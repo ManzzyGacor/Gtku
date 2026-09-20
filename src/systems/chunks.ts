@@ -20,6 +20,8 @@ export interface PropSprite {
   fps: number;
   phase: number;
   lastFrame: number;
+  /** Seconds left of being pushed aside by something walking through (tall grass). */
+  bend: number;
 }
 
 export interface LoadedChunk {
@@ -141,7 +143,7 @@ export class ChunkManager {
     const sprite = this.scene.add.image(p.x, p.y, 'props', name).setOrigin((f.ax ?? f.w / 2) / f.w, (f.ay ?? f.h) / f.h);
     if (p.flip) sprite.setFlipX(true);
     sprite.setDepth(def.flat ? 1 : p.y);
-    return { placement: p, sprite, frames, fps: def.fps ?? 0, phase: hashf(p.x, p.y, 3) * 10, lastFrame: 0 };
+    return { placement: p, sprite, frames, fps: def.fps ?? 0, phase: hashf(p.x, p.y, 3) * 10, lastFrame: 0, bend: 0 };
   }
 
   frameName(type: PropType, i: number): string {
@@ -149,11 +151,15 @@ export class ChunkManager {
   }
 
   /** Advance prop animations + water frames. `time` in seconds. */
-  animate(time: number): void {
+  animate(time: number, dt = 0): void {
     for (const c of this.loaded.values()) {
       for (const ps of c.props) {
         if (ps.frames <= 1) continue;
-        const i = Math.floor(time * ps.fps + ps.phase) % ps.frames;
+        let i = Math.floor(time * ps.fps + ps.phase) % ps.frames;
+        if (ps.bend > 0) {
+          ps.bend -= dt;
+          i = ps.frames - 1;
+        }
         if (i !== ps.lastFrame) {
           ps.lastFrame = i;
           ps.sprite.setFrame(this.frameName(ps.placement.type, i));
@@ -169,6 +175,38 @@ export class ChunkManager {
         if (k && c.ground.texture.key !== k) c.ground.setTexture(k);
       }
     }
+  }
+
+  /** Push grass aside around (x, y). Returns how many blades newly started bending. */
+  disturb(x: number, y: number, r: number): number {
+    let fresh = 0;
+    const cx = Math.floor(x / CHUNK_PX);
+    const cy = Math.floor(y / CHUNK_PX);
+    for (let oy = -1; oy <= 1; oy++)
+      for (let ox = -1; ox <= 1; ox++) {
+        const c = this.loaded.get(keyOf(cx + ox, cy + oy));
+        if (!c) continue;
+        for (const ps of c.props) {
+          if (ps.placement.type !== 'tallgrass') continue;
+          if (Math.abs(ps.placement.x - x) > r || Math.abs(ps.placement.y - y) > r) continue;
+          if (ps.bend <= 0) fresh++;
+          ps.bend = 0.4;
+        }
+      }
+    return fresh;
+  }
+
+  /** A random on-screen prop of one of the given types, or null. */
+  randomProp(view: Phaser.Geom.Rectangle, types: string[]): PropPlacement | null {
+    const chunks = [...this.loaded.values()];
+    if (!chunks.length) return null;
+    for (let tries = 0; tries < 4; tries++) {
+      const c = chunks[Math.floor(Math.random() * chunks.length)];
+      if (!c.props.length) continue;
+      const p = c.props[Math.floor(Math.random() * c.props.length)].placement;
+      if (types.includes(p.type) && view.contains(p.x, p.y - 20)) return p;
+    }
+    return null;
   }
 
   private unload(c: LoadedChunk): void {

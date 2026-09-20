@@ -1,4 +1,5 @@
 /** Effect sprites: slashes, sparks, particles, projectiles, glows. */
+import { shadedBlob } from './draw';
 import { P } from './palette';
 import { Pixmap, type Color } from './pixmap';
 import { SheetBuilder, type Sheet } from './sheet';
@@ -128,6 +129,26 @@ function healOrb(): Pixmap {
   return pm;
 }
 
+/** Dark leafy silhouette used by the forest parallax canopy layer. */
+function canopy(seed: number): Pixmap {
+  const pm = new Pixmap(72, 56);
+  const clumps: [number, number, number, number][] = [
+    [36, 26, 26, 18],
+    [16, 30, 14, 12],
+    [56, 30, 14, 12],
+    [30, 14, 14, 11],
+    [46, 40, 15, 10],
+  ];
+  clumps.forEach(([cx, cy, rx, ry], i) => shadedBlob(pm, cx + (seed % 3), cy, rx, ry, [P.f0, P.g0, P.f1, P.f2], seed + i));
+  return pm;
+}
+
+function cloud(): Pixmap {
+  const pm = new Pixmap(110, 44);
+  for (const [cx, cy, rx, ry] of [[40, 22, 32, 14], [72, 24, 28, 12], [56, 18, 24, 12]] as const) pm.ellipse(cx, cy, rx, ry, P.ink0, 255);
+  return pm;
+}
+
 function softShadow(w: number, h: number): Pixmap {
   const pm = new Pixmap(w, h);
   pm.ellipse(w / 2, h / 2, w / 2, h / 2, P.ink0, 100);
@@ -154,6 +175,9 @@ export function buildFxSheet(): Sheet {
   sb.add('rock_proj', rockProj(), 7, 7);
   sb.add('orb', orb(), 6, 6);
   sb.add('heal_orb', healOrb(), 6, 6);
+  sb.add('canopy_0', canopy(1), 36, 28);
+  sb.add('canopy_1', canopy(2), 36, 28);
+  sb.add('cloud', cloud(), 55, 22);
   sb.add('shadow_s', softShadow(12, 5), 6, 2);
   return sb.build();
 }

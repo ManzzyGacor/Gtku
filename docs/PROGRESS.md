@@ -16,8 +16,8 @@ Legenda: ✅ selesai · 🚧 sedang dikerjakan · ⬜ belum
 8. ✅ Musuh 1: Lendir Lumut (pengejar: hop → telegraf → terkam)
 9. ✅ Musuh 2: Pemanah Duri (kiting, bidik bertelegraf, tembak duri)
 10. ✅ Musuh 3: Kelelawar Kelam (kawanan mengitari, maks 2 penyelam bergiliran)
-11. ⬜ Pencahayaan dinamis, siklus siang-malam, vignette, bloom
-12. ⬜ Air & rumput beranimasi, partikel (debu/daun/air), parallax
+11. ✅ Pencahayaan dinamis (lightmap + halo aditif), siklus siang-malam (7 menit), vignette, bloom opsional, kualitas adaptif
+12. ✅ Air & rumput beranimasi (rumput menyibak saat dilewati), partikel debu/daun/air, parallax (kanopi hutan, bayangan awan, debu gua)
 13. ⬜ NPC + dialog + quest
 14. ⬜ Puzzle dorong batu + gerbang
 15. ⬜ Boss Kolosus Kelam

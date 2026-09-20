@@ -318,6 +318,7 @@ export class EnemyDirector {
         this.projViews.set(p, img);
       }
       img.setPosition(Math.round(p.x), Math.round(p.y));
+      if (p.proj !== 'thorn') this.game.lighting.light(p.x, p.y, 26, 0xa795ff, 0.55);
       if (p.proj !== 'rock') img.setRotation(p.angle);
       else img.setRotation(p.age * 8);
     }

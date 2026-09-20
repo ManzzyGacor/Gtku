@@ -35,6 +35,7 @@ export class Fx {
   private drops: Emitter;
   private embers: Emitter;
   private smoke: Emitter;
+  private fall: Emitter;
   private flips: Flip[] = [];
   private nums: Num[] = [];
   readonly gfx: Phaser.GameObjects.Graphics;
@@ -52,6 +53,7 @@ export class Fx {
     this.drops = mk({ frame: ['drop'], speed: { min: 30, max: 70 }, angle: { min: 230, max: 310 }, lifespan: { min: 300, max: 480 }, alpha: { start: 1, end: 0 }, gravityY: 240 });
     this.embers = mk({ frame: ['ember', 'spark_s'], speed: { min: 6, max: 20 }, angle: { min: 250, max: 290 }, lifespan: { min: 500, max: 900 }, alpha: { start: 1, end: 0 } });
     this.smoke = mk({ frame: ['smoke'], speed: { min: 6, max: 24 }, angle: { min: 240, max: 300 }, lifespan: { min: 500, max: 800 }, alpha: { start: 0.55, end: 0 } });
+    this.fall = mk({ frame: ['leaf_g', 'leaf_o'], speed: { min: 4, max: 14 }, angle: { min: 60, max: 120 }, lifespan: { min: 1500, max: 2400 }, alpha: { start: 1, end: 0 }, gravityY: 6, accelerationX: { min: -6, max: 6 } });
     this.gfx = scene.add.graphics().setDepth(FX_DEPTH - 1);
   }
 
@@ -111,6 +113,11 @@ export class Fx {
 
   leafFall(x: number, y: number): void {
     this.leaves.explode(1, x, y);
+  }
+
+  /** A leaf drifting down from a tree crown. */
+  fallingLeaf(x: number, y: number): void {
+    this.fall.explode(1, x, y);
   }
 
   // ── slash ──

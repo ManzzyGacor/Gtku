@@ -6,6 +6,11 @@ import { EnemyDirector } from '../systems/EnemyDirector';
 import { CameraRig } from '../systems/cameraRig';
 import { ChunkManager, type LoadedChunk } from '../systems/chunks';
 import { Fx } from '../systems/fx';
+import { Lighting } from '../systems/lighting';
+import { Parallax } from '../systems/parallax';
+import { blendAmbient, ambientAt, nightAmount, smooth, DAY_SECONDS } from '../systems/daynight';
+import { AREAS, CAVE_X0, FOREST_X0 } from '../world/areas';
+import { Quality, type QualityLevel } from '../core/quality';
 import { HeroCore, type HeroEvent, type HeroInput } from '../entities/HeroCore';
 import { HeroView } from '../entities/HeroView';
 import type { EnemyCore } from '../entities/enemies';
@@ -32,6 +37,11 @@ export class GameScene extends Phaser.Scene {
   fx!: Fx;
   state = new GameState();
   director!: EnemyDirector;
+  lighting!: Lighting;
+  private parallax!: Parallax;
+  private quality = new Quality();
+  private bloom: { setActive(v: boolean): unknown } | null = null;
+  private leafT = 0;
   /** Seconds of game time (frozen during hit-stop). */
   simTime = 0;
   private freezeLeft = 0;
@@ -53,6 +63,8 @@ export class GameScene extends Phaser.Scene {
     this.fx = new Fx(this);
     this.director = new EnemyDirector(this);
     this.chunks = new ChunkManager(this, this.world, sheets.get('tiles')!);
+    this.lighting = new Lighting(this);
+    this.parallax = new Parallax(this);
     this.chunks.onLoad = (c) => this.onChunkLoad(c);
     this.chunks.onUnload = (c) => this.onChunkUnload(c);
 
@@ -67,12 +79,17 @@ export class GameScene extends Phaser.Scene {
     this.rig = new CameraRig(cam, WORLD_PX_W, WORLD_PX_H);
     this.rig.snap(start.x, start.y);
     this.chunks.preload(this.rig.view, 1);
+    this.setupPost();
+    this.quality.onChange = (l) => this.applyQuality(l);
+    this.applyQuality(this.quality.level);
 
     this.events.on('enemy-killed', (e: EnemyCore) => this.onEnemyKilled(e));
     this.scene.launch('UI');
     this.scene.bringToTop('UI');
     this.scale.on(Phaser.Scale.Events.RESIZE, () => this.rig.snap(this.hero.x, this.hero.y));
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.lighting.destroy();
+      this.parallax.destroy();
       this.chunks.destroy();
       this.director.destroy();
       this.fx.destroy();
@@ -82,11 +99,34 @@ export class GameScene extends Phaser.Scene {
   // ───────────────────────── chunk hooks ─────────────────────────
 
   private onChunkLoad(c: LoadedChunk): void {
+    this.lighting.addChunk(c);
     this.director.spawnForChunk(c);
   }
 
   private onChunkUnload(c: LoadedChunk): void {
+    this.lighting.removeChunk(c);
     this.director.despawnForChunk(c);
+  }
+
+  // ───────────────────────── post-processing & quality ─────────────────────────
+
+  /** Bloom via camera filters (WebGL only). Wrapped so an unsupported device just skips it. */
+  private setupPost(): void {
+    if (new URLSearchParams(location.search).get('bloom') === '0') return;
+    try {
+      if (this.renderer.type !== Phaser.WEBGL) return;
+      const out = Phaser.Actions.AddEffectBloom(this.cameras.main, { threshold: 0.66, blurRadius: 2, blurSteps: 3, blendAmount: 0.5 });
+      this.bloom = out[0].parallelFilters;
+    } catch (err) {
+      console.warn('bloom unavailable', err);
+      this.bloom = null;
+    }
+  }
+
+  private applyQuality(level: QualityLevel): void {
+    this.bloom?.setActive(level >= 2);
+    this.fx.quality = level >= 1 ? 1 : 0.5;
+    this.lighting.everyN = level >= 1 ? 1 : 2;
   }
 
   // ───────────────────────── helpers ─────────────────────────
@@ -146,6 +186,7 @@ export class GameScene extends Phaser.Scene {
     for (const e of evs) {
       switch (e.type) {
         case 'swing-start':
+          this.lighting.flash(h.x + Math.cos(e.angle) * 14, h.y - 10 + Math.sin(e.angle) * 10, 46, 0xffd98a, 0.85, 0.16);
           this.fx.slash(h.x, h.y - 9, e.angle, e.index);
           this.heroView.squash(e.index === 2 ? 1.28 : 1.16, e.index === 2 ? 0.8 : 0.88);
           break;
@@ -157,6 +198,7 @@ export class GameScene extends Phaser.Scene {
           break;
         case 'blast':
           this.fx.glowPulse(e.x, e.y, e.radius + 14, 0xffe4a0, 420);
+          this.lighting.flash(e.x, e.y, 140, 0xffe4a0, 1, 0.5);
           this.fx.goldBurst(e.x, e.y, 30);
           this.fx.smokePuff(e.x, e.y + 6, 6);
           this.rig.shake(4, 0.28);
@@ -240,6 +282,37 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Day/night, lightmap, parallax, drifting leaves. */
+  private updateAtmosphere(dt: number, realDt: number, time: number): void {
+    this.state.dayTime = (this.state.dayTime + dt / DAY_SECONDS) % 1;
+    const h = this.hero;
+    const tx = h.x / 16;
+    const caveW = smooth(CAVE_X0 - 6, CAVE_X0 + 3, tx);
+    const outdoor = ambientAt(this.state.dayTime);
+    const ambient = blendAmbient(outdoor, AREAS.cave.ambient, caveW);
+    const night = nightAmount(this.state.dayTime) * (1 - caveW);
+    const cam = this.cameras.main;
+
+    // hero lantern: the keeper's lamp always burns; stronger when it's dark
+    const dark = Math.max(night, caveW);
+    this.lighting.light(h.x, h.y - 12, 58 + dark * 34, 0xffd9a0, 0.5 + dark * 0.5, 0.03);
+    const boss = this.director.bossRef;
+    if (boss && boss.awake && !boss.dead) this.lighting.light(boss.x, boss.cy, 80, 0xa795ff, 0.9, 0.08);
+    this.lighting.update(realDt, time, cam.scrollX, cam.scrollY, ambient, night, caveW);
+
+    const forest = smooth(FOREST_X0 - 4, FOREST_X0 + 4, tx) * (1 - smooth(CAVE_X0 - 6, CAVE_X0 - 1, tx));
+    const outdoorDay = (1 - caveW) * (1 - night);
+    this.parallax.update(cam.scrollX, cam.scrollY, time, forest, outdoorDay, caveW);
+
+    // occasional leaf drifting off a tree crown in the forest
+    this.leafT -= realDt;
+    if (this.leafT <= 0 && forest > 0.3) {
+      this.leafT = 0.35 + Math.random() * 0.6;
+      const p = this.chunks.randomProp(this.rig.view, ['tree_a', 'tree_c', 'tree_b']);
+      if (p) this.fx.fallingLeaf(p.x + (Math.random() - 0.5) * 18, p.y - 22 - Math.random() * 12);
+    }
+  }
+
   override update(time: number, deltaMs: number): void {
     const realDt = Math.min(deltaMs / 1000, 1 / 20);
     let dt = realDt;
@@ -268,10 +341,17 @@ export class GameScene extends Phaser.Scene {
     this.updatePickups(realDt);
     this.heroView.update(dt, realDt, time / 1000);
     this.fx.update(realDt);
+    this.quality.update(realDt);
+
+    // walking through tall grass bends it and kicks up a leaf
+    if (dt > 0 && Math.hypot(this.hero.vx, this.hero.vy) > 20 && this.chunks.disturb(this.hero.x, this.hero.y, 11) > 0) {
+      this.fx.leafFall(this.hero.x, this.hero.y - 4);
+    }
 
     this.rig.update(realDt, this.hero.x, this.hero.y - 6, this.hero.vx, this.hero.vy);
     this.chunks.update(this.rig.view);
     this.chunks.step(5);
-    this.chunks.animate(this.simTime);
+    this.chunks.animate(this.simTime, dt);
+    this.updateAtmosphere(dt, realDt, time / 1000);
   }
 }
