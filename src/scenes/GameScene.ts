@@ -412,7 +412,7 @@ export class GameScene extends Phaser.Scene {
     this.puzzle.openBossDoor();
     this.director.resetAll(this.chunks.loaded.values());
     this.cameras.main.fadeIn(500, 8, 4, 16);
-    this.ui?.toast('Kamu pingsan… bangun di ' + cp.name);
+    this.ui?.toast('Kamu pingsan... bangun di ' + cp.name);
   }
 
   // ───────────────────────── main loop ─────────────────────────

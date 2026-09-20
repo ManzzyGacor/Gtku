@@ -165,6 +165,7 @@ export class UIScene extends Phaser.Scene {
   private buildMinimap(): void {
     const w = WORLD_TILES_W;
     const h = WORLD_TILES_H;
+    if (this.textures.exists('minimap')) this.textures.remove('minimap');
     const tex = this.textures.createCanvas('minimap', w, h)!;
     const ctx = tex.getContext();
     const world = this.game_.world;

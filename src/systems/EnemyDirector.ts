@@ -181,7 +181,7 @@ export class EnemyDirector {
         this.views.delete(e);
       }
     }
-    this.syncProjectiles(realDt);
+    this.syncProjectiles();
     this.drawOverlays();
     this.updateBossDeath(realDt);
   }
@@ -307,8 +307,7 @@ export class EnemyDirector {
 
   // ───────────────────────── views ─────────────────────────
 
-  private syncProjectiles(realDt: number): void {
-    void realDt;
+  private syncProjectiles(): void {
     for (const p of this.world.projectiles) {
       let img = this.projViews.get(p);
       if (!img) {

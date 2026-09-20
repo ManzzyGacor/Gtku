@@ -147,14 +147,12 @@ export class GeneratedWorld implements WorldSource {
 
   constructor(seed = SEED) {
     const g = this.g;
-    const rng = makeRng(seed);
-
     this.baseTerrain(seed);
     this.carveCave(seed);
     this.rivers(seed);
     this.paths(seed);
     this.entities();
-    this.village(rng);
+    this.village();
     this.caveDecor(seed);
     this.forestDecor(seed);
     this.borders(seed);
@@ -327,7 +325,7 @@ export class GeneratedWorld implements WorldSource {
     g.keepDisc(84, 26, 3);
   }
 
-  private village(rng: () => number): void {
+  private village(): void {
     const g = this.g;
     const P = PLAZA;
     // Great Lantern
@@ -362,7 +360,6 @@ export class GeneratedWorld implements WorldSource {
     g.keepDisc(PLAZA.x, PLAZA.y + 4, 3);
     // decor: keep house doors clear
     for (const [x, y] of [[9, 35], [32, 35], [8, 51], [33, 52], [20, 30]] as const) g.keepDisc(x, y, 1.5);
-    void rng;
   }
 
   private caveDecor(seed: number): void {

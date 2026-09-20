@@ -3,7 +3,7 @@
  * Poses are tables of joint offsets, so animation frames are cheap to author and stay consistent.
  */
 import { finish } from './draw';
-import { P, outlineOf, shade } from './palette';
+import { P, shade } from './palette';
 import { mix, Pixmap, type Color } from './pixmap';
 import { SheetBuilder, type Sheet } from './sheet';
 
@@ -257,28 +257,24 @@ export function drawHumanoid(look: Look, dir: Dir, pose: Pose = {}): Pixmap {
     }
   } else {
     // ── side view (facing right) ──
-    const step = (v: number): number => Math.round(v);
-    const drawLegS = (x: number, fwd: number, lift: number, dark: boolean): void => {
+    // legs swing from the hip: `stride` shifts the foot forward (+) / back (-), the forward foot lifts a pixel
+    const drawLegS = (x: number, stride: number, dark: boolean): void => {
       if (look.robe) return;
-      const bottom = FY - Math.max(0, lift);
+      const bottom = FY - (stride > 1 ? 1 : 0);
       const c = dark ? shade(look.pants, -0.25) : look.pants;
-      b.rect(x, hipY, 3, bottom - hipY - 1, c);
-      b.rect(x + step(fwd) * 0, bottom - 1, 4, 2, dark ? shade(look.boots, -0.2) : look.boots);
-      b.set(x + 3, bottom, dark ? shade(look.boots, -0.2) : look.boots);
-      void fwd;
+      const boots = dark ? shade(look.boots, -0.2) : look.boots;
+      const len = bottom - hipY - 1;
+      for (let i = 0; i < len; i++) b.rect(x + Math.round((stride * i) / Math.max(1, len - 1)), hipY + i, 3, 1, c);
+      b.rect(x + stride, bottom - 1, 4, 2, boots);
+      b.set(x + stride + 3, bottom, boots);
     };
     const farArm = pose.armL ?? [-1, 6];
     const nearArm = pose.armR ?? [1, 6];
     if (weaponBehind && swordPose) drawSword(18 + lean + nearArm[0], top + 2 + nearArm[1]);
     // far arm (behind torso)
     arm(b, 15 + lean, top + 2, 15 + lean + farArm[0], top + 2 + farArm[1], shade(t1, -0.3), shade(skin[1], -0.2), look.trim);
-    drawLegS(13 + Math.round(legL) * 0 + lean + Math.round((pose.legL ?? 0) > 0 ? -1 : 0), 0, 0, true);
-    drawLegS(16 + lean, 0, Math.max(0, legR), false);
-    if (legL !== 0 || legR !== 0) {
-      // stride: shift boots horizontally
-      const s = legR - legL;
-      b.rect(15 + lean + Math.max(-3, Math.min(3, Math.round(s / 2))), FY - 1, 4, 2, look.boots);
-    }
+    drawLegS(14 + lean, legL, true);
+    drawLegS(15 + lean, legR, false);
     if (look.robe) {
       b.rect(11 + lean, top + 6, 10, FY - top - 7, t1);
       b.rect(11 + lean, FY - 3, 10, 3, t0);
@@ -308,7 +304,8 @@ export function drawHumanoid(look: Look, dir: Dir, pose: Pose = {}): Pixmap {
     b.set(hx + 1, headY, 0, 0);
     b.set(hx + 11, headY, 0, 0);
     hairFront(b, look, hx - 1, headY - 1, true);
-    b.rect(hx + 8, headY + 2, 5, 4, skin[1]); // forehead clear of hair at the front
+    b.rect(hx + 7, headY + 2, 6, 8, skin[1]); // face: keep the front of the head free of hair
+    b.hline(hx + 8, headY + 9, 4, skin[0]);
     b.rect(hx + 8, headY + 1, 4, 1, look.hairStyle === 'bald' ? skin[1] : look.hair[1]);
     if (look.hairStyle !== 'bald' && look.hairStyle !== 'cap') {
       b.hline(hx + 7, headY + 2, 5, look.hair[1]);
@@ -539,4 +536,3 @@ export function buildNpcSheet(): Sheet {
   return sb.build();
 }
 
-void outlineOf;
