@@ -43,6 +43,8 @@ export class ChunkManager {
   readonly loaded = new Map<number, LoadedChunk>();
   private queue: Task[] = [];
   private animFrame = 0;
+  /** The Great Lantern is dark until the quest is done. */
+  lanternLit = false;
   onLoad: (c: LoadedChunk) => void = () => undefined;
   onUnload: (c: LoadedChunk) => void = () => undefined;
   private readonly tileSheet: Sheet;
@@ -146,7 +148,14 @@ export class ChunkManager {
     return { placement: p, sprite, frames, fps: def.fps ?? 0, phase: hashf(p.x, p.y, 3) * 10, lastFrame: 0, bend: 0 };
   }
 
+  setLanternLit(v: boolean): void {
+    this.lanternLit = v;
+    for (const c of this.loaded.values())
+      for (const ps of c.props) if (ps.placement.type === 'great_lantern') ps.sprite.setFrame(this.frameName('great_lantern', ps.lastFrame));
+  }
+
   frameName(type: PropType, i: number): string {
+    if (type === 'great_lantern' && !this.lanternLit) return 'great_lantern_off';
     return (PROPS[type].frames ?? 1) > 1 ? `${type}_${i}` : type;
   }
 

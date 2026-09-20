@@ -352,8 +352,8 @@ export class GeneratedWorld implements WorldSource {
     g.prop('flowerbed', 22, 54, { halfX: true });
     g.prop('flowerbed', 29, 56, { halfX: true });
     // signs
-    g.prop('sign', 43, 38);
-    g.prop('sign', 22, 35);
+    g.prop('sign', 43, 38).text = 'Gerbang Timur. Di seberang: Hutan Bisik. Hati-hati, monsternya makin buas!';
+    g.prop('sign', 22, 35).text = 'Desa Lentera. Tempat cahaya bersemi. Bicaralah dengan Tetua Wulan di plaza.';
     // fences: village north edge & garden
     for (let x = 4; x <= 46; x++) g.prop('fence_h', x, 16);
     for (let x = 4; x <= 46; x++) g.prop('fence_h', x, 64);
@@ -458,8 +458,8 @@ export class GeneratedWorld implements WorldSource {
       }
     // forest shrine (checkpoint) + a couple of set-pieces
     g.prop('shrine', 60, 31);
-    g.prop('sign', 58, 36);
-    g.prop('sign', 91, 38);
+    g.prop('sign', 58, 36).text = 'Altar Hutan di utara. Menyentuh apinya menyembuhkan dan menyimpan progresmu.';
+    g.prop('sign', 91, 38).text = 'Gua Kelam. Hanya untuk yang berani. Dorong batu ukir ke pelat untuk membuka gerbang!';
     g.prop('log', 74, 29, { halfX: true });
   }
 

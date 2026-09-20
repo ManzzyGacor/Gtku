@@ -18,11 +18,11 @@ Legenda: ✅ selesai · 🚧 sedang dikerjakan · ⬜ belum
 10. ✅ Musuh 3: Kelelawar Kelam (kawanan mengitari, maks 2 penyelam bergiliran)
 11. ✅ Pencahayaan dinamis (lightmap + halo aditif), siklus siang-malam (7 menit), vignette, bloom opsional, kualitas adaptif
 12. ✅ Air & rumput beranimasi (rumput menyibak saat dilewati), partikel debu/daun/air, parallax (kanopi hutan, bayangan awan, debu gua)
-13. ⬜ NPC + dialog + quest
-14. ⬜ Puzzle dorong batu + gerbang
-15. ⬜ Boss Kolosus Kelam
-16. ⬜ Save/load, checkpoint, respawn
-17. ⬜ Minimap + banner area
+13. ✅ NPC (4) + dialog (efek ketik) + quest "Cahaya untuk Desa" (tes transisi, Lentera Agung menyala di akhir)
+14. ✅ Puzzle dorong batu ke pelat → gerbang terbuka (tes bisa diselesaikan; batu reset bila keluar ruangan)
+15. ✅ Boss Kolosus Kelam (3 fase, pintu arena menutup, HP bar besar, ledakan kematian)
+16. ✅ Save/load localStorage (autosave 30 dtk + event), checkpoint altar/Lentera, respawn, layar judul Lanjutkan/Main Baru
+17. ✅ Minimap jendela 48x32 tile + banner nama area
 18. ⬜ Polesan performa & ringkasan akhir
 
 ## Catatan

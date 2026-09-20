@@ -3,6 +3,9 @@ import { input, type Action } from '../core/input';
 import { wrapText } from '../art/font';
 import { P } from '../art/palette';
 import { pixelText } from '../ui/pixeltext';
+import { trackerLines } from '../systems/quest';
+import { TILE, WORLD_TILES_H, WORLD_TILES_W } from '../config';
+import { T } from '../world/tiles';
 import type { GameScene } from './GameScene';
 
 interface Btn {
@@ -46,6 +49,10 @@ export class UIScene extends Phaser.Scene {
   private trailHp = 12;
   private questText!: Phaser.GameObjects.BitmapText;
   private fsBtn!: Phaser.GameObjects.Image;
+  private mapImg!: Phaser.GameObjects.Image;
+  private mapFrame!: Phaser.GameObjects.Rectangle;
+  private mapGfx!: Phaser.GameObjects.Graphics;
+  private mapPos = { x: 0, y: 0 };
   private hint!: Phaser.GameObjects.BitmapText;
   private flashRect!: Phaser.GameObjects.Rectangle;
   private flashT = 0;
@@ -91,8 +98,12 @@ export class UIScene extends Phaser.Scene {
 
     this.buildTouch();
     this.buildHud();
+    this.buildMinimap();
     this.buildDialog();
     this.layout();
+    this.game_.events.on('quest-changed', () => this.setQuest(trackerLines(this.game_.state)));
+    this.setQuest(trackerLines(this.game_.state));
+    this.setNpcMarks(this.game_.npcMarks());
 
     this.scale.on(Phaser.Scale.Events.RESIZE, () => this.layout());
     this.input.on('pointerdown', this.onDown, this);
@@ -151,6 +162,69 @@ export class UIScene extends Phaser.Scene {
     this.bossName = pixelText(this, 0, 0, '', { depth: 22, origin: [0.5, 1], color: 0xd8cfff }).setVisible(false);
   }
 
+  private buildMinimap(): void {
+    const w = WORLD_TILES_W;
+    const h = WORLD_TILES_H;
+    const tex = this.textures.createCanvas('minimap', w, h)!;
+    const ctx = tex.getContext();
+    const world = this.game_.world;
+    const colors: Record<number, string> = {
+      [T.GRASS]: '#4f9a42', [T.FLOWERS]: '#5aa84a', [T.FOREST]: '#2b6b3a', [T.DIRT]: '#a16e3f', [T.COBBLE]: '#a8a0a0',
+      [T.SAND]: '#dcba82', [T.WATER]: '#2673ac', [T.SHALLOW]: '#3f9fcf', [T.CAVE]: '#3a3e5e', [T.WALL]: '#141024',
+      [T.BRIDGE_H]: '#8e5b33', [T.BRIDGE_V]: '#8e5b33', [T.ARENA]: '#5a4a9a',
+    };
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const t = world.tileAt(x, y);
+        let c = colors[t] ?? '#000';
+        if (world.solidAt(x, y) && t !== T.WALL && t !== T.WATER) c = t === T.FOREST || t === T.GRASS || t === T.FLOWERS ? '#1b4a2c' : '#6a4a3a';
+        ctx.fillStyle = c;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    tex.refresh();
+    this.mapImg = this.add.image(0, 0, 'minimap').setOrigin(0).setScale(2).setDepth(19);
+    this.mapFrame = this.add.rectangle(0, 0, 100, 68, 0x0f0b1c, 0.9).setOrigin(0).setDepth(18).setStrokeStyle(1, P.s4);
+    this.mapGfx = this.add.graphics().setDepth(20);
+  }
+
+  private updateMinimap(): void {
+    const g = this.game_;
+    const VIEW_W = 48;
+    const VIEW_H = 32;
+    const hx = g.hero.x / TILE;
+    const hy = g.hero.y / TILE;
+    const cx0 = Phaser.Math.Clamp(Math.round(hx - VIEW_W / 2), 0, WORLD_TILES_W - VIEW_W);
+    const cy0 = Phaser.Math.Clamp(Math.round(hy - VIEW_H / 2), 0, WORLD_TILES_H - VIEW_H);
+    const fx = this.mapPos.x + 2;
+    const fy = this.mapPos.y + 2;
+    this.mapImg.setPosition(fx - cx0 * 2, fy - cy0 * 2);
+    this.mapImg.setCrop(cx0, cy0, VIEW_W, VIEW_H);
+    const gfx = this.mapGfx;
+    gfx.clear();
+    const dot = (tx: number, ty: number, color: number, size = 2): void => {
+      const px = fx + (tx - cx0) * 2;
+      const py = fy + (ty - cy0) * 2;
+      if (px < fx || py < fy || px > fx + VIEW_W * 2 - size || py > fy + VIEW_H * 2 - size) return;
+      gfx.fillStyle(color, 1);
+      gfx.fillRect(Math.round(px), Math.round(py), size, size);
+    };
+    // objectives and NPCs
+    const stage = g.state.quest.stage;
+    for (const npc of this.npcMarks) dot(npc.x / TILE, npc.y / TILE, npc.id === 'wulan' && (stage === 0 || stage === 3) ? 0xffd15a : 0x66e0ff);
+    if (stage === 2) dot(g.world.markers.boss.spawn.x / TILE, g.world.markers.boss.spawn.y / TILE, 0xff5a4a, 3);
+    for (const cp of g.world.markers.checkpoints) dot(cp.x / TILE, cp.y / TILE, 0xffb04a);
+    // hero (blinks)
+    if (Math.floor(this.time.now / 350) % 2 === 0) dot(hx - 0.5, hy - 1, 0xffffff, 3);
+    else dot(hx - 0.5, hy - 1, 0xff5a5a, 3);
+  }
+
+  private npcMarks: { id: string; x: number; y: number }[] = [];
+
+  /** GameScene tells us where NPCs stand so the minimap can mark them. */
+  setNpcMarks(list: { id: string; x: number; y: number }[]): void {
+    this.npcMarks = list;
+  }
+
   private buildDialog(): void {
     this.dlgBg = this.add.rectangle(0, 0, 100, 60, P.ink0, 0.92).setOrigin(0);
     this.dlgFrame = this.add.rectangle(0, 0, 100, 60, 0, 0).setOrigin(0).setStrokeStyle(1, P.y3);
@@ -181,6 +255,8 @@ export class UIScene extends Phaser.Scene {
     place('skill', w - 90, h - 84);
     place('interact', w - 48, h - 106);
     this.fsBtn.setPosition(w - 12, 12);
+    this.mapPos = { x: w - 104, y: 22 };
+    this.mapFrame.setPosition(this.mapPos.x, this.mapPos.y).setSize(100, 68);
     this.hint.setPosition(w / 2, h - 6);
     this.banner.setPosition(w / 2, 46);
     this.toastText.setPosition(w / 2, h - 44);
@@ -422,10 +498,11 @@ export class UIScene extends Phaser.Scene {
     const hero = g.hero;
     const ratio = Phaser.Math.Clamp(hero.hp / hero.maxHp, 0, 1);
     const fullW = 72;
-    this.hpFill.width = Math.round(fullW * ratio);
-    this.hpFillHi.width = this.hpFill.width;
+    const fillW = Math.round(fullW * ratio);
+    this.hpFill.setSize(fillW, 6);
+    this.hpFillHi.setSize(fillW, 2);
     this.trailHp += (hero.hp - this.trailHp) * Math.min(1, dt * (hero.hp < this.trailHp ? 2.2 : 12));
-    this.hpTrail.width = Math.round((fullW * Phaser.Math.Clamp(this.trailHp, 0, hero.maxHp)) / hero.maxHp);
+    this.hpTrail.setSize(Math.round((fullW * Phaser.Math.Clamp(this.trailHp, 0, hero.maxHp)) / hero.maxHp), 6);
     this.hpText.setText(`${Math.ceil(hero.hp)}/${hero.maxHp}`);
     this.hpFill.setFillStyle(ratio < 0.3 ? P.r1 : P.r2);
 
@@ -454,6 +531,8 @@ export class UIScene extends Phaser.Scene {
       this.flashRect.setAlpha(this.flashA * (this.flashT / this.flashDur));
     } else this.flashRect.setAlpha(0);
 
+    this.updateMinimap();
+
     // banner/toast fades
     if (this.bannerT > 0) {
       this.bannerT -= dt;
@@ -471,8 +550,8 @@ export class UIScene extends Phaser.Scene {
       const bw = this.bossBg.width - 4;
       const r = this.bossRatio ?? 0;
       this.bossTrailRatio += (r - this.bossTrailRatio) * Math.min(1, dt * (r < this.bossTrailRatio ? 1.8 : 10));
-      this.bossFill.width = Math.round(bw * r);
-      this.bossTrail.width = Math.round(bw * this.bossTrailRatio);
+      this.bossFill.setSize(Math.round(bw * r), 6);
+      this.bossTrail.setSize(Math.round(bw * this.bossTrailRatio), 6);
     }
   }
 }

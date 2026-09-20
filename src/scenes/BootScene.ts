@@ -37,6 +37,6 @@ export class BootScene extends Phaser.Scene {
 
   private finish(): void {
     document.getElementById('boot-msg')?.remove();
-    this.scene.start('Game');
+    this.scene.start('Title');
   }
 }

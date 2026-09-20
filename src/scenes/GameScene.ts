@@ -1,6 +1,12 @@
 import Phaser from 'phaser';
 import { WORLD_PX_H, WORLD_PX_W } from '../config';
 import { input } from '../core/input';
+import { loadGame, saveGame } from '../core/save';
+import { PuzzleSystem } from '../systems/PuzzleSystem';
+import { nearestInteractable, type Interactable } from '../systems/interactables';
+import { advanceQuest, dialogueFor, type NpcId, type QuestEvent } from '../systems/quest';
+import { NpcView } from '../entities/NpcView';
+import { areaAtTile, type AreaId } from '../world/areas';
 import { sheets } from '../art/register';
 import { EnemyDirector } from '../systems/EnemyDirector';
 import { CameraRig } from '../systems/cameraRig';
@@ -42,6 +48,12 @@ export class GameScene extends Phaser.Scene {
   private quality = new Quality();
   private bloom: { setActive(v: boolean): unknown } | null = null;
   private leafT = 0;
+  puzzle!: PuzzleSystem;
+  private npcViews: NpcView[] = [];
+  private interactables: Interactable[] = [];
+  private area: AreaId | null = null;
+  private autosaveT = 30;
+  private continueGame = false;
   /** Seconds of game time (frozen during hit-stop). */
   simTime = 0;
   private freezeLeft = 0;
@@ -51,6 +63,18 @@ export class GameScene extends Phaser.Scene {
 
   constructor() {
     super('Game');
+  }
+
+  init(data?: { continue?: boolean }): void {
+    this.continueGame = !!data?.continue;
+    this.state = new GameState();
+    this.pickups = [];
+    this.deathT = -1;
+    this.freezeLeft = 0;
+    this.simTime = 0;
+    this.area = null;
+    this.npcViews = [];
+    this.interactables = [];
   }
 
   get ui(): UIScene | undefined {
@@ -73,21 +97,35 @@ export class GameScene extends Phaser.Scene {
     this.lastHp = this.hero.hp;
     this.hero.aimAssist = (angle) => this.aimAssist(angle);
     this.heroView = new HeroView(this, this.hero);
+    this.puzzle = new PuzzleSystem(this);
+    const save = this.continueGame ? loadGame() : null;
+    if (save) {
+      this.state.load(save);
+      this.hero.reset(save.hero.x, save.hero.y, Math.max(1, save.hero.hp));
+      this.lastHp = this.hero.hp;
+    }
+    if (this.state.puzzleSolved) this.puzzle.restoreSolved();
+    this.chunks.setLanternLit(!!this.state.flags.lanternLit);
+    this.buildInteractables();
 
     const cam = this.cameras.main;
     cam.setBackgroundColor(0x0f0b1c);
     this.rig = new CameraRig(cam, WORLD_PX_W, WORLD_PX_H);
-    this.rig.snap(start.x, start.y);
+    this.rig.snap(this.hero.x, this.hero.y);
     this.chunks.preload(this.rig.view, 1);
     this.setupPost();
     this.quality.onChange = (l) => this.applyQuality(l);
     this.applyQuality(this.quality.level);
 
     this.events.on('enemy-killed', (e: EnemyCore) => this.onEnemyKilled(e));
+    this.events.on('boss-wake', () => this.puzzle.closeBossDoor());
+    this.events.on('boss-defeated', () => this.onBossDone());
     this.scene.launch('UI');
     this.scene.bringToTop('UI');
     this.scale.on(Phaser.Scale.Events.RESIZE, () => this.rig.snap(this.hero.x, this.hero.y));
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.puzzle.destroy();
+      for (const n of this.npcViews) n.destroy();
       this.lighting.destroy();
       this.parallax.destroy();
       this.chunks.destroy();
@@ -160,6 +198,36 @@ export class GameScene extends Phaser.Scene {
 
   private onEnemyKilled(e: EnemyCore): void {
     if (e.kind !== 'boss' && Math.random() < 0.3) this.dropHeal(e.x, e.cy);
+    this.questEvent({ type: 'kill', kind: e.kind });
+  }
+
+  /** Apply a quest event, tell the player, refresh the HUD and persist. */
+  questEvent(ev: QuestEvent): void {
+    const r = advanceQuest(this.state, ev);
+    if (!r.changed) return;
+    if (r.message) this.ui?.toast(r.message);
+    this.events.emit('quest-changed');
+    if (r.lightLantern) this.lightLantern();
+    this.refreshNpcMarkers();
+    if (ev.type !== 'kill' || r.message) this.saveNow();
+  }
+
+  private onBossDone(): void {
+    this.puzzle.openBossDoor();
+    this.ui?.showBanner('Kolosus Kelam kalah!');
+    this.questEvent({ type: 'boss-defeated' });
+    this.saveNow();
+  }
+
+  /** The finale: the Great Lantern burns again. */
+  private lightLantern(): void {
+    const m = this.world.markers.lantern;
+    this.chunks.setLanternLit(true);
+    this.fx.goldBurst(m.x, m.y - 40, 50);
+    this.fx.glowPulse(m.x, m.y - 40, 170, 0xffd98a, 1400);
+    this.rig.shake(3, 0.6);
+    this.ui?.flash(0xfff2c0, 0.6, 900);
+    this.ui?.showBanner('Lentera Agung menyala kembali!');
   }
 
   private dropHeal(x: number, y: number): void {
@@ -167,7 +235,7 @@ export class GameScene extends Phaser.Scene {
     this.pickups.push({ x, y, img, age: 0, heal: 2 });
   }
 
-  /** Boss hooks (door + music handled by later systems). */
+  /** Boss hooks (called by the enemy director). */
   onBossWake(): void {
     this.events.emit('boss-wake');
   }
@@ -176,6 +244,98 @@ export class GameScene extends Phaser.Scene {
     this.fx.goldBurst(x, y, 40);
     this.fx.glowPulse(x, y - 10, 90, 0xffd98a, 900);
     this.events.emit('boss-defeated', x, y);
+  }
+
+  // ───────────────────────── NPCs, shrines, signs ─────────────────────────
+
+  npcMarks(): { id: string; x: number; y: number }[] {
+    return this.npcViews.map((n) => ({ id: n.def.id, x: n.def.x, y: n.def.y }));
+  }
+
+  private buildInteractables(): void {
+    const w = this.world;
+    const chunksX = w.widthTiles / 16;
+    const chunksY = w.heightTiles / 16;
+    for (let cy = 0; cy < chunksY; cy++)
+      for (let cx = 0; cx < chunksX; cx++) {
+        const c = w.chunk(cx, cy);
+        for (const n of c.npcs) {
+          const v = new NpcView(this, n);
+          this.npcViews.push(v);
+          this.collision.addBlocker(Math.floor(n.x / 16), Math.floor(n.y / 16));
+          this.interactables.push({ id: n.id, x: n.x, y: n.y, range: 30, label: () => 'Bicara', interact: () => this.talk(n.id as NpcId, n.name, n.look) });
+        }
+        for (const p of c.props) {
+          if (p.type === 'sign' && p.text) {
+            const text = p.text;
+            this.interactables.push({ id: `sign_${p.x}_${p.y}`, x: p.x, y: p.y - 4, range: 24, label: () => 'Baca', interact: () => this.ui?.showDialog({ name: 'Papan', lines: [text] }) });
+          }
+        }
+      }
+    for (const cp of w.markers.checkpoints) {
+      this.interactables.push({ id: cp.id, x: cp.x, y: cp.y - 4, range: 30, label: () => 'Istirahat', interact: () => this.rest(cp.id, cp.name) });
+    }
+    this.refreshNpcMarkers();
+  }
+
+  private refreshNpcMarkers(): void {
+    const stage = this.state.quest.stage;
+    for (const n of this.npcViews) n.markerText = n.def.id === 'wulan' ? (stage === 0 ? '!' : stage === 3 ? '?' : '') : '';
+  }
+
+  private talk(id: NpcId, name: string, look: string): void {
+    const ui = this.ui;
+    if (!ui || ui.dialogOpen) return;
+    const script = dialogueFor(id, this.state);
+    ui.showDialog({
+      name,
+      look,
+      lines: script.lines,
+      onDone: () => {
+        if (script.onDone) this.questEvent(script.onDone);
+      },
+    });
+  }
+
+  /** Shrine / lantern: heal fully, remember the checkpoint, save. */
+  private rest(id: string, name: string): void {
+    this.state.checkpoint = id;
+    this.hero.heal(this.hero.maxHp);
+    this.lastHp = this.hero.hp;
+    const h = this.hero;
+    this.fx.goldBurst(h.x, h.y - 12, 20);
+    this.fx.glowPulse(h.x, h.y - 12, 44, 0xffd98a, 500);
+    this.lighting.flash(h.x, h.y - 12, 90, 0xffd98a, 0.9, 0.5);
+    this.ui?.toast(`${name}: HP pulih, progres tersimpan`);
+    this.saveNow(true);
+  }
+
+  private updateInteraction(): void {
+    const ui = this.ui;
+    let label: string | null = null;
+    if (ui && !ui.dialogOpen && this.hero.alive && this.deathT < 0) {
+      const it = nearestInteractable(this.interactables, this.hero.x, this.hero.y);
+      label = it ? it.label() : null;
+      if (it && input.consume('interact', 120)) it.interact();
+    }
+    this.registry.set('interact', label);
+  }
+
+  // ───────────────────────── save / areas ─────────────────────────
+
+  saveNow(force = false): void {
+    const boss = this.director.bossRef;
+    if (!this.hero.alive || (!force && boss && boss.awake && !boss.dead)) return;
+    saveGame(this.state.toJSON({ x: this.hero.x, y: this.hero.y, hp: this.hero.hp }));
+  }
+
+  private updateArea(): void {
+    const a = areaAtTile(Math.floor(this.hero.x / 16));
+    if (a !== this.area && this.ui) {
+      this.area = a;
+      this.ui.showBanner(AREAS[a].name);
+      if (this.state.quest.stage > 0 || a !== 'village') this.saveNow();
+    }
   }
 
   // ───────────────────────── hero events ─────────────────────────
@@ -249,6 +409,7 @@ export class GameScene extends Phaser.Scene {
     this.deathT = -1;
     this.rig.snap(cp.x, cp.y);
     this.chunks.preload(this.rig.view, 1);
+    this.puzzle.openBossDoor();
     this.director.resetAll(this.chunks.loaded.values());
     this.cameras.main.fadeIn(500, 8, 4, 16);
     this.ui?.toast('Kamu pingsan… bangun di ' + cp.name);
@@ -298,6 +459,8 @@ export class GameScene extends Phaser.Scene {
     this.lighting.light(h.x, h.y - 12, 58 + dark * 34, 0xffd9a0, 0.5 + dark * 0.5, 0.03);
     const boss = this.director.bossRef;
     if (boss && boss.awake && !boss.dead) this.lighting.light(boss.x, boss.cy, 80, 0xa795ff, 0.9, 0.08);
+    const lm = this.world.markers.lantern;
+    this.lighting.setLantern(!!this.state.flags.lanternLit, lm.x, lm.y - 40);
     this.lighting.update(realDt, time, cam.scrollX, cam.scrollY, ambient, night, caveW);
 
     const forest = smooth(FOREST_X0 - 4, FOREST_X0 + 4, tx) * (1 - smooth(CAVE_X0 - 6, CAVE_X0 - 1, tx));
@@ -335,8 +498,17 @@ export class GameScene extends Phaser.Scene {
       const speedMult = this.collision.speedAt(this.hero.x, this.hero.y);
       this.hero.update(dt, inp, this.collision, speedMult);
     }
+    this.puzzle.update(dt, realDt);
     this.director.update(dt, realDt);
     this.handleHeroEvents();
+    for (const n of this.npcViews) n.update(realDt, this.hero);
+    this.updateInteraction();
+    this.updateArea();
+    this.autosaveT -= realDt;
+    if (this.autosaveT <= 0) {
+      this.autosaveT = 30;
+      this.saveNow();
+    }
     this.updateDeath(realDt);
     this.updatePickups(realDt);
     this.heroView.update(dt, realDt, time / 1000);
