@@ -189,9 +189,21 @@ export class Pixmap {
         const i = (py * src.w + px) * 4;
         const a = src.data[i + 3];
         if (a === 0) continue;
+        const ox = dx + x;
+        const oy = dy + y;
+        // fast path: opaque copy without recolor
+        if (a === 255 && alpha === 1 && !opts.map) {
+          if (ox < 0 || oy < 0 || ox >= this.w || oy >= this.h) continue;
+          const o = (oy * this.w + ox) * 4;
+          this.data[o] = src.data[i];
+          this.data[o + 1] = src.data[i + 1];
+          this.data[o + 2] = src.data[i + 2];
+          this.data[o + 3] = 255;
+          continue;
+        }
         let c = rgb(src.data[i], src.data[i + 1], src.data[i + 2]);
         if (opts.map) c = opts.map(c, x, y);
-        this.set(dx + x, dy + y, c, a * alpha);
+        this.set(ox, oy, c, a * alpha);
       }
     }
     return this;
