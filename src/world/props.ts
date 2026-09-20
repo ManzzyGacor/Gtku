@@ -28,8 +28,10 @@ export interface PropDef {
   /** Animated frame count (`<type>_0..n-1`) and fps; 1 = static (`<type>`). */
   frames?: number;
   fps?: number;
-  /** Interact text (signs). */
-  sign?: string;
+  /** Drawn just above the ground, below every y-sorted object (lily pads, flower beds). */
+  flat?: boolean;
+  /** Created by a dedicated system instead of the chunk streamer. */
+  special?: boolean;
 }
 
 const TRUNK: [number, number, number, number] = [-8, -16, 16, 16];
@@ -49,8 +51,8 @@ export const PROPS: Record<PropType, PropDef> = {
   tallgrass: { fp: null, frames: 3, fps: 3 },
   mushroom: { fp: null, light: { radius: 34, color: 0x5cf0d0, strength: 0.55, nightOnly: true, lift: 4 } },
   reeds: { fp: null, frames: 3, fps: 2.5 },
-  lily: { fp: null, frames: 2, fps: 1.2 },
-  flowerbed: { fp: null },
+  lily: { fp: null, frames: 2, fps: 1.2, flat: true },
+  flowerbed: { fp: null, flat: true },
   haystack: { fp: [-16, -14, 32, 14] },
   house_a: { fp: [-30, -30, 60, 30] },
   house_b: { fp: [-30, -30, 60, 30] },
@@ -71,9 +73,9 @@ export const PROPS: Record<PropType, PropDef> = {
   crystal_b: { fp: TILE1, light: { radius: 74, color: 0x9d86ff, strength: 0.8, flicker: 0.06, lift: 12 } },
   stalagmite: { fp: TILE1 },
   pillar: { fp: [-8, -14, 16, 14] },
-  gate: { fp: null },
-  plate: { fp: null },
-  boss_door: { fp: null },
+  gate: { fp: null, special: true },
+  plate: { fp: null, special: true },
+  boss_door: { fp: null, special: true },
 };
 
 export interface PropPlacement {

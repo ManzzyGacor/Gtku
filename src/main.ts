@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { installErrorOverlay } from './core/errors';
 import { planDisplay } from './core/display';
 import { BootScene } from './scenes/BootScene';
+import { GameScene } from './scenes/GameScene';
 
 installErrorOverlay();
 
@@ -29,7 +30,7 @@ const game = new Phaser.Game({
   fps: { target: 60 },
   input: { activePointers: 4, touch: { capture: true } },
   disableContextMenu: true,
-  scene: [BootScene],
+  scene: [BootScene, GameScene],
 });
 
 /** Re-plan the integer scale whenever the window / orientation changes. */

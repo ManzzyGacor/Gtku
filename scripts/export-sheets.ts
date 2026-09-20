@@ -19,3 +19,10 @@ for (const sheet of buildAllSheets()) {
   writeFileSync(`${out}${sheet.key}@${z}x.png`, encodePng(upscale(sheet.pixmap, z, 0x24203a)));
   console.log(`${sheet.key}: ${sheet.pixmap.w}x${sheet.pixmap.h}, ${Object.keys(sheet.frames).length} frames`);
 }
+
+// close-up of the first frames of a sheet for detailed inspection: npm run assets -- hero
+const focus = process.argv[2];
+if (focus) {
+  const sheet = buildAllSheets().find((s) => s.key === focus);
+  if (sheet) writeFileSync(`${out}${focus}-closeup.png`, encodePng(upscale(sheet.pixmap.sub(0, 0, Math.min(sheet.pixmap.w, 256), Math.min(sheet.pixmap.h, 70)), 6, 0x24203a)));
+}

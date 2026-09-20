@@ -7,10 +7,10 @@ Legenda: ✅ selesai · 🚧 sedang dikerjakan · ⬜ belum
 
 ## Rencana fitur (urutan pengerjaan)
 1. ✅ Scaffold & dokumentasi
-2. ⬜ Pipeline seni murni-kode (Pixmap, palet, ekspor PNG, font piksel, tileset)
-3. ⬜ Data dunia: worldgen 3 area, chunk, collision, preview PNG
-4. ⬜ GameScene: streaming chunk, kamera halus, hero bergerak (keyboard) + tabrakan
-5. ⬜ Sprite hero + animasi
+2. ✅ Pipeline seni murni-kode (Pixmap, palet, ekspor PNG, font piksel, tileset, props)
+3. ✅ Data dunia: worldgen 3 area, chunk, collision, preview PNG (tes keterjangkauan)
+4. ✅ GameScene: streaming chunk, kamera halus, hero bergerak (keyboard) + tabrakan
+5. ✅ Sprite hero + animasi (rig humanoid parametrik, 3 arah + flip)
 6. ⬜ Kontrol sentuh + HUD (UIScene)
 7. ⬜ Kombat hero: kombo 3 hit, dodge roll, skill, hit-stop, shake, angka damage
 8. ⬜ Musuh 1: Lendir Lumut (pengejar)
