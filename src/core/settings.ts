@@ -1,0 +1,167 @@
+/**
+ * Player settings: graphics preset, debug overlays, touch layout, text size, volumes.
+ * Pure DOM + localStorage (no Phaser) so it can be unit-tested and read from anywhere.
+ *
+ * URL parameters override a stored value for the session and lock it in the UI:
+ *   ?fps=1  ?bloom=0  ?preset=low|medium|high|ultra  ?q=0|1|2 (legacy, maps to low/medium/high)
+ */
+import { SETTINGS_KEY } from '../config';
+
+export type PresetId = 'low' | 'medium' | 'high' | 'ultra';
+export const PRESET_IDS: readonly PresetId[] = ['low', 'medium', 'high', 'ultra'];
+
+export interface Settings {
+  /** Graphics preset. `ultra` additionally needs the downloaded HD pack. */
+  preset: PresetId;
+  /** True until the player picks a preset by hand; lets auto-detect / auto-drop act freely. */
+  presetAuto: boolean;
+  fpsCounter: boolean;
+  bloom: boolean;
+  /** Joystick radius multiplier. */
+  stickScale: number;
+  /** Joystick home position as a fraction of the screen. */
+  stickX: number;
+  stickY: number;
+  /** Action button radius multiplier. */
+  buttonScale: number;
+  /** Dialogue text scale (1 = small, 3 = large); HUD text follows at one step down. */
+  textScale: number;
+  musicVol: number;
+  sfxVol: number;
+  /** Set once the intro cutscene has been watched (or skipped) to the end. */
+  cutsceneSeen: boolean;
+  /** Version string of the installed HD pack, or null when it is not installed. */
+  hdVersion: string | null;
+}
+
+export const DEFAULTS: Settings = {
+  preset: 'high',
+  presetAuto: true,
+  fpsCounter: false,
+  bloom: true,
+  stickScale: 1,
+  stickX: 0.14,
+  stickY: 0.78,
+  buttonScale: 1,
+  textScale: 2,
+  musicVol: 0.6,
+  sfxVol: 0.8,
+  cutsceneSeen: false,
+  hdVersion: null,
+};
+
+/** Allowed range + step for the numeric settings, shared by the settings panel and clamping. */
+export const RANGES = {
+  stickScale: { min: 0.7, max: 1.8, step: 0.1 },
+  stickX: { min: 0.06, max: 0.42, step: 0.02 },
+  stickY: { min: 0.4, max: 0.9, step: 0.02 },
+  buttonScale: { min: 0.7, max: 1.8, step: 0.1 },
+  textScale: { min: 1, max: 3, step: 1 },
+  musicVol: { min: 0, max: 1, step: 0.1 },
+  sfxVol: { min: 0, max: 1, step: 0.1 },
+} as const;
+
+export type NumericKey = keyof typeof RANGES;
+
+const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
+
+/** Round to the nearest step so repeated +/- never drifts (0.30000000000000004). */
+export function quantize(key: NumericKey, value: number): number {
+  const r = RANGES[key];
+  const steps = Math.round((clamp(value, r.min, r.max) - r.min) / r.step);
+  return Math.round((r.min + steps * r.step) * 1000) / 1000;
+}
+
+function sanitize(raw: unknown): Partial<Settings> {
+  if (!raw || typeof raw !== 'object') return {};
+  const o = raw as Record<string, unknown>;
+  const out: Partial<Settings> = {};
+  if (typeof o.preset === 'string' && PRESET_IDS.includes(o.preset as PresetId)) out.preset = o.preset as PresetId;
+  for (const k of ['presetAuto', 'fpsCounter', 'bloom', 'cutsceneSeen'] as const) if (typeof o[k] === 'boolean') out[k] = o[k] as boolean;
+  for (const k of Object.keys(RANGES) as NumericKey[]) if (typeof o[k] === 'number' && Number.isFinite(o[k])) out[k] = quantize(k, o[k] as number);
+  if (typeof o.hdVersion === 'string' || o.hdVersion === null) out.hdVersion = o.hdVersion as string | null;
+  return out;
+}
+
+function readStored(): Partial<Settings> {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    return raw ? sanitize(JSON.parse(raw)) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Parse `?fps=1&bloom=0&preset=ultra&q=1` into a partial settings patch. */
+export function parseUrlOverrides(search: string): Partial<Settings> {
+  const out: Partial<Settings> = {};
+  const q = new URLSearchParams(search);
+  const bool = (v: string | null): boolean | null => (v === '1' || v === 'on' ? true : v === '0' || v === 'off' ? false : null);
+  const fps = bool(q.get('fps'));
+  if (fps !== null) out.fpsCounter = fps;
+  const bloom = bool(q.get('bloom'));
+  if (bloom !== null) out.bloom = bloom;
+  const p = q.get('preset');
+  if (p && PRESET_IDS.includes(p as PresetId)) out.preset = p as PresetId;
+  const legacy = q.get('q');
+  if (out.preset === undefined && (legacy === '0' || legacy === '1' || legacy === '2')) out.preset = (['low', 'medium', 'high'] as const)[Number(legacy)];
+  if (out.preset !== undefined) out.presetAuto = false;
+  return out;
+}
+
+export type SettingsListener = (key: keyof Settings | null) => void;
+
+export class SettingsStore {
+  private data: Settings;
+  /** Keys pinned by the URL: changing them in the panel would be a lie, so the panel shows them locked. */
+  readonly locked: ReadonlySet<keyof Settings>;
+  private listeners = new Set<SettingsListener>();
+
+  constructor(search = typeof location !== 'undefined' ? location.search : '') {
+    const overrides = parseUrlOverrides(search);
+    this.data = { ...DEFAULTS, ...readStored(), ...overrides };
+    // `presetAuto` rides along with `preset` but must not show up as a locked row of its own.
+    this.locked = new Set((Object.keys(overrides) as (keyof Settings)[]).filter((k) => k !== 'presetAuto'));
+  }
+
+  all(): Readonly<Settings> {
+    return this.data;
+  }
+
+  get<K extends keyof Settings>(key: K): Settings[K] {
+    return this.data[key];
+  }
+
+  set<K extends keyof Settings>(key: K, value: Settings[K]): void {
+    if (this.data[key] === value) return;
+    this.data[key] = value;
+    this.persist();
+    for (const fn of this.listeners) fn(key);
+  }
+
+  /** Nudge a numeric setting by `dir` steps, clamped to its range. */
+  step(key: NumericKey, dir: number): void {
+    this.set(key, quantize(key, this.data[key] + RANGES[key].step * dir));
+  }
+
+  isLocked(key: keyof Settings): boolean {
+    return this.locked.has(key);
+  }
+
+  on(fn: SettingsListener): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private persist(): void {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.data));
+    } catch {
+      /* private window / blocked storage: settings just don't survive a reload */
+    }
+  }
+}
+
+export const settings = new SettingsStore();
