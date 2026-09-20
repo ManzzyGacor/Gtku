@@ -7,7 +7,9 @@ Open-world action RPG 2D top-down pixel art. Ringkasan desain: `docs/GAME_DESIGN
 
 - **Phaser 4.2.x** (renderer baru berbasis RenderNode; BUKAN Phaser 3 — lihat catatan API di bawah), **TypeScript 7 (strict)**, **Vite 8**.
 - Dokumentasi Phaser 4 ada lokal: `node_modules/phaser/skills/*/SKILL.md`, `node_modules/phaser/docs`, tipe di `node_modules/phaser/types/phaser.d.ts`.
-- Tes murni-logika: `node --import tsx --test tests/*.test.ts` (`npm test`). Tidak ada tes berbasis browser.
+- Tes: `node --import tsx --test tests/*.test.ts` (`npm test`). Tes logika murni + **`tests/smoke.test.ts`**: menjalankan GameScene/UIScene
+  asli terhadap Phaser palsu (`tests/mocks/phaser-mock.ts`, dialihkan lewat hook resolve) selama ribuan frame (jalan, kombat, dialog, puzzle, boss,
+  save/load, respawn, cek kebocoran objek, validasi nama frame). Tidak ada tes piksel/browser — render nyata WebGL hanya bisa dicek di perangkat.
 
 ## Menjalankan
 
@@ -34,9 +36,11 @@ src/
   core/              utilitas tanpa/sedikit Phaser: display, input, save, kualitas adaptif, rng, error overlay
   art/               PIPELINE SENI MURNI-KODE (tanpa DOM): Pixmap, palette, generator sprite/tile/fx/ui/font, registry sheet
   world/             data dunia: tile, worldgen, chunk, WorldSource, koordinat area, collision grid
-  entities/          Hero, Enemy(+brains), Npc, Projectile, objek puzzle
-  systems/           lighting, day-night, combat/fx, dialog, quest, minimap, spawner
-  scenes/            Boot, Title, Game, UI (HUD + kontrol sentuh + dialog)
+  entities/          HeroCore/HeroView, enemies (AI murni) + EnemyView, NpcView
+  systems/           chunks, lighting, daynight, parallax, fx, cameraRig, EnemyDirector, PuzzleSystem(+Logic), quest, interactables
+  state/             GameState (quest, kill, flag, waktu) + serialisasi save
+  data/              (cadangan) data konten
+  scenes/            Boot, Title, Game, UI (HUD + kontrol sentuh + dialog + minimap)
 tests/               tes logika (node:test + tsx)
 scripts/             skrip node (ekspor sheet ke PNG, preview dunia)
 public/assets/override/   TARUH PNG buatan tangan di sini untuk menimpa aset generatif (lihat di bawah)
@@ -63,6 +67,7 @@ docs/                GAME_DESIGN.md, PROGRESS.md
   Filter hanya WebGL; selalu bungkus try/catch dan sediakan fallback tanpa filter.
 - `RenderTexture/DynamicTexture` harus memanggil `render()`. Game ini menghindarinya: tekstur dinamis dibuat dengan **CanvasTexture**
   (`textures.addCanvas` lalu `refresh()`).
+- `Rectangle`/shape: ubah ukuran dengan `setSize()` — mengubah `.width` langsung TIDAK memperbarui geometri.
 - Pencahayaan dipakai **manual** (lightmap kanvas 2D + blend MULTIPLY), bukan `setLighting()` bawaan, agar hasilnya deterministik.
 - `Geom.Point` tak ada (pakai `Vector2`); `Math.TAU` = 2π.
 
