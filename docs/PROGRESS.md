@@ -12,10 +12,10 @@ Legenda: ✅ selesai · 🚧 sedang dikerjakan · ⬜ belum
 4. ✅ GameScene: streaming chunk, kamera halus, hero bergerak (keyboard) + tabrakan
 5. ✅ Sprite hero + animasi (rig humanoid parametrik, 3 arah + flip)
 6. ✅ Kontrol sentuh (joystick dinamis + tombol) + HUD (UIScene, dialog, banner, boss bar)
-7. ⬜ Kombat hero: kombo 3 hit, dodge roll, skill, hit-stop, shake, angka damage
-8. ⬜ Musuh 1: Lendir Lumut (pengejar)
-9. ⬜ Musuh 2: Pemanah Duri (jarak jauh)
-10. ⬜ Musuh 3: Kelelawar Kelam (kawanan)
+7. ✅ Kombat hero: kombo 3 hit, dodge roll, skill, hit-stop, shake, angka damage, slash/partikel, auto-aim, pickup heal
+8. ✅ Musuh 1: Lendir Lumut (pengejar: hop → telegraf → terkam)
+9. ✅ Musuh 2: Pemanah Duri (kiting, bidik bertelegraf, tembak duri)
+10. ✅ Musuh 3: Kelelawar Kelam (kawanan mengitari, maks 2 penyelam bergiliran)
 11. ⬜ Pencahayaan dinamis, siklus siang-malam, vignette, bloom
 12. ⬜ Air & rumput beranimasi, partikel (debu/daun/air), parallax
 13. ⬜ NPC + dialog + quest

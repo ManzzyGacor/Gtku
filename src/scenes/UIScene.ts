@@ -47,6 +47,10 @@ export class UIScene extends Phaser.Scene {
   private questText!: Phaser.GameObjects.BitmapText;
   private fsBtn!: Phaser.GameObjects.Image;
   private hint!: Phaser.GameObjects.BitmapText;
+  private flashRect!: Phaser.GameObjects.Rectangle;
+  private flashT = 0;
+  private flashDur = 1;
+  private flashA = 0;
 
   // banner
   private banner!: Phaser.GameObjects.BitmapText;
@@ -122,6 +126,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   private buildHud(): void {
+    this.flashRect = this.add.rectangle(0, 0, 10, 10, 0xffffff, 0).setOrigin(0).setDepth(5);
     this.add.image(4, 3, 'ui', 'heart_full').setOrigin(0, 0).setDepth(20);
     this.add.rectangle(22, 6, 76, 10, P.ink0).setOrigin(0).setDepth(20).setStrokeStyle(1, P.s4);
     this.hpTrail = this.add.rectangle(24, 8, 72, 6, P.y4).setOrigin(0).setDepth(21);
@@ -162,6 +167,7 @@ export class UIScene extends Phaser.Scene {
   private layout(): void {
     const w = this.scale.width;
     const h = this.scale.height;
+    this.flashRect.setSize(w, h);
     this.joyHome = { x: 62, y: h - 58 };
     if (this.stickPointer < 0) this.placeStick(this.joyHome.x, this.joyHome.y, 0, 0);
     const place = (a: Action, x: number, y: number): void => {
@@ -317,6 +323,14 @@ export class UIScene extends Phaser.Scene {
 
   // ───────────────────────────── public API ─────────────────────────────
 
+  /** Full-screen colour flash that fades out (damage, blast, phase change). */
+  flash(color: number, alpha: number, ms: number): void {
+    this.flashRect.setFillStyle(color, 1);
+    this.flashA = alpha;
+    this.flashDur = ms / 1000;
+    this.flashT = ms / 1000;
+  }
+
   showBanner(text: string): void {
     this.banner.setText(text);
     this.bannerT = 2.6;
@@ -434,6 +448,11 @@ export class UIScene extends Phaser.Scene {
     for (const o of [ib.img, ib.ico, ib.dim, ib.label]) o.setVisible(showI);
     if (prompt && !this.dialogOpen) this.hint.setText(this.touchUI ? prompt : `[E] ${prompt}`);
     else this.hint.setText('');
+
+    if (this.flashT > 0) {
+      this.flashT = Math.max(0, this.flashT - dt);
+      this.flashRect.setAlpha(this.flashA * (this.flashT / this.flashDur));
+    } else this.flashRect.setAlpha(0);
 
     // banner/toast fades
     if (this.bannerT > 0) {
