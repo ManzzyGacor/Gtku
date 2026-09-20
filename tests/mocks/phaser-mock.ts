@@ -45,7 +45,7 @@ export function mockGO(type: string, init: Bag = {}): any {
     setDisplaySize: (w: number, h: number) => { store.width = w; store.height = h; },
   };
   const handler: ProxyHandler<Bag> = {
-    get(t, k: string) {
+    get(_t, k: string) {
       if (k === 'then') return undefined;
       if (k === 'destroy') {
         return () => {
