@@ -1,0 +1,24 @@
+{
+  "name": "gtku",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Open-world 2D top-down pixel-art action RPG (Phaser 4 + TypeScript + Vite)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "assets": "tsx scripts/export-sheets.ts"
+  },
+  "dependencies": {
+    "phaser": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "tsx": "^4.23.14",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}

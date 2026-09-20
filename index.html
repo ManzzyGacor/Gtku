@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#14101f" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Lentera Kelam</title>
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #0d0a16; overflow: hidden; }
+      body { display: flex; align-items: center; justify-content: center; position: fixed; inset: 0;
+             touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+             -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+      #game { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+      canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; touch-action: none; }
+      #boot-msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+                  color: #c9b8ff; font: 14px/1.4 monospace; pointer-events: none; }
+      #err { position: fixed; left: 0; right: 0; bottom: 0; max-height: 40%; overflow: auto; margin: 0;
+             padding: 6px 8px; background: rgba(120, 10, 30, 0.92); color: #fff; font: 11px/1.3 monospace;
+             white-space: pre-wrap; z-index: 99; display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="boot-msg">Memuat Lentera Kelam…</div>
+    <pre id="err"></pre>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
