@@ -11,7 +11,7 @@ Legenda: ✅ selesai · 🚧 sedang dikerjakan · ⬜ belum
 3. ✅ Data dunia: worldgen 3 area, chunk, collision, preview PNG (tes keterjangkauan)
 4. ✅ GameScene: streaming chunk, kamera halus, hero bergerak (keyboard) + tabrakan
 5. ✅ Sprite hero + animasi (rig humanoid parametrik, 3 arah + flip)
-6. ⬜ Kontrol sentuh + HUD (UIScene)
+6. ✅ Kontrol sentuh (joystick dinamis + tombol) + HUD (UIScene, dialog, banner, boss bar)
 7. ⬜ Kombat hero: kombo 3 hit, dodge roll, skill, hit-stop, shake, angka damage
 8. ⬜ Musuh 1: Lendir Lumut (pengejar)
 9. ⬜ Musuh 2: Pemanah Duri (jarak jauh)

@@ -38,6 +38,8 @@ export class GameScene extends Phaser.Scene {
     this.rig.snap(start.x, start.y);
     this.chunks.preload(this.rig.view, 1);
 
+    this.scene.launch('UI');
+    this.scene.bringToTop('UI');
     this.scale.on(Phaser.Scale.Events.RESIZE, () => this.rig.snap(this.hero.x, this.hero.y));
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.chunks.destroy());
   }

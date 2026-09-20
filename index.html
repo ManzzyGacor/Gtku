@@ -19,6 +19,9 @@
       canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; touch-action: none; }
       #boot-msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
                   color: #c9b8ff; font: 14px/1.4 monospace; pointer-events: none; }
+      #rotate { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; text-align: center;
+                background: #0d0a16; color: #ffd98a; font: 18px/1.4 monospace; z-index: 90; padding: 24px; }
+      @media (orientation: portrait) and (max-width: 900px) { #rotate { display: flex; } }
       #err { position: fixed; left: 0; right: 0; bottom: 0; max-height: 40%; overflow: auto; margin: 0;
              padding: 6px 8px; background: rgba(120, 10, 30, 0.92); color: #fff; font: 11px/1.3 monospace;
              white-space: pre-wrap; z-index: 99; display: none; }
@@ -27,6 +30,7 @@
   <body>
     <div id="game"></div>
     <div id="boot-msg">Memuat Lentera Kelam…</div>
+    <div id="rotate">Putar HP kamu ke mode landscape ↻</div>
     <pre id="err"></pre>
     <script type="module" src="/src/main.ts"></script>
   </body>
