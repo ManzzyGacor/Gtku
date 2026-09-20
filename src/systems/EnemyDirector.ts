@@ -13,6 +13,7 @@ import type { SpawnDef } from '../world/source';
 import { frameOf } from '../art/register';
 import type { GameScene } from '../scenes/GameScene';
 import type { LoadedChunk } from './chunks';
+import { OVERLIGHT } from './fx';
 
 const PROJ_FRAME: Record<string, string> = { thorn: 'thorn', rock: 'rock_proj', orb: 'orb' };
 
@@ -313,7 +314,7 @@ export class EnemyDirector {
       if (!img) {
         const name = PROJ_FRAME[p.proj];
         const f = frameOf('fx', name);
-        img = this.game.add.image(p.x, p.y, 'fx', name).setOrigin((f.ax ?? f.w / 2) / f.w, (f.ay ?? f.h / 2) / f.h).setDepth(4100);
+        img = this.game.add.image(p.x, p.y, 'fx', name).setOrigin((f.ax ?? f.w / 2) / f.w, (f.ay ?? f.h / 2) / f.h).setDepth(OVERLIGHT);
         this.projViews.set(p, img);
       }
       img.setPosition(Math.round(p.x), Math.round(p.y));

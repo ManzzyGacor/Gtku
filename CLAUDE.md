@@ -55,7 +55,7 @@ docs/                GAME_DESIGN.md, PROGRESS.md
   memungkinkan supaya bisa dites di Node. Kelas Phaser hanya menggambar/menghubungkan input.
 - Waktu simulasi memakai `dt` detik. Hit-stop = simulasi dibekukan sementara (`GameScene.freeze(ms)`), render & UI jalan terus.
 - Semua posisi dunia dalam piksel logis (bukan piksel layar). 1 tile = 16 px. Kamera zoom selalu 1; skala integer dilakukan CSS.
-- Y-sort: `setDepth(footY)` untuk objek dinamis dan statis. Layer khusus: tanah 0, bayangan 1, objek = y (2..3000), lightmap 5000, efek layar 6000.
+- Y-sort: `setDepth(footY)` untuk objek dinamis dan statis. Layer khusus: tanah 0, bayangan 1, objek = y (2..3000), lightmap 5000 (partikel 4000 di bawahnya; slash/telegraf/proyektil 5150, teks damage 5200 di atasnya agar terbaca saat gelap).
 - Jangan memakai `Math.random()` untuk hal yang harus konsisten (worldgen, variasi tile): pakai `core/rng.ts` (seeded).
 - Satu fitur per langkah: `npm run build` hijau → commit jelas → `git push origin main` → update `docs/PROGRESS.md`.
 - Pesan commit diakhiri baris `Co-Authored-By` sesuai instruksi harness.

@@ -231,7 +231,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private dropHeal(x: number, y: number): void {
-    const img = this.add.image(x, y, 'fx', 'heal_orb').setDepth(3500);
+    const img = this.add.image(x, y, 'fx', 'heal_orb').setDepth(5150);
     this.pickups.push({ x, y, img, age: 0, heal: 2 });
   }
 

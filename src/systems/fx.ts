@@ -20,7 +20,11 @@ interface Num {
   vy: number;
 }
 
+/** Particles live under the lightmap (they get lit/darkened like the world). */
 export const FX_DEPTH = 4000;
+/** Combat feedback that must stay readable at night / in caves draws above the lightmap (depth 5000). */
+export const OVERLIGHT = 5150;
+export const TEXT_DEPTH = 5200;
 
 /** Quality knob: scales particle counts (adaptive quality lowers it when FPS drops). */
 export class Fx {
@@ -54,7 +58,7 @@ export class Fx {
     this.embers = mk({ frame: ['ember', 'spark_s'], speed: { min: 6, max: 20 }, angle: { min: 250, max: 290 }, lifespan: { min: 500, max: 900 }, alpha: { start: 1, end: 0 } });
     this.smoke = mk({ frame: ['smoke'], speed: { min: 6, max: 24 }, angle: { min: 240, max: 300 }, lifespan: { min: 500, max: 800 }, alpha: { start: 0.55, end: 0 } });
     this.fall = mk({ frame: ['leaf_g', 'leaf_o'], speed: { min: 4, max: 14 }, angle: { min: 60, max: 120 }, lifespan: { min: 1500, max: 2400 }, alpha: { start: 1, end: 0 }, gravityY: 6, accelerationX: { min: -6, max: 6 } });
-    this.gfx = scene.add.graphics().setDepth(FX_DEPTH - 1);
+    this.gfx = scene.add.graphics().setDepth(OVERLIGHT + 10);
   }
 
   private n(count: number): number {
@@ -122,7 +126,7 @@ export class Fx {
 
   // ── slash ──
   slash(x: number, y: number, angle: number, combo: number): void {
-    const img = this.scene.add.image(x + Math.cos(angle) * 6, y + Math.sin(angle) * 6, 'fx', 'slash_0').setDepth(FX_DEPTH + 1);
+    const img = this.scene.add.image(x + Math.cos(angle) * 6, y + Math.sin(angle) * 6, 'fx', 'slash_0').setDepth(OVERLIGHT);
     img.setRotation(angle);
     if (combo === 1) img.setFlipY(true);
     if (combo === 2) img.setScale(1.28);
@@ -130,13 +134,13 @@ export class Fx {
   }
 
   private flipbook(x: number, y: number, frames: string[], fps: number): void {
-    const img = this.scene.add.image(x, y, 'fx', frames[0]).setDepth(FX_DEPTH + 1);
+    const img = this.scene.add.image(x, y, 'fx', frames[0]).setDepth(OVERLIGHT);
     this.flips.push({ img, t: 0, frames, fps, vx: 0, vy: 0 });
   }
 
   /** Expanding additive glow (skill blast, phase change). */
   glowPulse(x: number, y: number, radius: number, color: number, ms = 380, alpha = 0.9): void {
-    const img = this.scene.add.image(x, y, 'fx', 'glow').setBlendMode(Phaser.BlendModes.ADD).setTint(color).setDepth(FX_DEPTH + 2).setAlpha(alpha);
+    const img = this.scene.add.image(x, y, 'fx', 'glow').setBlendMode(Phaser.BlendModes.ADD).setTint(color).setDepth(OVERLIGHT).setAlpha(alpha);
     const s1 = (radius * 2) / 64;
     img.setScale(s1 * 0.35);
     this.scene.tweens.add({ targets: img, scale: s1, alpha: 0, duration: ms, ease: 'Cubic.easeOut', onComplete: () => img.destroy() });
@@ -144,7 +148,7 @@ export class Fx {
 
   // ── damage numbers ──
   number(x: number, y: number, text: string, color = 0xffffff, scale = 1): void {
-    const t = pixelText(this.scene, Math.round(x), Math.round(y), text, { color, scale, origin: [0.5, 1], depth: FX_DEPTH + 5 });
+    const t = pixelText(this.scene, Math.round(x), Math.round(y), text, { color, scale, origin: [0.5, 1], depth: TEXT_DEPTH });
     this.nums.push({ text: t, life: 0.75, max: 0.75, vy: -34 });
     if (this.nums.length > 24) {
       const o = this.nums.shift()!;

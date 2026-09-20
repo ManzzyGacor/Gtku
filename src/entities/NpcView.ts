@@ -20,7 +20,7 @@ export class NpcView {
     const name = `${def.look}_d_0`;
     const f = frameOf('npc', name);
     this.sprite = scene.add.image(def.x, def.y, 'npc', name).setOrigin((f.ax ?? 16) / f.w, (f.ay ?? 29) / f.h).setDepth(def.y);
-    this.mark = pixelText(scene, def.x, def.y - 40, '', { color: 0xffd15a, origin: [0.5, 1], scale: 2, depth: 4900 });
+    this.mark = pixelText(scene, def.x, def.y - 40, '', { color: 0xffd15a, origin: [0.5, 1], scale: 2, depth: 5200 });
   }
 
   update(dt: number, hero: { x: number; y: number }): void {

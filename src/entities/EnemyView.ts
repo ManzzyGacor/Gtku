@@ -33,7 +33,7 @@ export class EnemyView {
     this.teleKind = kind;
     this.teleDur = dur;
     this.teleT = dur;
-    if (!this.mark) this.mark = pixelText(this.scene, 0, 0, '!', { color: 0xff5a4a, origin: [0.5, 1], scale: 2, depth: 4900 });
+    if (!this.mark) this.mark = pixelText(this.scene, 0, 0, '!', { color: 0xff5a4a, origin: [0.5, 1], scale: 2, depth: 5200 });
     this.mark.setVisible(true);
   }
 
