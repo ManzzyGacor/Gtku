@@ -176,3 +176,40 @@ test('a streamed chunk contains exactly the geometry its plan describes', () => 
   assert.ok(w3d.stats().instances >= plan.shapes.length, `loaded ${w3d.stats().instances} < planned ${plan.shapes.length}`);
   w3d.dispose();
 });
+
+test('preload can warm just the neighbourhood, leaving the rest to the budgeted loader', () => {
+  const scene = new THREE.Scene();
+  const w3d = new World3D(scene, world, tileSheet);
+  w3d.setRenderDistance(4);
+  const start = world.markers.playerStart;
+
+  // A boot that baked the full radius at once would freeze the first frame for a second or more.
+  w3d.preload(start.x / 16, start.y / 16, 1);
+  const warmed = w3d.stats().chunks;
+  assert.ok(warmed >= 4 && warmed <= 12, `a small neighbourhood, got ${warmed} chunks`);
+
+  // the rest arrives over the following frames without another preload
+  const focus = new THREE.Vector3(start.x / 16, 0, start.y / 16);
+  for (let i = 0; i < 300; i++) w3d.update(0.5, focus, 0, 1, 1 / 60);
+  const full = w3d.stats();
+  assert.ok(full.chunks > warmed, 'the loader kept going on its own');
+  assert.equal(full.queued, 0);
+  w3d.dispose();
+});
+
+test('the loaded chunk count stays within a sane budget at every radius', () => {
+  const scene = new THREE.Scene();
+  const w3d = new World3D(scene, world, tileSheet);
+  const start = world.markers.playerStart;
+  const focus = new THREE.Vector3(start.x / 16, 0, start.y / 16);
+  // Each chunk is a 256x256 ground texture (256 kB), so this is a memory budget, not a nicety.
+  const budget: Record<number, number> = { 2: 30, 3: 45, 4: 60, 6: 110 };
+  for (const radius of [2, 3, 4, 6]) {
+    w3d.setRenderDistance(radius);
+    for (let i = 0; i < 400; i++) w3d.update(0.5, focus, 0, 8, 1 / 60);
+    const n = w3d.stats().chunks;
+    assert.ok(n <= budget[radius], `radius ${radius} loaded ${n} chunks (budget ${budget[radius]})`);
+    assert.ok(n >= radius * radius, `radius ${radius} loaded only ${n} chunks`);
+  }
+  w3d.dispose();
+});

@@ -323,11 +323,14 @@ export class World3D {
 
   /**
    * Queue the chunks near `focus`, drop the far ones. Loading itself is budgeted by `step`.
-   * Unloading uses one chunk of hysteresis so walking along a border does not thrash.
+   *
+   * Unloading keeps half a chunk of hysteresis so walking along a border does not thrash — a full
+   * chunk of margin sounds safer but grows the loaded disc by about a quarter, and every chunk is
+   * a 256x256 texture.
    */
   private stream(focusX: number, focusZ: number): void {
     const want = this.desired(focusX, focusZ, 0);
-    const keep = new Set(this.desired(focusX, focusZ, 1).map((c) => keyOf(c.cx, c.cy)));
+    const keep = new Set(this.desired(focusX, focusZ, 0.5).map((c) => keyOf(c.cx, c.cy)));
     let changed = false;
     for (const [key, c] of this.loaded) {
       if (keep.has(key)) continue;
@@ -346,10 +349,19 @@ export class World3D {
     }
   }
 
-  /** Load everything within range right now (first frame, teleports). */
-  preload(focusX: number, focusZ: number): void {
+  /**
+   * Load what is around `focus` right now (first frame, teleports).
+   *
+   * `radius` lets the caller load a *small* neighbourhood synchronously and leave the rest to the
+   * budgeted loader: baking dozens of ground textures in one go would freeze the first frame for a
+   * second or more on a phone, and distance fog hides the rest arriving.
+   */
+  preload(focusX: number, focusZ: number, radius?: number): void {
+    const full = this.radiusChunks;
+    if (radius !== undefined) this.radiusChunks = Math.max(1, radius);
     this.stream(focusX, focusZ);
     this.step(this.queue.length);
+    this.radiusChunks = full;
   }
 
   private loadChunk(cx: number, cy: number): void {

@@ -37,35 +37,39 @@ export interface GraphicsProfile {
   /** Post-process pixel outline. */
   outline: boolean;
   shadows: 'off' | 'low' | 'high';
-  /** How many world chunks to keep around the camera. */
-  renderDistance: number;
+  /**
+   * Extra chunks streamed *beyond* what the camera can actually see. The visible radius is derived
+   * from the camera, so this is only the margin that hides pop-in; 0 means "exactly what is on
+   * screen". Every extra chunk is a 256x256 ground texture, so this number is expensive.
+   */
+  chunkMargin: number;
 }
 
 export const PROFILES: Record<PresetId, GraphicsProfile> = {
   vlow: {
     id: 'vlow', name: 'Sangat Rendah', note: 'Untuk HP lama',
     bloom: false, particles: 0.2, lightmapEveryN: 3, parallax: false, fog: false, halos: 6,
-    renderScale: 0.6, pixelHeight: 270, outline: false, shadows: 'off', renderDistance: 1,
+    renderScale: 0.6, pixelHeight: 270, outline: false, shadows: 'off', chunkMargin: 0,
   },
   low: {
     id: 'low', name: 'Rendah', note: 'Paling ringan',
     bloom: false, particles: 0.4, lightmapEveryN: 2, parallax: false, fog: false, halos: 10,
-    renderScale: 0.75, pixelHeight: 270, outline: false, shadows: 'off', renderDistance: 2,
+    renderScale: 0.75, pixelHeight: 270, outline: false, shadows: 'off', chunkMargin: 0,
   },
   medium: {
     id: 'medium', name: 'Sedang', note: 'Seimbang',
     bloom: false, particles: 0.7, lightmapEveryN: 1, parallax: true, fog: false, halos: 16,
-    renderScale: 1, pixelHeight: 270, outline: true, shadows: 'low', renderDistance: 2,
+    renderScale: 1, pixelHeight: 270, outline: true, shadows: 'low', chunkMargin: 1,
   },
   high: {
     id: 'high', name: 'Tinggi', note: 'Semua efek dasar',
     bloom: true, particles: 1, lightmapEveryN: 1, parallax: true, fog: true, halos: 22,
-    renderScale: 1, pixelHeight: 324, outline: true, shadows: 'high', renderDistance: 3,
+    renderScale: 1, pixelHeight: 324, outline: true, shadows: 'high', chunkMargin: 1,
   },
   ultra: {
     id: 'ultra', name: 'Ultra', note: 'Paling berat',
     bloom: true, particles: 1.4, lightmapEveryN: 1, parallax: true, fog: true, halos: 22,
-    renderScale: 1, pixelHeight: 360, outline: true, shadows: 'high', renderDistance: 4,
+    renderScale: 1, pixelHeight: 360, outline: true, shadows: 'high', chunkMargin: 2,
   },
 };
 

@@ -75,8 +75,9 @@ export class Game3D {
 
     this.applyProfile();
     this.resize();
-    // Everything within range is ready before the first frame, so the player never sees a hole.
-    this.scene3d.preload(u(start.x), u(start.y));
+    // The immediate neighbourhood is ready before the first frame; the rest streams in behind the
+    // fog over the next few frames rather than freezing the boot.
+    this.scene3d.preload(u(start.x), u(start.y), 2);
     window.addEventListener('resize', this.onResize);
   }
 
@@ -102,12 +103,13 @@ export class Game3D {
   }
 
   /**
-   * How many chunks to keep loaded: enough to fill the screen at the current camera angle and zoom,
-   * plus the preset's own margin. A flatter camera or a wider zoom therefore streams more.
+   * How many chunks to keep loaded: what the camera can actually see, plus the preset's margin.
+   * A flatter camera or a wider zoom therefore streams more. Capped, so zooming all the way out
+   * on a weak phone cannot ask for a hundred ground textures at once.
    */
   private chunkRadius(): number {
-    const needed = Math.ceil(this.camera.viewRadius / 16) + 1;
-    return Math.max(profileOf(settings.get('preset')).renderDistance, needed);
+    const visible = Math.ceil(this.camera.viewRadius / 16);
+    return Math.min(6, visible + profileOf(settings.get('preset')).chunkMargin);
   }
 
   // ───────────────────────── loop ─────────────────────────
