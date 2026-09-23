@@ -31,9 +31,14 @@ Ringkasan desain: `docs/GAME_DESIGN.md`. Status pekerjaan: `docs/PROGRESS.md`
 npm install
 npm run dev        # Vite di 127.0.0.1:5173 (dipakai lewat Cloudflare Tunnel https://game.varesa.mom)
 npm run build      # tsc --noEmit && vite build  → HARUS hijau sebelum commit
-npm test           # Vitest: logika inti (dunia, kombat, AI, quest, save) + smoke test
+npm test           # Vitest: logika inti (dunia, kombat, AI, quest, save) + smoke test + penjaga lapisan
+npm run test:watch # Vitest mode tonton
 npm run assets     # ekspor semua sheet seni ke .preview/*.png (untuk dilihat/diedit, tidak di-commit)
+npx tsx scripts/plan-stats.ts   # jumlah chunk/instance/draw group/lampu per area di mode 3D
 ```
+
+Flag URL untuk menguji di HP: `?renderer=2d|3d`, `?fps=1`, `?bloom=0`, `?preset=vlow|low|medium|high|ultra`.
+Semuanya juga ada di menu Pengaturan (gerigi di pojok kanan atas).
 
 - Dev server harus hidup di **sesi tmux bernama `game`**: `tmux new-session -d -s game -c <repo> "npm run dev"`.
   Cek: `tmux capture-pane -t game -p | tail`. `vite.config.ts` sudah berisi `allowedHosts: ['game.varesa.mom']` dan HMR `wss`/443.
@@ -99,6 +104,26 @@ bundle yang dipilih.
 - `Rectangle`/shape: ubah ukuran dengan `setSize()` — mengubah `.width` langsung TIDAK memperbarui geometri.
 - Pencahayaan dipakai **manual** (lightmap kanvas 2D + blend MULTIPLY), bukan `setLighting()` bawaan, agar hasilnya deterministik.
 - `Geom.Point` tak ada (pakai `Vector2`); `Math.TAU` = 2π.
+
+## Catatan API Three.js (sudah diverifikasi di repo ini)
+
+- **Colour management dimatikan** (`THREE.ColorManagement.enabled = false`, `outputColorSpace = LinearSRGBColorSpace`,
+  tekstur `colorSpace = NoColorSpace`). Palet di `src/art/palette.ts` dipilih tangan; kami ingin byte-nya
+  keluar apa adanya, bukan hasil pulang-balik sRGB.
+- `DataTexture` **tidak bisa diandalkan menghormati `flipY`** di semua driver. Untuk bidang tanah, baris
+  pixmap dibalik saat upload (`pixmapTexture(pm, { flipRows: true })`). Pixmap baris 0 = utara, dan bidang
+  yang dirotasi `-PI/2` punya `v = 1` di utara.
+- `WebGLRenderTarget.setSize()` **hanya mengubah ukuran attachment warna, bukan `depthTexture`** — buat
+  `DepthTexture` baru dan pasang ulang (lihat `PixelRenderer.resize`).
+- `InstancedMesh.setColorAt()` bekerja dengan material standar (`MeshLambertMaterial`/`MeshBasicMaterial`):
+  Three mendefinisikan `USE_INSTANCING_COLOR` sendiri, tidak perlu `vertexColors: true`.
+- Varying UV untuk `map` bernama **`vMapUv`** (r152+), dihitung di chunk `<uv_vertex>`. Tambal lewat
+  `onBeforeCompile` **setelah** `#include <uv_vertex>` dan bungkus `#ifdef USE_MAP`.
+- Setiap material yang memakai `onBeforeCompile` **wajib** punya `customProgramCacheKey()`, kalau tidak
+  Three akan memakai ulang program milik material lain.
+- Kamera ortografik: kedalaman bersifat linear, jadi outline bisa dibuat dari selisih depth tetangga
+  tanpa linearisasi (`PixelRenderer` shader quad).
+- Geometri dibuat prosedural lewat kode; **tidak ada alat desktop** (lihat batasan pemain di atas).
 
 ## Mengganti aset dengan gambar buatan tangan
 

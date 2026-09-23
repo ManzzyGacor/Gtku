@@ -25,9 +25,13 @@ import { countKinds, groupShapes, planArea, u, type ShapeKind, type WorldPlan } 
  * size; the vertex shader picks the two components facing the camera-facing normal.
  */
 const UV_SCALE_CHUNK = /* glsl */ `
-  vec3 n = abs(normal);
-  vec2 uvScale = n.y > 0.5 ? vec2(aSize.x, aSize.z) : (n.x > 0.5 ? vec2(aSize.z, aSize.y) : vec2(aSize.x, aSize.y));
+#ifdef USE_MAP
+  vec3 faceNormal = abs(normal);
+  vec2 uvScale = faceNormal.y > 0.5
+    ? vec2(aSize.x, aSize.z)
+    : (faceNormal.x > 0.5 ? vec2(aSize.z, aSize.y) : vec2(aSize.x, aSize.y));
   vMapUv *= uvScale;
+#endif
 `;
 
 function patchUvScale(material: THREE.Material): void {
