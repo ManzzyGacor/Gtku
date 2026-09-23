@@ -21,7 +21,7 @@ export const PITCH_MAX = RANGES.camPitch.max;
 export const ZOOM_MIN = RANGES.camZoom.min;
 export const ZOOM_MAX = RANGES.camZoom.max;
 /** How far the camera sits from its target. Orthographic, so this only has to clear the geometry. */
-const DISTANCE = 70;
+export const CAMERA_DISTANCE = 70;
 /**
  * The camera aims a little above the ground — roughly the hero's chest. At a side-on tilt this
  * keeps the hero in the middle of the screen instead of the bottom third.
@@ -63,7 +63,7 @@ export class IsoCamera {
     // Direction from the target to the camera. Its elevation above the ground *is* `pitchDeg`.
     this.offset
       .set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch))
-      .multiplyScalar(DISTANCE);
+      .multiplyScalar(CAMERA_DISTANCE);
   }
 
   get pitch(): number {
@@ -98,6 +98,18 @@ export class IsoCamera {
     const halfH = this.pixelH / TILE / 2 / this.zoomLevel;
     // a tilted camera sees further along the ground than its vertical half-extent suggests
     return Math.hypot(halfW, halfH / Math.max(0.35, Math.sin(deg(this.pitchDeg))));
+  }
+
+  /**
+   * Where distance fog should start and end, in view depth.
+   *
+   * Three measures fog from the camera, and an orthographic camera sits `CAMERA_DISTANCE` away from
+   * what it is looking at — so "near" is around 70, not around 0. Fog therefore only touches the
+   * half of the screen beyond the hero, which is exactly where the world runs out.
+   */
+  fogRange(): [number, number] {
+    const r = this.viewRadius;
+    return [CAMERA_DISTANCE + r * 0.15, CAMERA_DISTANCE + r * 1.3];
   }
 
   /** Snap straight to a world position (teleport, first frame). */

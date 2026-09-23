@@ -14,7 +14,8 @@ import { CHUNK_PX, CHUNK_TILES } from '../config';
 import { bakeChunk } from '../art/bake';
 import { buildGreyboxTextures, type GreyboxTexture } from '../art/greybox';
 import type { Sheet } from '../art/sheet';
-import { ambientAt, nightAmount } from '../core/systems/daynight';
+import { ambientAt, blendAmbient, nightAmount } from '../core/systems/daynight';
+import { AREAS } from '../core/world/areas';
 import type { TileRect, WorldSource } from '../core/world/source';
 import { pixmapTexture } from './textures';
 import { countKinds, groupShapes, planArea, u, type ShapeKind, type WorldPlan } from './worldPlan';
@@ -195,9 +196,10 @@ export class World3D {
   // ───────────────────────── per frame ─────────────────────────
 
   /** Day/night colouring plus the nearest planned lights, moved into the light pool. */
-  update(dayTime: number, focus: THREE.Vector3): void {
-    const amb = ambientAt(dayTime);
-    const night = nightAmount(dayTime);
+  update(dayTime: number, focus: THREE.Vector3, cave = 0): void {
+    const amb = blendAmbient(ambientAt(dayTime), AREAS.cave.ambient, cave);
+    // Inside the cave the sun is irrelevant: torches and crystals do the lighting.
+    const night = Math.max(nightAmount(dayTime), cave);
     this.hemi.color.setRGB(amb[0], amb[1], amb[2]);
     this.hemi.intensity = 0.55 + (1 - night) * 0.5;
     this.sun.color.setRGB(Math.min(1, amb[0] * 1.15), amb[1], amb[2] * 0.95);

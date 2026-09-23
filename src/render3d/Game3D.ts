@@ -12,7 +12,8 @@ import { AdaptiveQuality, probeDevice, profileOf, suggestPreset } from '../core/
 import { input } from '../core/input';
 import { PerfMeter } from '../core/perf';
 import { settings } from '../core/settings';
-import { DAY_SECONDS } from '../core/systems/daynight';
+import { DAY_SECONDS, smooth } from '../core/systems/daynight';
+import { CAVE_X0 } from '../core/world/areas';
 import { HeroCore, type HeroInput } from '../core/entities/HeroCore';
 import { Collision } from '../core/world/collision';
 import { GeneratedWorld } from '../core/world/worldgen';
@@ -20,6 +21,7 @@ import type { DiagnosticsSource } from '../ui/diagnostics';
 import { HeroMesh3D } from './HeroMesh3D';
 import { IsoCamera } from './IsoCamera';
 import { PixelRenderer } from './PixelRenderer';
+import { Sky } from './Sky';
 import { World3D } from './World3D';
 import { u } from './worldPlan';
 
@@ -31,6 +33,7 @@ export class Game3D {
   readonly camera = new IsoCamera();
   readonly world = new GeneratedWorld();
   readonly collision = new Collision(this.world);
+  readonly sky: Sky;
   readonly scene3d: World3D;
   readonly hero: HeroCore;
   readonly heroMesh: HeroMesh3D;
@@ -49,6 +52,8 @@ export class Game3D {
 
   constructor(parent: HTMLElement) {
     this.pixels = new PixelRenderer(parent);
+    // Created before the world: materials compiled afterwards then include the fog chunks.
+    this.sky = new Sky(this.pixels.scene);
     this.scene3d = new World3D(this.pixels.scene, this.world, this.tileSheet);
 
     /*
@@ -126,8 +131,17 @@ export class Game3D {
       this.adaptive.update(dt, settings.get('preset'));
     }
     this.heroMesh.update(this.paused ? 0 : dt, dt, this.hero, this.clock);
-    this.scene3d.update(this.dayTime, this.camera.target);
+    const cave = this.caveWeight();
+    const [fogNear, fogFar] = this.camera.fogRange();
+    this.sky.update(this.dayTime, cave, fogNear, fogFar);
+    this.pixels.renderer.setClearColor(this.sky.haze, 1);
+    this.scene3d.update(this.dayTime, this.camera.target, cave);
     this.pixels.render(this.camera.camera);
+  }
+
+  /** 0 outside, 1 deep in the cave — the same curve the 2D renderer uses for its lightmap. */
+  private caveWeight(): number {
+    return smooth(CAVE_X0 - 6, CAVE_X0 + 3, this.hero.x / 16);
   }
 
   /**
@@ -183,6 +197,7 @@ export class Game3D {
       `area: ${this.world.areaAt(Math.floor(this.hero.x / 16), Math.floor(this.hero.y / 16))}`,
       `kamera: sudut ${this.camera.pitch}\u00b0  zoom ${this.camera.zoom.toFixed(2)}x  ` +
         `target (${this.camera.target.x.toFixed(1)}, ${this.camera.target.z.toFixed(1)})  radius pandang ${this.camera.viewRadius.toFixed(1)} unit`,
+      `kabut: ${this.sky.fog.near.toFixed(0)} - ${this.sky.fog.far.toFixed(0)} (gua ${(this.caveWeight() * 100).toFixed(0)}%)`,
     ];
   }
 
@@ -192,6 +207,7 @@ export class Game3D {
     window.removeEventListener('resize', this.onResize);
     this.unsubscribe();
     this.camera.dispose();
+    this.sky.dispose();
     this.heroMesh.dispose();
     this.scene3d.dispose();
     this.pixels.dispose();
