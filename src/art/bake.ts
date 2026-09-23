@@ -105,3 +105,33 @@ export function bakeChunk(world: WorldSource, sheet: Sheet, cx: number, cy: numb
   }
   return out;
 }
+
+
+/**
+ * A 16x16 mask of where the water is in one chunk: one texel per tile, alpha marks water and the
+ * red channel says how deep (0 = shallow, 1 = open water).
+ *
+ * The 3D renderer lays a rippling surface over the baked ground and uses this to know which tiles
+ * it may touch. One byte per tile is all the resolution needed — the ripple pattern itself comes
+ * from world coordinates, not from this texture.
+ */
+export function bakeWaterMask(world: WorldSource, cx: number, cy: number): Pixmap {
+  const pm = new Pixmap(CHUNK_TILES, CHUNK_TILES);
+  let any = false;
+  for (let ty = 0; ty < CHUNK_TILES; ty++)
+    for (let tx = 0; tx < CHUNK_TILES; tx++) {
+      const t = world.tileAt(cx * CHUNK_TILES + tx, cy * CHUNK_TILES + ty);
+      if (!isWater(t)) continue;
+      any = true;
+      pm.set(tx, ty, t === T.WATER ? 0xff0000 : 0x000000, 255);
+    }
+  return any ? pm : new Pixmap(0, 0);
+}
+
+/** True when a chunk has any water at all, so the renderer can skip the overlay entirely. */
+export function chunkHasWater(world: WorldSource, cx: number, cy: number): boolean {
+  for (let ty = 0; ty < CHUNK_TILES; ty++)
+    for (let tx = 0; tx < CHUNK_TILES; tx++)
+      if (isWater(world.tileAt(cx * CHUNK_TILES + tx, cy * CHUNK_TILES + ty))) return true;
+  return false;
+}

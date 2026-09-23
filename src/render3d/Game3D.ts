@@ -11,12 +11,13 @@ import { AdaptiveQuality, probeDevice, profileOf, suggestPreset } from '../core/
 import { input } from '../core/input';
 import { PerfMeter } from '../core/perf';
 import { settings } from '../core/settings';
-import { DAY_SECONDS, smooth } from '../core/systems/daynight';
-import { CAVE_X0 } from '../core/world/areas';
+import { DAY_SECONDS, nightAmount, smooth } from '../core/systems/daynight';
+import { CAVE_X0, FOREST_X0 } from '../core/world/areas';
 import { HeroCore, type HeroInput } from '../core/entities/HeroCore';
 import { Collision } from '../core/world/collision';
 import { GeneratedWorld } from '../core/world/worldgen';
 import type { DiagnosticsSource } from '../ui/diagnostics';
+import { Environment } from './Environment';
 import { HeroMesh3D } from './HeroMesh3D';
 import { IsoCamera } from './IsoCamera';
 import { PixelRenderer } from './PixelRenderer';
@@ -33,6 +34,7 @@ export class Game3D {
   readonly world = new GeneratedWorld();
   readonly collision = new Collision(this.world);
   readonly sky: Sky;
+  readonly environment: Environment;
   readonly scene3d: World3D;
   readonly hero: HeroCore;
   readonly heroMesh: HeroMesh3D;
@@ -54,6 +56,7 @@ export class Game3D {
     // Created before the world: materials compiled afterwards then include the fog chunks.
     this.sky = new Sky(this.pixels.scene);
     this.scene3d = new World3D(this.pixels.scene, this.world, this.tileSheet);
+    this.environment = new Environment(this.pixels.scene);
 
     const start = this.world.markers.playerStart;
     this.hero = new HeroCore(start.x, start.y);
@@ -89,6 +92,10 @@ export class Game3D {
     const p = profileOf(settings.get('preset'));
     this.pixels.setOutline(p.outline);
     this.scene3d.setLightBudget(LIGHT_BUDGET[p.id] ?? 4);
+    // The bottom preset stands still: swaying every blade costs vertex work.
+    this.scene3d.setWind(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.6 : 1);
+    this.scene3d.setWater(p.id !== 'vlow');
+    this.environment.setBudget(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.5 : 1);
     this.scene3d.setShadows(p.shadows);
     this.resize();
     this.scene3d.setRenderDistance(this.chunkRadius());
@@ -140,13 +147,25 @@ export class Game3D {
     this.sky.update(this.dayTime, cave, fogNear, fogFar);
     this.pixels.renderer.setClearColor(this.sky.haze, 1);
     this.scene3d.setRenderDistance(this.chunkRadius());
-    this.scene3d.update(this.dayTime, this.camera.target, cave, this.paused ? 0 : 1);
+    this.scene3d.setHeroGround(u(this.hero.x), u(this.hero.y));
+    this.scene3d.update(this.dayTime, this.camera.target, cave, this.paused ? 0 : 1, dt);
+    // the water reflects whatever the sky is doing, and fogs out with everything else
+    this.scene3d.waterUniforms.uSky.value.copy(this.sky.haze);
+    this.scene3d.waterUniforms.uFogColor.value.copy(this.sky.haze);
+    this.scene3d.waterUniforms.uFogRange.value.set(this.sky.fog.near, this.sky.fog.far);
+    this.environment.update(dt, this.camera.target, nightAmount(this.dayTime), cave, this.forestWeight(), this.sky.haze);
     this.pixels.render(this.camera.camera);
   }
 
   /** 0 outside, 1 deep in the cave — the same curve the 2D renderer uses for its lightmap. */
   private caveWeight(): number {
     return smooth(CAVE_X0 - 6, CAVE_X0 + 3, this.hero.x / 16);
+  }
+
+  /** 0 in the village, 1 deep in the forest; drives how thick the ground mist gets. */
+  private forestWeight(): number {
+    const tx = this.hero.x / 16;
+    return smooth(FOREST_X0 - 8, FOREST_X0 + 8, tx) * (1 - smooth(CAVE_X0 - 8, CAVE_X0 - 2, tx));
   }
 
   /**
@@ -197,7 +216,8 @@ export class Game3D {
       `grid pixel: ${plan.pixelW}x${plan.pixelH} (zoom ${plan.zoom})`,
       `render target: ${plan.renderW}x${plan.renderH}`,
       `chunk dimuat: ${s.chunks} (radius ${this.chunkRadius()}, antre ${s.queued})   instance: ${s.instances}   ` +
-        `draw group: ${s.draws} (${s.pools} pool)   lampu: ${s.lights}`,
+        `draw group: ${s.draws} (${s.pools} pool, ${s.water} air)   lampu: ${s.lights}`,
+      `atmosfer: malam ${(nightAmount(this.dayTime) * 100).toFixed(0)}%   hutan ${(this.forestWeight() * 100).toFixed(0)}%`,
       `outline tersedia: ${this.pixels.canOutline ? 'ya' : 'tidak'}`,
       `hero: (${Math.round(this.hero.x)}, ${Math.round(this.hero.y)}) hp ${this.hero.hp}/${this.hero.maxHp} state ${this.hero.state}`,
       `area: ${this.world.areaAt(Math.floor(this.hero.x / 16), Math.floor(this.hero.y / 16))}`,
@@ -214,6 +234,7 @@ export class Game3D {
     this.unsubscribe();
     this.camera.dispose();
     this.sky.dispose();
+    this.environment.dispose();
     this.heroMesh.dispose();
     this.scene3d.dispose();
     this.pixels.dispose();

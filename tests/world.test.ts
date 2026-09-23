@@ -3,6 +3,7 @@ import { test } from 'vitest';
 import { TILE, WORLD_CHUNKS_H, WORLD_CHUNKS_W } from '../src/config';
 import { GeneratedWorld } from '../src/core/world/worldgen';
 import type { WorldSource } from '../src/core/world/source';
+import type { PropPlacement } from '../src/core/world/props';
 
 const world = new GeneratedWorld();
 
@@ -100,7 +101,7 @@ test('the world is the size Batch 2 grew it to, with all three areas', () => {
 });
 
 test('the landmarks worth exploring exist and are spread out', () => {
-  const props = [];
+  const props: PropPlacement[] = [];
   for (let cy = 0; cy < WORLD_CHUNKS_H; cy++) for (let cx = 0; cx < WORLD_CHUNKS_W; cx++) props.push(...world.chunk(cx, cy).props);
   const count = (type: string): number => props.filter((p) => p.type === type).length;
 

@@ -22,6 +22,9 @@ export const u = (px: number): number => px * UNITS_PER_PX;
 
 export type ShapeKind = 'box' | 'prism';
 
+/** Textures whose shapes bend in the wind and part when the hero walks through them. */
+export const VEGETATION: ReadonlySet<GreyboxTexture> = new Set<GreyboxTexture>(['leaf']);
+
 export interface ShapeInstance {
   kind: ShapeKind;
   /** Centre of the shape, in world units. */
@@ -49,6 +52,8 @@ export interface PointLightPlan {
   radius: number;
   intensity: number;
   nightOnly: boolean;
+  /** 0 = steady, higher = a livelier flame. Straight from the 2D light definition. */
+  flicker: number;
 }
 
 export interface WorldPlan {
@@ -186,6 +191,7 @@ function propLight(p: PropPlacement, out: PointLightPlan[]): void {
     radius: u(def.radius),
     intensity: def.strength,
     nightOnly: !!def.nightOnly,
+    flicker: def.flicker ?? 0,
   });
 }
 

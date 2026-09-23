@@ -14,7 +14,7 @@
  */
 import * as THREE from 'three';
 import { CHUNK_PX, CHUNK_TILES } from '../config';
-import { bakeChunk } from '../art/bake';
+import { bakeChunk, bakeWaterMask, chunkHasWater } from '../art/bake';
 import { buildGreyboxTextures, type GreyboxTexture } from '../art/greybox';
 import type { Sheet } from '../art/sheet';
 import { ambientAt, blendAmbient, nightAmount } from '../core/systems/daynight';
@@ -23,7 +23,8 @@ import type { WorldSource } from '../core/world/source';
 import { InstancePool } from './InstancePool';
 import { FADE_LIFT, FADE_RADIUS } from './occlusion';
 import { pixmapTexture } from './textures';
-import { groupKeyOf, planChunk, u, type ChunkPlan, type PointLightPlan, type ShapeKind } from './worldPlan';
+import { makeWaterUniforms, WaterSurface, type WaterUniforms } from './WaterSurface';
+import { groupKeyOf, planChunk, u, VEGETATION, type ChunkPlan, type PointLightPlan, type ShapeKind } from './worldPlan';
 
 /**
  * Per-instance UV scaling. Without it a 16x16 texture stretches across whatever face it lands on
@@ -37,6 +38,43 @@ const UV_SCALE_CHUNK = /* glsl */ `
     ? vec2(aSize.x, aSize.z)
     : (faceNormal.x > 0.5 ? vec2(aSize.z, aSize.y) : vec2(aSize.x, aSize.y));
   vMapUv *= uvScale;
+#endif
+`;
+
+/**
+ * Wind, in the vertex shader (docs/OVERHAUL.md §4 "lingkungan hidup": animated with instancing,
+ * never a JS loop per blade).
+ *
+ * Every instance bends by a two-frequency gust whose phase comes from its own world position, so a
+ * field of grass never moves in unison. The bend is weighted by height inside the shape — the base
+ * stays planted — and divided by the instance's size so a big tree crown and a tuft of grass lean
+ * by the same number of world units rather than by the same fraction of themselves.
+ *
+ * The hero pushes vegetation aside with the same formula, which is why walking through long grass
+ * parts it: nothing about that is simulated on the CPU.
+ */
+const SWAY_VERTEX = /* glsl */ `
+#ifdef LM_SWAY
+  {
+    vec3 lmInstPos = instanceMatrix[3].xyz;
+    float lmHeight = clamp(position.y + 0.5, 0.0, 1.0);
+    float lmPhase = lmInstPos.x * 0.33 + lmInstPos.z * 0.21;
+    float lmGust = sin(uTime * 1.3 + lmPhase) * 0.6 + sin(uTime * 2.9 + lmPhase * 1.7) * 0.4;
+    vec2 lmBend = uWind * lmGust;
+    vec2 lmAway = lmInstPos.xz - uHeroPos;
+    float lmPush = 1.0 - smoothstep(0.0, uPushRadius, length(lmAway));
+    lmBend += normalize(lmAway + vec2(0.0001, 0.0)) * lmPush * 0.6;
+    lmBend *= lmHeight * uSway;
+    transformed.x += lmBend.x / max(aSize.x, 0.001);
+    transformed.z += lmBend.y / max(aSize.z, 0.001);
+  }
+#endif
+`;
+
+/** Lantern glass and crystals breathe a little, on their own phase. */
+const PULSE_FRAGMENT = /* glsl */ `
+#ifdef LM_PULSE
+  diffuseColor.rgb *= 0.86 + 0.14 * sin(uTime * 5.5 + vOccView.x * 2.3 + vOccView.y * 1.7);
 #endif
 `;
 
@@ -88,22 +126,45 @@ export interface OcclusionUniforms {
   uFadeOn: { value: number };
 }
 
-function patchInstanceMaterial(material: THREE.Material, occlusion: OcclusionUniforms): void {
+/** Shared by every instanced material: one place to advance time and the wind. */
+export interface EnvUniforms {
+  uTime: { value: number };
+  /** Wind displacement in world units, already including strength and direction. */
+  uWind: { value: THREE.Vector2 };
+  /** Hero position on the ground (x, z). */
+  uHeroPos: { value: THREE.Vector2 };
+  uPushRadius: { value: number };
+}
+
+interface PatchOpts {
+  /** Bends in the wind and parts around the hero. */
+  sway: number;
+  /** Brightness breathes on its own phase (lantern glass, crystals). */
+  pulse: boolean;
+}
+
+function patchInstanceMaterial(material: THREE.Material, occlusion: OcclusionUniforms, env: EnvUniforms, opts: PatchOpts): void {
+  const defines = `${opts.sway > 0 ? '#define LM_SWAY\n' : ''}${opts.pulse ? '#define LM_PULSE\n' : ''}`;
   material.onBeforeCompile = (shader) => {
-    shader.vertexShader = `attribute vec3 aSize;\nvarying vec3 vOccView;\n${shader.vertexShader}`
+    shader.vertexShader = `${defines}attribute vec3 aSize;\nvarying vec3 vOccView;\nuniform float uTime;\nuniform vec2 uWind;\nuniform vec2 uHeroPos;\nuniform float uPushRadius;\nuniform float uSway;\n${shader.vertexShader}`
       .replace('#include <uv_vertex>', `#include <uv_vertex>\n${UV_SCALE_CHUNK}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${SWAY_VERTEX}`)
       .replace('#include <project_vertex>', '#include <project_vertex>\n  vOccView = mvPosition.xyz;');
-    shader.fragmentShader = `${OCCLUSION_PARS}${shader.fragmentShader}`.replace(
-      'void main() {',
-      `void main() {\n${OCCLUSION_FRAGMENT}`,
-    );
+    shader.fragmentShader = `${defines}${OCCLUSION_PARS}uniform float uTime;\n${shader.fragmentShader}`
+      .replace('void main() {', `void main() {\n${OCCLUSION_FRAGMENT}`)
+      .replace('#include <map_fragment>', `#include <map_fragment>\n${PULSE_FRAGMENT}`);
     // Shared uniform objects: updating `.value` once reaches every patched material.
     shader.uniforms.uHeroView = occlusion.uHeroView;
     shader.uniforms.uFadeRadius = occlusion.uFadeRadius;
     shader.uniforms.uFadeOn = occlusion.uFadeOn;
+    shader.uniforms.uTime = env.uTime;
+    shader.uniforms.uWind = env.uWind;
+    shader.uniforms.uHeroPos = env.uHeroPos;
+    shader.uniforms.uPushRadius = env.uPushRadius;
+    shader.uniforms.uSway = { value: opts.sway };
   };
-  // Instances differing only in per-instance data still share one program.
-  material.customProgramCacheKey = () => 'lm-instance';
+  // Materials with different injected code must not share a compiled program.
+  material.customProgramCacheKey = () => `lm-instance|${opts.sway > 0 ? 's' : ''}${opts.pulse ? 'p' : ''}`;
 }
 
 const keyOf = (cx: number, cy: number): number => cy * 1000 + cx;
@@ -114,6 +175,8 @@ interface LoadedChunk3D {
   ground: THREE.Mesh;
   texture: THREE.Texture;
   material: THREE.Material;
+  /** Only chunks with water get a rippling overlay. */
+  water: WaterSurface | null;
   lights: PointLightPlan[];
 }
 
@@ -124,6 +187,9 @@ export class World3D {
   private poolGeometries: THREE.BufferGeometry[] = [];
   private poolMaterials: THREE.Material[] = [];
   private groundGeometry: THREE.PlaneGeometry;
+  private waterGeometry: THREE.PlaneGeometry;
+  readonly waterUniforms: WaterUniforms = makeWaterUniforms();
+  private waterEnabled = true;
 
   private loaded = new Map<number, LoadedChunk3D>();
   private planCache = new Map<number, ChunkPlan>();
@@ -136,6 +202,17 @@ export class World3D {
   private hemi = new THREE.HemisphereLight(0xbfd4ff, 0x3a2f5e, 1);
   private sun = new THREE.DirectionalLight(0xfff2c0, 1.1);
   private pool: THREE.PointLight[] = [];
+
+  private readonly env: EnvUniforms = {
+    uTime: { value: 0 },
+    uWind: { value: new THREE.Vector2(0.18, 0.07) },
+    uHeroPos: { value: new THREE.Vector2(-1e4, -1e4) },
+    uPushRadius: { value: 1.6 },
+  };
+  /** Wind strength, 0..1; the preset can calm it down or switch it off. */
+  private windStrength = 1;
+  /** Real seconds, for wind and flicker (keeps running while the simulation is frozen). */
+  private clock = 0;
 
   private readonly occlusion: OcclusionUniforms = {
     uHeroView: { value: new THREE.Vector3(0, 0, -1e9) },
@@ -157,6 +234,8 @@ export class World3D {
 
     this.groundGeometry = new THREE.PlaneGeometry(CHUNK_TILES, CHUNK_TILES);
     this.groundGeometry.rotateX(-Math.PI / 2);
+    this.waterGeometry = new THREE.PlaneGeometry(CHUNK_TILES, CHUNK_TILES);
+    this.waterGeometry.rotateX(-Math.PI / 2);
   }
 
   // ───────────────────────── settings ─────────────────────────
@@ -282,9 +361,18 @@ export class World3D {
     ground.receiveShadow = this.shadowsOn;
     this.group.add(ground);
 
+    // rippling surface, only where there is water to ripple
+    let water: WaterSurface | null = null;
+    if (chunkHasWater(this.world, cx, cy)) {
+      const maskTex = pixmapTexture(bakeWaterMask(this.world, cx, cy), { flipRows: true });
+      water = new WaterSurface(this.waterGeometry, maskTex, this.waterUniforms, cx, cy);
+      water.mesh.visible = this.waterEnabled;
+      this.group.add(water.mesh);
+    }
+
     const key = keyOf(cx, cy);
     for (const [groupKey, shapes] of this.byGroup(plan)) this.poolFor(groupKey, shapes[0]).addChunk(key, shapes);
-    this.loaded.set(key, { cx, cy, ground, texture, material, lights: plan.lights });
+    this.loaded.set(key, { cx, cy, ground, texture, material, water, lights: plan.lights });
     this.rebuildLightList();
   }
 
@@ -306,7 +394,10 @@ export class World3D {
     this.poolGeometries.push(geo);
     const map = this.textures[sample.texture]!;
     const mat = sample.emissive ? new THREE.MeshBasicMaterial({ map }) : new THREE.MeshLambertMaterial({ map });
-    patchInstanceMaterial(mat, this.occlusion);
+    patchInstanceMaterial(mat, this.occlusion, this.env, {
+      sway: VEGETATION.has(sample.texture) ? 1 : 0,
+      pulse: !!sample.emissive,
+    });
     this.poolMaterials.push(mat);
     // Room for a generous chunk neighbourhood; the pool doubles itself if a dense area needs more.
     pool = new InstancePool(this.group, geo, mat, 2048, !sample.emissive);
@@ -330,6 +421,7 @@ export class World3D {
     this.group.remove(c.ground);
     c.material.dispose();
     c.texture.dispose();
+    c.water?.dispose();
     this.loaded.delete(key);
   }
 
@@ -351,10 +443,34 @@ export class World3D {
     this.occlusion.uHeroView.value.set(heroWorld.x, heroWorld.y + FADE_LIFT, heroWorld.z).applyMatrix4(camera.matrixWorldInverse);
   }
 
+  /** How lively the vegetation is. The `vlow` preset stands still to save vertex work. */
+  setWind(strength: number): void {
+    this.windStrength = Math.max(0, strength);
+  }
+
+  /** Rippling water costs one extra transparent pass per chunk; the bottom preset skips it. */
+  setWater(on: boolean): void {
+    this.waterEnabled = on;
+    for (const c of this.loaded.values()) if (c.water) c.water.mesh.visible = on;
+  }
+
+  /** Where the hero stands, so grass parts around them (world units). */
+  setHeroGround(x: number, z: number): void {
+    this.env.uHeroPos.value.set(x, z);
+  }
+
   /** Stream, then colour the world for the time of day and move the light pool. */
-  update(dayTime: number, focus: THREE.Vector3, cave = 0, loadBudget = 1): void {
+  update(dayTime: number, focus: THREE.Vector3, cave = 0, loadBudget = 1, realDt = 0): void {
     this.stream(focus.x, focus.z);
     this.step(loadBudget);
+
+    // Wind: a slow swing in direction on top of a steady breeze, so gusts never feel mechanical.
+    this.clock += realDt;
+    this.env.uTime.value = this.clock;
+    const swing = Math.sin(this.clock * 0.13) * 0.35 + Math.sin(this.clock * 0.041) * 0.2;
+    const calm = 1 - cave * 0.8; // barely a draught underground
+    this.env.uWind.value.set(Math.cos(swing) * 0.2, Math.sin(swing) * 0.2).multiplyScalar(this.windStrength * calm);
+    this.waterUniforms.uTime.value = this.clock;
 
     const amb = blendAmbient(ambientAt(dayTime), AREAS.cave.ambient, cave);
     // Inside the cave the sun is irrelevant: torches and crystals do the lighting.
@@ -383,21 +499,29 @@ export class World3D {
       p.position.set(l.x, l.y, l.z);
       p.color.setHex(l.color);
       p.distance = l.radius;
-      p.intensity = l.intensity * (l.nightOnly ? Math.min(1, night * 2) : 1) * 2.2;
+      // Torches and shrine flames breathe, each on its own phase, using the 2D flicker amounts.
+      const phase = l.x * 0.13 + l.z * 0.29;
+      const flick = l.flicker
+        ? 1 + l.flicker * (Math.sin(this.clock * 9 + phase) * 0.6 + Math.sin(this.clock * 23 + phase * 1.7) * 0.4)
+        : 1;
+      p.intensity = l.intensity * flick * (l.nightOnly ? Math.min(1, night * 2) : 1) * 2.2;
     });
   }
 
   /** For the report. */
-  stats(): { chunks: number; queued: number; instances: number; draws: number; lights: number; pools: number } {
+  stats(): { chunks: number; queued: number; instances: number; draws: number; lights: number; pools: number; water: number } {
     let instances = 0;
     for (const p of this.pools.values()) instances += p.liveCount;
+    let water = 0;
+    for (const c of this.loaded.values()) if (c.water?.mesh.visible) water++;
     return {
       chunks: this.loaded.size,
       queued: this.queue.length,
       instances,
-      draws: this.loaded.size + this.pools.size,
+      draws: this.loaded.size + this.pools.size + water,
       lights: this.pool.length,
       pools: this.pools.size,
+      water,
     };
   }
 
@@ -410,6 +534,7 @@ export class World3D {
     this.poolGeometries = [];
     this.poolMaterials = [];
     this.groundGeometry.dispose();
+    this.waterGeometry.dispose();
     for (const t of Object.values(this.textures)) t?.dispose();
     this.textures = {};
     this.planCache.clear();

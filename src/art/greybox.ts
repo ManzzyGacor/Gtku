@@ -107,3 +107,33 @@ export function buildGreyboxTextures(): Record<GreyboxTexture, Pixmap> {
     glow: glowPanel(SIZE),
   };
 }
+
+
+/**
+ * Soft tiling noise for the drifting ground fog, stored in the alpha channel so it can be
+ * scrolled and layered without tinting anything. Two octaves keep it from looking like a grid.
+ */
+export function buildFogNoise(size = 32): Pixmap {
+  const pm = new Pixmap(size, size);
+  const smooth = (x: number, y: number, period: number, seed: number): number => {
+    const sx = x / period;
+    const sy = y / period;
+    const x0 = Math.floor(sx);
+    const y0 = Math.floor(sy);
+    const fx = sx - x0;
+    const fy = sy - y0;
+    const ex = fx * fx * (3 - 2 * fx);
+    const ey = fy * fy * (3 - 2 * fy);
+    const cells = size / period;
+    const at = (ix: number, iy: number): number => tileNoise(ix, iy, cells, cells, seed);
+    const a = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * ex;
+    const b = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * ex;
+    return a + (b - a) * ey;
+  };
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const n = smooth(x, y, size / 4, 31) * 0.65 + smooth(x, y, size / 8, 37) * 0.35;
+      pm.set(x, y, 0xffffff, Math.round(Math.max(0, Math.min(1, (n - 0.25) / 0.6)) * 255));
+    }
+  return pm;
+}
