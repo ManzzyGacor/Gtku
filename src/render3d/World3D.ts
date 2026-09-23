@@ -17,6 +17,7 @@ import type { Sheet } from '../art/sheet';
 import { ambientAt, blendAmbient, nightAmount } from '../core/systems/daynight';
 import { AREAS } from '../core/world/areas';
 import type { TileRect, WorldSource } from '../core/world/source';
+import { FADE_LIFT, FADE_RADIUS } from './occlusion';
 import { pixmapTexture } from './textures';
 import { countKinds, groupShapes, planArea, u, type ShapeKind, type WorldPlan } from './worldPlan';
 
@@ -35,15 +36,83 @@ const UV_SCALE_CHUNK = /* glsl */ `
 #endif
 `;
 
-function patchUvScale(material: THREE.Material): void {
+/**
+ * Cut a hole in whatever stands between the camera and the hero.
+ *
+ * A fixed 3/4 camera means roofs, tree crowns and cave walls regularly park themselves in front of
+ * the player. Rather than raycasting and fading whole objects on the CPU, each fragment asks: am I
+ * nearer the camera than the hero, and do I sit within an ellipse around the hero on screen? If so
+ * it dissolves away. The dissolve is an ordered 4x4 dither and a `discard`, not alpha blending —
+ * that keeps the pixel-art look, needs no transparency sorting, and leaves the depth buffer clean
+ * so the outline pass still works.
+ *
+ * `vOccView` is the fragment's view-space position; under an orthographic camera its xy *is* the
+ * screen position, which is what makes the test this cheap.
+ */
+/**
+ * Cut a hole in whatever stands between the camera and the hero.
+ *
+ * A fixed 3/4 camera means roofs, tree crowns and cave walls regularly park themselves in front of
+ * the player. Rather than raycasting and fading whole objects on the CPU, each fragment asks: am I
+ * nearer the camera than the hero, and do I sit within an ellipse around the hero on screen? If so
+ * it dissolves away. The dissolve is an ordered 4x4 dither plus `discard`, not alpha blending —
+ * that keeps the pixel-art look, needs no transparency sorting, and leaves the depth buffer clean
+ * so the outline pass still draws a proper silhouette.
+ *
+ * `vOccView` is the fragment's view-space position; under an orthographic camera its xy *is* the
+ * screen position, which is what makes the test this cheap. The same rule lives as plain
+ * arithmetic in `occlusion.ts`, where it can be unit-tested.
+ */
+const OCCLUSION_PARS = /* glsl */ `
+varying vec3 vOccView;
+uniform vec3 uHeroView;
+uniform vec2 uFadeRadius;
+uniform float uFadeOn;
+
+// Bayer recursion M2n = [[4*Mn, 4*Mn+2], [4*Mn+3, 4*Mn+1]] with M2 = [[0,2],[3,1]],
+// as arithmetic because GLSL ES 1.0 has no bit operations or dynamic array indexing.
+float lmBayer2(float x, float y) {
+  float d = mod(x + y, 2.0);
+  return d * (2.0 + y) + (1.0 - d) * x;
+}
+
+float lmDither(vec2 p) {
+  vec2 lo = mod(p, 2.0);
+  vec2 hi = mod(floor(p * 0.5), 2.0);
+  return (4.0 * lmBayer2(lo.x, lo.y) + lmBayer2(hi.x, hi.y) + 0.5) / 16.0;
+}
+`;
+
+const OCCLUSION_FRAGMENT = /* glsl */ `
+  if (uFadeOn > 0.5 && vOccView.z > uHeroView.z + 0.2) {
+    vec2 delta = (vOccView.xy - uHeroView.xy) / uFadeRadius;
+    float cover = 1.0 - clamp(dot(delta, delta), 0.0, 1.0);
+    if (cover > 0.01 && cover > lmDither(floor(gl_FragCoord.xy))) discard;
+  }
+`;
+
+export interface OcclusionUniforms {
+  uHeroView: { value: THREE.Vector3 };
+  uFadeRadius: { value: THREE.Vector2 };
+  uFadeOn: { value: number };
+}
+
+function patchInstanceMaterial(material: THREE.Material, occlusion: OcclusionUniforms): void {
   material.onBeforeCompile = (shader) => {
-    shader.vertexShader = `attribute vec3 aSize;\n${shader.vertexShader}`.replace(
-      '#include <uv_vertex>',
-      `#include <uv_vertex>\n${UV_SCALE_CHUNK}`,
+    shader.vertexShader = `attribute vec3 aSize;\nvarying vec3 vOccView;\n${shader.vertexShader}`
+      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${UV_SCALE_CHUNK}`)
+      .replace('#include <project_vertex>', '#include <project_vertex>\n  vOccView = mvPosition.xyz;');
+    shader.fragmentShader = `${OCCLUSION_PARS}${shader.fragmentShader}`.replace(
+      'void main() {',
+      `void main() {\n${OCCLUSION_FRAGMENT}`,
     );
+    // Shared uniform objects: updating `.value` once reaches every patched material.
+    shader.uniforms.uHeroView = occlusion.uHeroView;
+    shader.uniforms.uFadeRadius = occlusion.uFadeRadius;
+    shader.uniforms.uFadeOn = occlusion.uFadeOn;
   };
   // Instances with different UV scaling still share one program.
-  material.customProgramCacheKey = () => 'uvscale';
+  material.customProgramCacheKey = () => 'lm-instance';
 }
 
 export class World3D {
@@ -59,6 +128,12 @@ export class World3D {
   private sun = new THREE.DirectionalLight(0xfff2c0, 1.1);
   private pool: THREE.PointLight[] = [];
   private plan: WorldPlan | null = null;
+  /** Shared by every instanced material; see `OCCLUSION_FRAGMENT`. */
+  private readonly occlusion: OcclusionUniforms = {
+    uHeroView: { value: new THREE.Vector3(0, 0, -1e9) },
+    uFadeRadius: { value: new THREE.Vector2(FADE_RADIUS.x, FADE_RADIUS.y) },
+    uFadeOn: { value: 1 },
+  };
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -168,7 +243,7 @@ export class World3D {
       const mat = g.emissive
         ? new THREE.MeshBasicMaterial({ map })
         : new THREE.MeshLambertMaterial({ map });
-      patchUvScale(mat);
+      patchInstanceMaterial(mat, this.occlusion);
       this.materials.push(mat);
 
       const mesh = new THREE.InstancedMesh(geo, mat, g.shapes.length);
@@ -191,6 +266,17 @@ export class World3D {
       this.group.add(mesh);
       this.instanced.push(mesh);
     }
+  }
+
+  /**
+   * Tell the shaders where the hero is, in view space, so anything in front of them dissolves.
+   * Called once per frame; the cost is one matrix transform, not a raycast.
+   */
+  setHeroOcclusion(heroWorld: THREE.Vector3, camera: THREE.Camera, enabled = true): void {
+    this.occlusion.uFadeOn.value = enabled ? 1 : 0;
+    if (!enabled) return;
+    // aim at the hero's middle, not their feet
+    this.occlusion.uHeroView.value.set(heroWorld.x, heroWorld.y + FADE_LIFT, heroWorld.z).applyMatrix4(camera.matrixWorldInverse);
   }
 
   // ───────────────────────── per frame ─────────────────────────

@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
+import * as THREE from 'three';
 import { TILE, WORLD_TILES_H } from '../src/config';
 import { planDisplay } from '../src/core/display';
 import { FOREST_X0 } from '../src/core/world/areas';
@@ -216,4 +217,61 @@ test('ground textures upload with their rows flipped, so north stays north', () 
   assert.equal(bytes(flipped).length, bytes(plain).length);
   // the source pixmap must not be modified
   assert.equal(pm.colorAt(0, 0), 0xff0000);
+});
+
+test('the hero cutout only touches things between the camera and the hero', async () => {
+  const { coverAmount, isCutOut, ditherThreshold, FADE_RADIUS, FADE_BIAS } = await import('../src/render3d/occlusion');
+  const hero = { x: 0, y: 0, z: -70 }; // view space: camera looks down -Z
+
+  assert.equal(coverAmount(hero, hero), 0, 'level with the hero is not "in front of" them');
+  assert.equal(coverAmount({ x: 0, y: 0, z: -70 + FADE_BIAS }, hero), 0, 'nor is the bias band');
+  assert.equal(coverAmount({ x: 0, y: 0, z: -69 }, hero), 1, 'a metre in front of the hero, dead centre');
+  assert.equal(coverAmount({ x: 0, y: 0, z: -80 }, hero), 0, 'behind the hero: never cut');
+
+  // outside the ellipse nothing happens, inside it rises smoothly toward the centre
+  assert.equal(coverAmount({ x: FADE_RADIUS.x, y: 0, z: -69 }, hero), 0, 'exactly on the edge');
+  assert.equal(coverAmount({ x: 9, y: 0, z: -69 }, hero), 0, 'far to the side');
+  const near = coverAmount({ x: 0.3, y: 0.2, z: -69 }, hero);
+  const mid = coverAmount({ x: 0.9, y: 0.5, z: -69 }, hero);
+  assert.ok(near > mid && mid > 0, `cover should fall off outward (${near} > ${mid} > 0)`);
+
+  // the dither spreads across the 4x4 cell, so a partly covered object dissolves instead of popping
+  const thresholds = new Set<number>();
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) thresholds.add(ditherThreshold(x, y));
+  assert.ok(thresholds.size >= 8, `dither needs several levels, got ${thresholds.size}`);
+  for (const t of thresholds) assert.ok(t > 0 && t < 1);
+  assert.equal(ditherThreshold(4, 8), ditherThreshold(0, 0), 'the pattern tiles');
+  assert.equal(ditherThreshold(-4, -8), ditherThreshold(0, 0), 'and handles negative coordinates');
+
+  // at half cover roughly half the pixels of a cell survive
+  let cut = 0;
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) if (isCutOut({ x: 0.85, y: 0, z: -69 }, hero, x, y)) cut++;
+  assert.ok(cut > 2 && cut < 14, `partial cover should dissolve, not pop (${cut}/16 pixels cut)`);
+  assert.equal([...Array(16).keys()].filter((i) => isCutOut({ x: 0, y: 0, z: -69 }, hero, i % 4, Math.floor(i / 4))).length, 16, 'full cover removes the whole cell');
+});
+
+test('a tree between the real camera and the hero is cut out; one behind it is not', async () => {
+  const { coverAmount, FADE_LIFT } = await import('../src/render3d/occlusion');
+  settings.reset(['camPitch', 'camZoom']);
+  const cam = new IsoCamera();
+  cam.setViewport(480, 270);
+  const heroWorld = new THREE.Vector3(40, 0, 40);
+  cam.snap(heroWorld.x, heroWorld.z);
+
+  const toView = (p: THREE.Vector3): THREE.Vector3 => p.clone().applyMatrix4(cam.camera.matrixWorldInverse);
+  const heroView = toView(new THREE.Vector3(heroWorld.x, heroWorld.y + FADE_LIFT, heroWorld.z));
+
+  // the camera sits at +x/+z of the target, so "between camera and hero" means a bit toward +x/+z
+  const inFront = toView(new THREE.Vector3(heroWorld.x + 1.4, 1.6, heroWorld.z + 1.4));
+  assert.ok(coverAmount(inFront, heroView) > 0, 'a tree crown right in front of the hero dissolves');
+
+  const behind = toView(new THREE.Vector3(heroWorld.x - 1.4, 1.6, heroWorld.z - 1.4));
+  assert.equal(coverAmount(behind, heroView), 0, 'the same crown on the far side stays solid');
+
+  const offToTheSide = toView(new THREE.Vector3(heroWorld.x + 6, 1.6, heroWorld.z + 6));
+  assert.equal(coverAmount(offToTheSide, heroView), 0, 'and one well off to the side stays solid');
+
+  const ground = toView(new THREE.Vector3(heroWorld.x + 2, 0, heroWorld.z + 2));
+  assert.ok(coverAmount(ground, heroView) < 0.7, 'the ground under the hero is barely touched');
+  cam.dispose();
 });

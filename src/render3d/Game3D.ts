@@ -132,6 +132,7 @@ export class Game3D {
     }
     this.heroMesh.update(this.paused ? 0 : dt, dt, this.hero, this.clock);
     const cave = this.caveWeight();
+    this.scene3d.setHeroOcclusion(this.heroMesh.root.position, this.camera.camera, this.hero.alive);
     const [fogNear, fogFar] = this.camera.fogRange();
     this.sky.update(this.dayTime, cave, fogNear, fogFar);
     this.pixels.renderer.setClearColor(this.sky.haze, 1);
