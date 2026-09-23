@@ -1,7 +1,19 @@
-# CLAUDE.md — Lentera Kelam
+# CLAUDE.md — Lentera Malam
 
-Open-world action RPG 2D top-down pixel art. Ringkasan desain: `docs/GAME_DESIGN.md`. Status pekerjaan: `docs/PROGRESS.md`
-(**perbarui setiap satu fitur selesai**). Kredit aset: `CREDITS.md`.
+Open-world action RPG pixel art. **Sedang dioverhaul dari 2D (Phaser) ke 3D pixel-art (Three.js)** —
+rencana induk & urutan batch: **`docs/OVERHAUL.md` (baca ini dulu)**.
+Ringkasan desain: `docs/GAME_DESIGN.md`. Status pekerjaan: `docs/PROGRESS.md`
+(**perbarui setiap satu fitur selesai**). Kredit aset: `CREDITS.md`. Naskah cerita: `docs/STORY.md`.
+
+## Lingkungan pemain (penting)
+
+- Pemain/penguji **hanya memakai HP Android, tanpa PC**. Mode landscape. **Jangan merencanakan alat
+  desktop** (Blender GUI, Tiled, editor sprite desktop) dan **gamepad bukan prioritas** — utamakan
+  kontrol sentuh.
+- Claude tidak bisa melihat hasil visual. Verifikasi visual & FPS dilakukan pemain di HP lewat menu
+  Pengaturan (penghitung FPS, panel error, tombol "Salin laporan") dan flag URL seperti `?fps=1`.
+- Semua aset harus **original**. Aset CC0 boleh dipakai bila sumber + lisensinya dicatat di `CREDITS.md`.
+- Susun folder aset supaya mudah diganti gambar/model buatan tangan.
 
 ## Stack
 

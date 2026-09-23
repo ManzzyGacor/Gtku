@@ -1,4 +1,4 @@
-# Lentera Kelam — Ringkasan Desain
+# Lentera Malam — Ringkasan Desain
 
 Open-world action RPG 2D top-down bergaya pixel art, terinspirasi rasa "petualangan ringan + aksi cepat" ala Guardian Tales,
 tetapi dengan **visual lebih modern** (pencahayaan dinamis, partikel, bloom, palet lebih kaya).

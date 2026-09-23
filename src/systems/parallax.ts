@@ -27,6 +27,8 @@ export class Parallax {
   private clouds: Layer;
   private motes: Layer;
   private a = { canopy: 0, clouds: 0, motes: 0 };
+  /** The `low` preset turns every layer off. */
+  enabled = true;
 
   constructor(private readonly scene: Phaser.Scene) {
     const rng = makeRng(77);
@@ -73,9 +75,10 @@ export class Parallax {
     const w = this.scene.scale.width;
     const h = this.scene.scale.height;
     const k = 0.08;
-    this.a.canopy += (forest - this.a.canopy) * k;
-    this.a.clouds += (dayOutdoor - this.a.clouds) * k;
-    this.a.motes += (cave - this.a.motes) * k;
+    const on = this.enabled ? 1 : 0;
+    this.a.canopy += (forest * on - this.a.canopy) * k;
+    this.a.clouds += (dayOutdoor * on - this.a.clouds) * k;
+    this.a.motes += (cave * on - this.a.motes) * k;
     this.setLayer(this.canopy, scrollX, scrollY, time, this.a.canopy, w, h);
     this.setLayer(this.clouds, scrollX, scrollY, time, this.a.clouds, w, h);
     this.setLayer(this.motes, scrollX, scrollY, time, this.a.motes, w, h);

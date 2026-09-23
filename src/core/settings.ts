@@ -5,7 +5,8 @@
  * URL parameters override a stored value for the session and lock it in the UI:
  *   ?fps=1  ?bloom=0  ?preset=low|medium|high|ultra  ?q=0|1|2 (legacy, maps to low/medium/high)
  */
-import { SETTINGS_KEY } from '../config';
+import { LEGACY_SETTINGS_KEY, SETTINGS_KEY } from '../config';
+import { readRaw, writeRaw } from './storage';
 
 export type PresetId = 'low' | 'medium' | 'high' | 'ultra';
 export const PRESET_IDS: readonly PresetId[] = ['low', 'medium', 'high', 'ultra'];
@@ -85,8 +86,7 @@ function sanitize(raw: unknown): Partial<Settings> {
 
 function readStored(): Partial<Settings> {
   try {
-    if (typeof localStorage === 'undefined') return {};
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    const raw = readRaw(SETTINGS_KEY, LEGACY_SETTINGS_KEY);
     return raw ? sanitize(JSON.parse(raw)) : {};
   } catch {
     return {};
@@ -155,12 +155,8 @@ export class SettingsStore {
   }
 
   private persist(): void {
-    try {
-      if (typeof localStorage === 'undefined') return;
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.data));
-    } catch {
-      /* private window / blocked storage: settings just don't survive a reload */
-    }
+    // A blocked store just means the settings don't survive a reload.
+    writeRaw(SETTINGS_KEY, JSON.stringify(this.data));
   }
 }
 

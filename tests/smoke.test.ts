@@ -213,7 +213,7 @@ test('returning the crystal to the elder completes the quest and lights the lant
 
 test('save/load round trip restores quest, puzzle and boss state', () => {
   game.saveNow(true);
-  const raw = store.get('lentera-kelam/save/v1');
+  const raw = store.get('lentera-malam/save/v1');
   assert.ok(raw, 'save exists');
   const env2 = makeGame(true);
   run(env2, 60);

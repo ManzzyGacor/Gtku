@@ -50,6 +50,8 @@ export class Lighting {
   vignetteStrength = 0.55;
   /** Update the canvas every N frames (adaptive quality can raise this). */
   everyN = 1;
+  /** How many halos the current preset allows (pool size stays MAX_HALOS). */
+  maxHalos = MAX_HALOS;
   private frameNo = 0;
   private lit = { lantern: false, lanternX: 0, lanternY: 0 };
 
@@ -212,8 +214,9 @@ export class Lighting {
     // halos: the visible "glow" of light sources above the darkness
     const haloK = Math.min(1, 0.22 + night * 0.7 + haloBoost * 0.6);
     let n = 0;
+    const budget = Math.max(0, Math.min(MAX_HALOS, this.maxHalos));
     for (const l of all) {
-      if (n >= MAX_HALOS) break;
+      if (n >= budget) break;
       const hImg = this.halos[n++];
       hImg.setVisible(this.enabled);
       hImg.setPosition(Math.round(l.x - scrollX), Math.round(l.y - scrollY));

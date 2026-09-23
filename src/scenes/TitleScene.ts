@@ -66,7 +66,7 @@ export class TitleScene extends Phaser.Scene {
 
     // title
     pixelText(this, Math.round(w * 0.62), 40, 'LENTERA', { color: 0xffd98a, scale: 4, origin: [0.5, 0], depth: 10 });
-    pixelText(this, Math.round(w * 0.62), 40 + 44, 'KELAM', { color: 0xa795ff, scale: 4, origin: [0.5, 0], depth: 10 });
+    pixelText(this, Math.round(w * 0.62), 40 + 44, 'MALAM', { color: 0xa795ff, scale: 4, origin: [0.5, 0], depth: 10 });
     pixelText(this, Math.round(w * 0.62), 40 + 92, 'Nyalakan kembali cahaya desa', { color: 0xd9cfff, origin: [0.5, 0], depth: 10 });
 
     const opts: { label: string; cont: boolean }[] = [];

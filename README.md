@@ -1,4 +1,4 @@
-# Lentera Kelam
+# Lentera Malam
 
 Open-world action RPG 2D top-down bergaya pixel art (Phaser 4 + TypeScript + Vite). Semua karakter, nama, cerita, dan aset **original**;
 seluruh pixel art dihasilkan lewat kode. Dirancang untuk browser HP Android (landscape) dan keyboard.
