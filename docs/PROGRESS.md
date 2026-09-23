@@ -1,6 +1,52 @@
-# Progress — Fase 1
+# Progress
 
 Legenda: ✅ selesai · 🚧 sedang dikerjakan · ⬜ belum
+
+> Rencana induk & urutan batch: **`docs/OVERHAUL.md`**.
+> Game sedang dioverhaul dari 2D (Phaser) ke 3D pixel-art (Three.js). Versi 2D tetap jalan.
+
+---
+
+## Batch 1 — Fase 0: persiapan (selesai)
+
+Tanpa mengubah tampilan game. 82 tes hijau.
+
+1. ✅ Audit arsitektur + rencana migrasi → `docs/OVERHAUL.md` §6–§7
+2. ✅ Ganti nama **Lentera Kelam → Lentera Malam**, kunci `localStorage` pindah ke
+   `lentera-malam/*` dengan migrasi sekali baca dari kunci lama (save pemain tidak hilang)
+3. ✅ Logika game murni pindah ke `src/core/**` (pemindahan saja; bundle hasil build byte-identik).
+   `tests/core-purity.test.ts` menjaga `src/core` bebas renderer dan hanya boleh mengimpor
+   `src/core/**` + `src/config`
+4. ✅ **Vitest** jadi runner tes (`npm test`), Phaser di-alias ke mock lewat `resolve.alias`
+5. ✅ Preset grafik **AUTO + 5 tingkat** (Sangat Rendah…Ultra): turun saat < 45 fps 3 dtk, naik saat
+   > 57 fps, cooldown 8 dtk, syarat naik berlipat tiap kali turun. Saran preset awal dari kemampuan
+   perangkat (core, memori, WebGL2, ukuran layar)
+6. ✅ **Alat debug**: menu Pengaturan in-game (overlay DOM, netral-renderer), penghitung FPS
+   (rata-rata + terendah + jumlah objek) lewat menu atau `?fps=1`, panel error dengan riwayat
+   12 error terakhir, dan tombol **"Salin laporan"**
+
+### Cara mengetes Fase 0 di HP
+
+- Ketuk **gerigi** di kanan atas → menu Pengaturan. Game ikut berhenti selama menu terbuka.
+- Nyalakan **Penghitung FPS** (atau buka `?fps=1`). Angkanya: rata-rata, `min` = setengah detik
+  terburuk, lalu jumlah objek aktif dan ukuran buffer.
+- Coba ubah **ukuran/posisi joystick**, **ukuran tombol**, dan **ukuran teks**, lalu tutup menu
+  dan main sebentar — semuanya tersimpan dan langsung berlaku.
+- Kalau ada yang aneh: ketuk **Salin laporan** lalu tempel hasilnya ke chat.
+- Gerigi berubah **merah** kalau ada error tercatat; ketuk **Error terakhir → Lihat**.
+
+---
+
+## Sisa Batch 1
+
+- 🚧 Fase 1 — fondasi 3D: renderer Three.js + pipeline pixel, kamera isometrik, Desa Lentera
+  greybox, preset grafik dasar, `?renderer=2d` untuk versi lama
+- ⬜ Fase 2 — player 3D: model & animasi dasar, gerak joystick/keyboard, kamera mengikuti,
+  collision memakai logika yang sudah ada
+
+---
+
+## Fase 1 lama (versi 2D) — selesai
 
 ## Fondasi
 - ✅ Scaffold Phaser 4 + TS + Vite, skala integer, dev server (tmux `game`, host `game.varesa.mom`), dokumen desain, CLAUDE.md
