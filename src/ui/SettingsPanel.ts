@@ -20,6 +20,7 @@ type Row =
   | { kind: 'toggle'; label: string; key: 'bloom' | 'fpsCounter'; hint?: string }
   | { kind: 'number'; label: string; key: NumericKey; fmt: (v: number) => string }
   | { kind: 'choice'; label: string; key: 'preset'; hint?: string }
+  | { kind: 'renderer'; label: string; hint: string }
   | { kind: 'action'; label: string; button: string; run: (panel: SettingsPanel) => void; note?: () => string };
 
 const pct = (v: number): string => `${Math.round(v * 100)}%`;
@@ -35,6 +36,8 @@ const ROWS: Row[] = [
   { kind: 'number', label: 'Joystick atas-bawah', key: 'stickY', fmt: pct },
   { kind: 'number', label: 'Ukuran tombol', key: 'buttonScale', fmt: mult },
   { kind: 'number', label: 'Ukuran teks', key: 'textScale', fmt: (v) => `${v}x` },
+  { kind: 'header', label: 'Mesin tampilan' },
+  { kind: 'renderer', label: 'Renderer', hint: 'Mengganti akan memuat ulang halaman' },
   { kind: 'header', label: 'Diagnostik' },
   { kind: 'toggle', label: 'Penghitung FPS', key: 'fpsCounter', hint: 'Bisa juga lewat ?fps=1' },
   {
@@ -155,7 +158,7 @@ export class SettingsPanel {
       label.appendChild(hint);
       line.appendChild(label);
 
-      const locked = row.kind !== 'action' && settings.isLocked(row.key as keyof Settings);
+      const locked = 'key' in row && settings.isLocked(row.key as keyof Settings);
       if (locked) line.classList.add('lm-locked');
 
       if (row.kind === 'toggle') {
@@ -207,6 +210,18 @@ export class SettingsPanel {
           hint.className = locked ? 'lm-hint lm-lockmsg' : 'lm-hint';
           hint.textContent = locked ? 'dipaksa dari URL' : auto ? `sekarang: ${cur.name} — ${row.hint ?? ''}` : cur.note;
         });
+      } else if (row.kind === 'renderer') {
+        const btn = el('button', {}, '');
+        btn.className = 'lm-btn wide';
+        const rlocked = settings.isLocked('renderer');
+        if (rlocked) line.classList.add('lm-locked');
+        else onTap(btn, () => this.switchRenderer());
+        line.appendChild(btn);
+        this.refreshers.push(() => {
+          btn.textContent = settings.get('renderer') === '3d' ? '3D (baru)' : '2D (lama)';
+          hint.className = rlocked ? 'lm-hint lm-lockmsg' : 'lm-hint';
+          hint.textContent = rlocked ? 'dipaksa dari URL' : row.hint;
+        });
       } else {
         const btn = el('button', {}, row.button);
         btn.className = 'lm-btn wide';
@@ -218,6 +233,15 @@ export class SettingsPanel {
       }
       this.body.appendChild(line);
     }
+  }
+
+  /**
+   * Flip between the 2D and 3D builds. They cannot be hot-swapped (different scene graphs, different
+   * loops), so the page reloads — which is also the only way to be sure nothing of the old one lingers.
+   */
+  private switchRenderer(): void {
+    settings.set('renderer', settings.get('renderer') === '3d' ? '2d' : '3d');
+    if (typeof location !== 'undefined' && typeof location.reload === 'function') location.reload();
   }
 
   /** Cycle AUTO → Sangat Rendah → … → Ultra → AUTO. */
@@ -259,8 +283,10 @@ export class SettingsPanel {
       view: src.view(),
       url: typeof location !== 'undefined' ? location.href : '',
     });
-    const ok = await copyText(text);
-    this.showDump(ok ? `Laporan tersalin ke clipboard. Tempel ke chat.\n\n${text}` : `Clipboard ditolak browser — pilih teks di bawah dan salin manual.\n\n${text}`);
+    const extra = src.report?.() ?? [];
+    const full = extra.length ? `${text}\n\n[RENDERER]\n${extra.join('\n')}` : text;
+    const ok = await copyText(full);
+    this.showDump(ok ? `Laporan tersalin ke clipboard. Tempel ke chat.\n\n${full}` : `Clipboard ditolak browser — pilih teks di bawah dan salin manual.\n\n${full}`);
   }
 
   showErrors(): void {

@@ -14,6 +14,8 @@ export interface DiagnosticsSource {
   view(): { w: number; h: number };
   /** Called when the settings menu opens/closes so gameplay can hold still. */
   setPaused(paused: boolean): void;
+  /** Renderer-specific lines appended to the "Salin laporan" report. */
+  report?(): string[];
 }
 
 /** Stand-in used before a renderer has started (title screen, boot). */
