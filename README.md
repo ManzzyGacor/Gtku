@@ -1,9 +1,22 @@
 # Lentera Malam
 
-Open-world action RPG 2D top-down bergaya pixel art (Phaser 4 + TypeScript + Vite). Semua karakter, nama, cerita, dan aset **original**;
-seluruh pixel art dihasilkan lewat kode. Dirancang untuk browser HP Android (landscape) dan keyboard.
+Open-world action RPG bergaya pixel art. Semua karakter, nama, cerita, dan aset **original**; seluruh pixel art dan
+geometri dihasilkan lewat kode. Dirancang untuk browser HP Android (landscape); keyboard tetap didukung.
 
-## Cara main
+> **Sedang dioverhaul dari 2D ke 3D pixel-art.** Rencana induk dan urutan batch: [`docs/OVERHAUL.md`](docs/OVERHAUL.md).
+
+## Dua mesin tampilan
+
+| Mode | Buka | Isi |
+| --- | --- | --- |
+| **3D** (default) | `?renderer=3d` | Three.js + pipeline pixel, kamera 3/4 isometrik, seluruh dunia greybox bertekstur pixel, player low-poly dengan lentera menyala. Combat, quest, dan NPC menyusul per batch. |
+| **2D** (lengkap) | `?renderer=2d` | Phaser 4 — game utuh: kombat, quest, puzzle, boss, save. Tetap dipertahankan sampai versi 3D menyamainya. |
+
+Ganti mode kapan saja dari **gerigi di pojok kanan atas → Renderer** (halaman dimuat ulang).
+Menu yang sama berisi preset grafik (AUTO + 5 tingkat), penghitung FPS, ukuran/posisi joystick, ukuran tombol,
+ukuran teks, panel error, dan tombol **"Salin laporan"** untuk melaporkan masalah dari HP.
+
+## Cara main (mode 2D)
 
 | Aksi | Sentuh (HP) | Keyboard |
 | --- | --- | --- |

@@ -10,7 +10,7 @@
  * the base follows the thumb when it runs past the edge, which is what works on a phone held in
  * two hands. Its resting position and size come from the settings menu.
  */
-import { input } from '../core/input';
+import { input, type Action } from '../core/input';
 import { settings } from '../core/settings';
 import { el, injectStyle } from './dom';
 
@@ -26,7 +26,30 @@ const CSS = `
   transform: translate(-50%, -50%); transition: opacity 120ms linear; }
 .lm-stick-base { border: 2px solid rgba(242, 226, 194, 0.55); background: rgba(26, 20, 48, 0.35); }
 .lm-stick-knob { background: rgba(242, 226, 194, 0.8); border: 2px solid rgba(255, 248, 230, 0.9); }
+.lm-act { position: absolute; border-radius: 50%; transform: translate(-50%, -50%);
+  display: flex; align-items: center; justify-content: center; touch-action: manipulation;
+  border: 2px solid rgba(242, 226, 194, 0.7); background: rgba(26, 20, 48, 0.55);
+  color: #f2e2c2; font: 11px/1 ui-monospace, monospace; letter-spacing: 0.5px; }
+.lm-act.down { background: rgba(255, 184, 46, 0.85); color: #1a1430; }
 `;
+
+/** The buttons Fase 2 can honestly offer: both drive real `HeroCore` states. */
+interface ActionButton {
+  action: Action;
+  label: string;
+  /** Radius in px at scale 1. */
+  r: number;
+  /** Offset from the bottom-right corner at scale 1. */
+  ox: number;
+  oy: number;
+  node: HTMLDivElement;
+  pointerId: number;
+}
+
+const BUTTONS: { action: Action; label: string; r: number; ox: number; oy: number }[] = [
+  { action: 'attack', label: 'TEBAS', r: 32, ox: 62, oy: 66 },
+  { action: 'dodge', label: 'GESER', r: 24, ox: 132, oy: 44 },
+];
 
 export class TouchControls {
   private root: HTMLDivElement;
@@ -34,6 +57,7 @@ export class TouchControls {
   private knob: HTMLDivElement;
   private pointerId = -1;
   private center = { x: 0, y: 0 };
+  private buttons: ActionButton[] = [];
   private unsubscribe: () => void;
   enabled = true;
 
@@ -46,6 +70,12 @@ export class TouchControls {
     this.knob = el('div');
     this.knob.className = 'lm-stick-knob';
     this.root.append(this.base, this.knob);
+    for (const b of BUTTONS) {
+      const node = el('div', {}, b.label);
+      node.className = 'lm-act';
+      this.root.appendChild(node);
+      this.buttons.push({ ...b, node, pointerId: -1 });
+    }
     parent.appendChild(this.root);
 
     this.root.addEventListener('pointerdown', (e) => this.onDown(e));
@@ -55,7 +85,7 @@ export class TouchControls {
     this.root.addEventListener('lostpointercapture', (e) => this.onUp(e));
 
     this.unsubscribe = settings.on((key) => {
-      if (key === 'stickScale' || key === 'stickX' || key === 'stickY') this.layout();
+      if (key === 'stickScale' || key === 'stickX' || key === 'stickY' || key === 'buttonScale') this.layout();
     });
     this.layout();
   }
@@ -79,6 +109,42 @@ export class TouchControls {
     Object.assign(this.knob.style, { width: `${k * 2}px`, height: `${k * 2}px` });
     this.place(this.center.x, this.center.y, 0, 0);
     this.setIdle(true);
+
+    const bs = settings.get('buttonScale');
+    for (const b of this.buttons) {
+      const r = b.r * bs;
+      Object.assign(b.node.style, {
+        width: `${r * 2}px`,
+        height: `${r * 2}px`,
+        left: `${w - b.ox * bs}px`,
+        top: `${h - b.oy * bs}px`,
+        fontSize: `${Math.max(8, Math.round(9 * bs))}px`,
+      });
+    }
+  }
+
+  /** Which action button is under a screen point, if any. */
+  private hitButton(px: number, py: number): ActionButton | null {
+    const bs = settings.get('buttonScale');
+    for (const b of this.buttons) {
+      const cx = parseFloat(b.node.style.left);
+      const cy = parseFloat(b.node.style.top);
+      if (Math.hypot(px - cx, py - cy) <= b.r * bs + 8) return b;
+    }
+    return null;
+  }
+
+  /** Press an action button as if tapped. Shared by pointer events and the tests. */
+  pressButton(b: ActionButton, down: boolean, pointerId = -1): void {
+    b.pointerId = down ? pointerId : -1;
+    b.node.classList.toggle('down', down);
+    if (down) input.press(b.action);
+    else input.release(b.action);
+  }
+
+  /** The action buttons, for tests and for the HUD to reflect cooldowns later. */
+  get actionButtons(): readonly ActionButton[] {
+    return this.buttons;
   }
 
   private setIdle(idle: boolean): void {
@@ -94,7 +160,14 @@ export class TouchControls {
   }
 
   private onDown(e: PointerEvent): void {
-    if (!this.enabled || this.pointerId >= 0) return;
+    if (!this.enabled) return;
+    const hit = this.hitButton(e.clientX, e.clientY);
+    if (hit) {
+      input.lastDevice = 'touch';
+      this.pressButton(hit, true, e.pointerId);
+      return;
+    }
+    if (this.pointerId >= 0) return;
     if (e.clientX > window.innerWidth * STICK_ZONE) return;
     this.pointerId = e.pointerId;
     this.root.setPointerCapture?.(e.pointerId);
@@ -114,6 +187,7 @@ export class TouchControls {
   }
 
   private onUp(e: PointerEvent): void {
+    for (const b of this.buttons) if (b.pointerId === e.pointerId) this.pressButton(b, false);
     if (e.pointerId !== this.pointerId) return;
     this.pointerId = -1;
     input.stick.x = 0;
@@ -151,6 +225,7 @@ export class TouchControls {
     if (!v) {
       input.stick.x = 0;
       input.stick.y = 0;
+      for (const b of this.buttons) this.pressButton(b, false);
     }
   }
 

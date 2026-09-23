@@ -39,8 +39,9 @@ export interface Settings {
 }
 
 export const DEFAULTS: Settings = {
-  // Still 2D by default: the 3D build becomes the default once it is playable (docs/OVERHAUL.md, Fase 2).
-  renderer: '2d',
+  // 3D is the default from Fase 2 on; `?renderer=2d` (or the settings menu) always gets the
+  // complete 2D game back until the 3D build matches it (docs/OVERHAUL.md §7).
+  renderer: '3d',
   preset: 'medium',
   presetAuto: true,
   fpsCounter: false,

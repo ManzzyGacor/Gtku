@@ -37,12 +37,57 @@ Tanpa mengubah tampilan game. 82 tes hijau.
 
 ---
 
-## Sisa Batch 1
+## Batch 1 — Fase 1: fondasi 3D (selesai)
 
-- 🚧 Fase 1 — fondasi 3D: renderer Three.js + pipeline pixel, kamera isometrik, Desa Lentera
-  greybox, preset grafik dasar, `?renderer=2d` untuk versi lama
-- ⬜ Fase 2 — player 3D: model & animasi dasar, gerak joystick/keyboard, kamera mengikuti,
-  collision memakai logika yang sudah ada
+1. ✅ **Pipeline pixel** (`render3d/PixelRenderer.ts`): scene → render target resolusi rendah →
+   quad nearest → kanvas. Dua tombol terpisah: **pixelHeight** (grid pixel 270/324/360 dari preset)
+   dan **renderScale** (tombol performa). Kanvas diukur kelipatan bulat grid pixel, jadi satu texel
+   jatuh di jumlah device pixel yang utuh. Pass yang sama menggambar **outline pixel** dari
+   perbandingan kedalaman 4 tetangga (butuh WebGL2)
+2. ✅ **Kamera 3/4 isometrik** ortografik, sudut tetap (yaw 45°, pitch 42°), zoom 0,75–1,6,
+   16 px = 1 unit dunia sehingga satu tile menutupi jumlah pixel yang sama seperti versi 2D
+3. ✅ **Dunia greybox bertekstur pixel**: tanah memakai `bakeChunk` yang sama dengan versi 2D
+   (seni tanah 3D benar-benar seni tanah 2D), prop & tembok jadi `InstancedMesh` yang dikelompokkan
+   per (bentuk, tekstur, emissive). Seluruh dunia = 40 chunk, ~6.700 instance, 10 grup draw
+   (cek sendiri: `npx tsx scripts/plan-stats.ts`)
+4. ✅ **Preset grafik dasar 3D**: outline, bayangan matahari, anggaran cahaya dinamis per preset
+5. ✅ **Pemilih renderer**: `?renderer=2d|3d` atau menu Pengaturan; Vite memecah bundle jadi HP
+   hanya mengunduh salah satu (entry 20 kB + boot3d 559 kB **atau** boot2d 1,48 MB)
+
+## Batch 1 — Fase 2: player 3D (selesai)
+
+1. ✅ **Model & animasi** (`render3d/HeroMesh3D.ts`): tubuh low-poly prosedural dari balok pada
+   hierarki sendi — torso, kepala, jubah yang mengayun, dua lengan, dua kaki, pedang, dan
+   **lentera yang menyala sebagai cahaya nyata**. Warnanya dari `HERO_LOOK` yang sama dengan
+   sprite 2D. Pose: idle bernapas, jalan/lari, tebasan per fase kombo, guling, kena pukul,
+   merapal, dan tumbang
+2. ✅ **Gerak joystick & keyboard** memakai `HeroCore` yang sama — arah joystick diputar ke ruang
+   kamera, jadi "dorong ke atas" berarti menjauh dari kamera
+3. ✅ **Kamera mengikuti** hero dengan easing
+4. ✅ **Collision** memakai `core/world/collision.ts` yang sama; diuji 25 detik simulasi menyapu
+   segala arah tanpa pernah masuk tile solid
+5. ✅ **Kontrol sentuh DOM** (`ui/TouchControls.ts`): joystick dinamis + tombol TEBAS dan GESER,
+   ukuran & posisinya ikut menu Pengaturan
+
+### Cara mengetes Batch 1 di HP
+
+1. Buka game seperti biasa — sekarang **langsung masuk mode 3D**. Kalau ingin versi 2D lengkap:
+   gerigi → **Renderer → 2D (lama)**, atau buka `?renderer=2d`.
+2. Nyalakan **Penghitung FPS** di menu (atau `?fps=1`). Baris kedua menunjukkan jumlah objek dan
+   ukuran render target.
+3. Jalan-jalan dengan joystick, coba **GESER** (guling) dan **TEBAS** (animasi kombo).
+   Lihat apakah lentera hero menerangi sekitar saat malam tiba (siklus siang-malam ±7 menit).
+4. Coba tiap **preset grafik** (AUTO + Sangat Rendah…Ultra) dan laporkan FPS-nya. Perhatikan
+   perbedaan ketajaman pixel dan garis outline.
+5. Kalau ada yang aneh atau gelap total: **Salin laporan** lalu tempel ke chat. Laporan mode 3D
+   memuat grid pixel, ukuran render target, jumlah chunk/instance/lampu, ketersediaan outline,
+   posisi hero, dan area.
+
+### Yang belum ada di mode 3D
+
+Musuh & kombat (Batch 3), stats & inventaris (Batch 4), NPC/quest/cutscene/audio/menu (Batch 5),
+**save/load** dan world streaming (Batch 6), akun (Batch 7). Save 2D lama tidak disentuh —
+mode 3D belum menulis apa pun ke save.
 
 ---
 

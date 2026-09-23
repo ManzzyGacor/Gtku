@@ -6,16 +6,18 @@
  * `input` hub, the same graphics presets and the same FPS watchdog. Nothing here is a second copy
  * of the game — it is a second *view* of it.
  */
-import { WORLD_TILES_H } from '../config';
+import { WORLD_TILES_H, WORLD_TILES_W } from '../config';
 import { buildTileSheet } from '../art/tiles';
 import { AdaptiveQuality, probeDevice, profileOf, suggestPreset } from '../core/graphics';
 import { input } from '../core/input';
 import { PerfMeter } from '../core/perf';
 import { settings } from '../core/settings';
 import { DAY_SECONDS } from '../core/systems/daynight';
-import { FOREST_X0 } from '../core/world/areas';
+import { HeroCore, type HeroInput } from '../core/entities/HeroCore';
+import { Collision } from '../core/world/collision';
 import { GeneratedWorld } from '../core/world/worldgen';
 import type { DiagnosticsSource } from '../ui/diagnostics';
+import { HeroMesh3D } from './HeroMesh3D';
 import { IsoCamera } from './IsoCamera';
 import { PixelRenderer } from './PixelRenderer';
 import { World3D } from './World3D';
@@ -28,7 +30,10 @@ export class Game3D {
   readonly pixels: PixelRenderer;
   readonly camera = new IsoCamera();
   readonly world = new GeneratedWorld();
+  readonly collision = new Collision(this.world);
   readonly scene3d: World3D;
+  readonly hero: HeroCore;
+  readonly heroMesh: HeroMesh3D;
   readonly perf = new PerfMeter();
 
   private adaptive = new AdaptiveQuality(this.perf);
@@ -37,6 +42,8 @@ export class Game3D {
   private lastFrame = 0;
   private dayTime = 0.35;
   private paused = false;
+  /** Real seconds since boot, for flicker and breathing (keeps running while paused). */
+  private clock = 0;
   private unsubscribe: () => void;
   private disposed = false;
 
@@ -44,10 +51,17 @@ export class Game3D {
     this.pixels = new PixelRenderer(parent);
     this.scene3d = new World3D(this.pixels.scene, this.world, this.tileSheet);
 
-    // Fase 1 builds Desa Lentera only; the other areas arrive with chunk streaming in Batch 6.
-    this.scene3d.build({ x0: 0, y0: 0, x1: FOREST_X0, y1: WORLD_TILES_H });
+    /*
+     * The whole existing world is built in one go. It measures 40 ground chunks and ~6.7k instances
+     * in 10 draw groups (see `npx tsx scripts/plan-stats.ts`), which instancing handles easily, and
+     * it means the player can walk anywhere instead of hitting an invisible edge. Chunk streaming
+     * in Batch 6 turns this into an optimisation rather than a fix.
+     */
+    this.scene3d.build({ x0: 0, y0: 0, x1: WORLD_TILES_W, y1: WORLD_TILES_H });
 
     const start = this.world.markers.playerStart;
+    this.hero = new HeroCore(start.x, start.y);
+    this.heroMesh = new HeroMesh3D(this.pixels.scene);
     this.camera.snap(u(start.x), u(start.y));
 
     if (settings.firstRun && settings.get('presetAuto') && !settings.isLocked('preset')) {
@@ -103,30 +117,37 @@ export class Game3D {
   /** One frame. Exposed so a test can drive the simulation without a browser. */
   step(dt: number): void {
     if (this.disposed) return;
+    this.clock += dt;
     if (!this.paused && dt > 0) {
       this.dayTime = (this.dayTime + dt / DAY_SECONDS) % 1;
-      this.moveCamera(dt);
+      this.updateHero(dt);
+      this.camera.follow(u(this.hero.x), u(this.hero.y), dt);
       this.perf.push(dt);
       this.adaptive.update(dt, settings.get('preset'));
     }
+    this.heroMesh.update(this.paused ? 0 : dt, dt, this.hero, this.clock);
     this.scene3d.update(this.dayTime, this.camera.target);
     this.pixels.render(this.camera.camera);
   }
 
   /**
-   * Fase 1 has no player yet, so the stick pans the camera over the village.
-   * Fase 2 replaces this with `HeroCore` and makes the camera follow the hero.
+   * Movement runs through the *same* `HeroCore` and the *same* `Collision` grid as the 2D build —
+   * only the input direction is rotated, because on a fixed 3/4 camera "push up" has to mean
+   * "walk away from the camera", not "walk north".
    */
-  private moveCamera(dt: number): void {
+  private updateHero(dt: number): void {
     const ax = input.axis();
-    if (!ax.x && !ax.y) return;
     const dir = this.camera.stickToWorld(ax.x, ax.y);
-    const speed = 14; // world units per second
-    const t = this.camera.target;
-    this.camera.snap(
-      Math.max(0, Math.min(FOREST_X0, t.x + dir.x * speed * dt)),
-      Math.max(0, Math.min(WORLD_TILES_H, t.z + dir.y * speed * dt)),
-    );
+    const inp: HeroInput = {
+      mx: dir.x,
+      my: dir.y,
+      attack: input.consume('attack'),
+      dodge: input.consume('dodge'),
+      skill: input.consume('skill'),
+    };
+    this.hero.update(dt, inp, this.collision, this.collision.speedAt(this.hero.x, this.hero.y));
+    // Combat effects arrive in Batch 3; until then the queue is drained so it cannot grow forever.
+    this.hero.events.length = 0;
   }
 
   // ───────────────────────── diagnostics ─────────────────────────
@@ -137,7 +158,7 @@ export class Game3D {
       fps: () => ({ avg: this.perf.avg, low: this.perf.low }),
       objects: () => {
         const s = this.scene3d.stats();
-        return s.instances + s.chunks;
+        return s.instances + s.chunks + 1;
       },
       view: () => ({ w: this.pixels.plan.renderW, h: this.pixels.plan.renderH }),
       setPaused: (p) => {
@@ -158,6 +179,8 @@ export class Game3D {
       `render target: ${plan.renderW}x${plan.renderH}`,
       `chunk tanah: ${s.chunks}   instance: ${s.instances}   draw group: ${s.draws}   lampu: ${s.lights}`,
       `outline tersedia: ${this.pixels.canOutline ? 'ya' : 'tidak'}`,
+      `hero: (${Math.round(this.hero.x)}, ${Math.round(this.hero.y)}) hp ${this.hero.hp}/${this.hero.maxHp} state ${this.hero.state}`,
+      `area: ${this.world.areaAt(Math.floor(this.hero.x / 16), Math.floor(this.hero.y / 16))}`,
     ];
   }
 
@@ -166,6 +189,7 @@ export class Game3D {
     this.stop();
     window.removeEventListener('resize', this.onResize);
     this.unsubscribe();
+    this.heroMesh.dispose();
     this.scene3d.dispose();
     this.pixels.dispose();
   }

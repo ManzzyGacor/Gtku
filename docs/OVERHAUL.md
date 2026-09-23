@@ -131,7 +131,7 @@ chunk streaming, jumlah cahaya dinamis & bayangan dibatasi.
 
 | Batch | Isi | Status |
 | --- | --- | --- |
-| **1** | Fase 0 (persiapan), Fase 1 (fondasi 3D), Fase 2 (player 3D) | 🚧 sedang dikerjakan |
+| **1** | Fase 0 (persiapan), Fase 1 (fondasi 3D), Fase 2 (player 3D) | ✅ selesai |
 | 2 | Lingkungan desa, cahaya & atmosfer, animasi rumput, air, pohon | ⬜ |
 | 3 | Migrasi combat, dua senjata, sistem elemen (4 elemen) | ⬜ |
 | 4 | Stats, equipment, Lantern Core, inventaris, progresi | ⬜ |
@@ -240,25 +240,36 @@ src/
 
 ### Langkah (satu fitur per commit, `npm run build` + `npm test` hijau tiap langkah)
 
-**Fase 0**
-1. `docs/OVERHAUL.md` (dokumen ini) + audit. ✅
-2. Ganti nama → Lentera Malam, migrasi kunci `localStorage`.
-3. Pindahkan file murni ke `src/core/**` (murni pemindahan + perbaiki import, tanpa ubah perilaku);
-   tambahkan tes penjaga yang gagal bila ada file `src/core/**` mengimpor `phaser`/`three`.
-4. Pasang Vitest (`npm test` → vitest), pertahankan seluruh tes yang ada termasuk smoke test.
-5. Alat debug: menu Pengaturan in-game, penghitung FPS, panel error + "Salin laporan".
+**Fase 0** — selesai
+1. ✅ `docs/OVERHAUL.md` (dokumen ini) + audit.
+2. ✅ Ganti nama → Lentera Malam, migrasi kunci `localStorage`.
+3. ✅ Pindahkan file murni ke `src/core/**`; `tests/architecture.test.ts` menjaga batas lapisan.
+4. ✅ Pasang Vitest (`npm test` → vitest), seluruh tes lama dipertahankan termasuk smoke test.
+5. ✅ Alat debug: menu Pengaturan in-game, penghitung FPS, panel error + "Salin laporan".
 
-**Fase 1**
-6. `npm i three`; `src/render3d/PixelRenderer.ts`: WebGL2 renderer + render target resolusi rendah +
-   upscale nearest; `?renderer=2d|3d`, default 3D, bisa diganti dari menu.
-7. Kamera isometrik 3/4 dengan zoom terbatas (pakai logika `cameraRig` sebagai acuan).
-8. Greybox Desa Lentera: mesh dari data `worldgen` yang sudah ada + tekstur pixel dari `art/*`.
-9. Preset grafik dasar untuk 3D (render scale, outline, bayangan, partikel).
+**Fase 1** — selesai
+6. ✅ `npm i three`; `render3d/PixelRenderer.ts`: render target resolusi rendah + upscale nearest +
+   outline pixel dari kedalaman; `?renderer=2d|3d` + baris Renderer di menu.
+7. ✅ Kamera isometrik 3/4 ortografik, sudut tetap, zoom 0,75–1,6, 16 px = 1 unit.
+8. ✅ Greybox seluruh dunia dari data `worldgen` + tekstur pixel `art/greybox.ts`; tanah memakai
+   `bakeChunk` yang sama dengan versi 2D.
+9. ✅ Preset grafik dasar untuk 3D (pixelHeight, renderScale, outline, bayangan, anggaran cahaya).
 
-**Fase 2**
-10. Model + animasi player low-poly prosedural.
-11. Gerak joystick/keyboard memakai `HeroCore` yang sama; kamera mengikuti; collision memakai
-    `core/world/collision.ts` yang sama.
+**Fase 2** — selesai
+10. ✅ Model + animasi player low-poly prosedural (`render3d/HeroMesh3D.ts`), lentera menyala
+    sebagai cahaya nyata.
+11. ✅ Gerak joystick/keyboard memakai `HeroCore` yang sama (arah joystick diputar ke ruang kamera);
+    kamera mengikuti; collision memakai `core/world/collision.ts` yang sama.
+
+### Belum dikerjakan di mode 3D (menyusul sesuai batch)
+
+| Hal | Batch |
+| --- | --- |
+| Musuh, kombat, damage, dua senjata, elemen | 3 |
+| Stats, equipment, Lantern Core, inventaris | 4 |
+| NPC, dialog, quest, cutscene, audio, menu utama & pause, HUD lengkap | 5 |
+| **Save/load** (mode 3D belum menyimpan posisi; save 2D lama tidak disentuh), world streaming | 6 |
+| Akun, world event | 7 |
 
 ### Aturan yang dipegang selama migrasi
 
