@@ -19,9 +19,11 @@ Ringkasan desain: `docs/GAME_DESIGN.md`. Status pekerjaan: `docs/PROGRESS.md`
 
 - **Phaser 4.2.x** (renderer baru berbasis RenderNode; BUKAN Phaser 3 — lihat catatan API di bawah), **TypeScript 7 (strict)**, **Vite 8**.
 - Dokumentasi Phaser 4 ada lokal: `node_modules/phaser/skills/*/SKILL.md`, `node_modules/phaser/docs`, tipe di `node_modules/phaser/types/phaser.d.ts`.
-- Tes: `node --import tsx --test tests/*.test.ts` (`npm test`). Tes logika murni + **`tests/smoke.test.ts`**: menjalankan GameScene/UIScene
-  asli terhadap Phaser palsu (`tests/mocks/phaser-mock.ts`, dialihkan lewat hook resolve) selama ribuan frame (jalan, kombat, dialog, puzzle, boss,
-  save/load, respawn, cek kebocoran objek, validasi nama frame). Tidak ada tes piksel/browser — render nyata WebGL hanya bisa dicek di perangkat.
+- Tes: **Vitest** (`npm test` = `vitest run`, `npm run test:watch` untuk mode tonton), konfigurasi di `vitest.config.ts`.
+  Tes logika murni `src/core` + **`tests/smoke.test.ts`**: menjalankan GameScene/UIScene asli terhadap Phaser palsu
+  (`tests/mocks/phaser-mock.ts`, dialihkan lewat `resolve.alias` Vitest) selama ribuan frame (jalan, kombat, dialog, puzzle,
+  boss, save/load, respawn, cek kebocoran objek, validasi nama frame). Plus `tests/core-purity.test.ts` yang menjaga
+  `src/core` bebas renderer. Tidak ada tes piksel/browser — render nyata WebGL hanya bisa dicek di perangkat.
 
 ## Menjalankan
 
@@ -29,7 +31,7 @@ Ringkasan desain: `docs/GAME_DESIGN.md`. Status pekerjaan: `docs/PROGRESS.md`
 npm install
 npm run dev        # Vite di 127.0.0.1:5173 (dipakai lewat Cloudflare Tunnel https://game.varesa.mom)
 npm run build      # tsc --noEmit && vite build  → HARUS hijau sebelum commit
-npm test           # tes logika (dunia, kombat, AI, quest, save)
+npm test           # Vitest: logika inti (dunia, kombat, AI, quest, save) + smoke test
 npm run assets     # ekspor semua sheet seni ke .preview/*.png (untuk dilihat/diedit, tidak di-commit)
 ```
 

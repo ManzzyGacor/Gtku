@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { TILE } from '../src/config';
 import { Collision } from '../src/core/world/collision';
 import type { WorldSource } from '../src/core/world/source';

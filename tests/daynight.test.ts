@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { ambientAt, blendAmbient, luminance, nightAmount, wrapDay } from '../src/core/systems/daynight';
 
 test('noon is fully bright and midnight is dark', () => {

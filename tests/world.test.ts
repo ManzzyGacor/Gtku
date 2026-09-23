@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { TILE, WORLD_CHUNKS_H, WORLD_CHUNKS_W } from '../src/config';
 import { GeneratedWorld } from '../src/core/world/worldgen';
 import type { WorldSource } from '../src/core/world/source';

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { makeRng } from '../src/core/rng';
 import { Archer, Boss, EnemyWorld, inArc, Slime, type HeroRef, type WorldEvent } from '../src/core/entities/enemies';
 import { Collision } from '../src/core/world/collision';

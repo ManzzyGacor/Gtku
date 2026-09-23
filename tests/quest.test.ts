@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { GameState, KILLS_NEEDED, RESPAWN_SECONDS } from '../src/core/state/GameState';
 import { advanceQuest, dialogueFor, trackerLines } from '../src/core/systems/quest';
 

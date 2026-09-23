@@ -1,6 +1,6 @@
 /** Storage helpers + the one-time migration from the pre-rename ("Lentera Kelam") keys. */
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 
 const store = new Map<string, string>();
 let blocked = false;

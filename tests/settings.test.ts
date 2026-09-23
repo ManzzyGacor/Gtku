@@ -1,6 +1,6 @@
 /** Settings store, FPS meter and the graphics preset ladder (pure logic, no browser). */
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 
 const store = new Map<string, string>();
 const g = globalThis as Record<string, unknown>;

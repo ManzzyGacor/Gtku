@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { Collision } from '../src/core/world/collision';
 import type { WorldSource } from '../src/core/world/source';
 import { ATTACKS, HeroCore, type HeroInput, HERO_STATS } from '../src/core/entities/HeroCore';

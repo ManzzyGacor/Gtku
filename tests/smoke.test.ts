@@ -4,10 +4,7 @@
  * exceptions, broken wiring and object leaks — the things that would otherwise only show up on a phone.
  */
 import assert from 'node:assert/strict';
-import { register } from 'node:module';
-import { test } from 'node:test';
-
-register('./mocks/hooks.mjs', import.meta.url);
+import { test } from 'vitest';
 
 // ---- browser globals ----
 const store = new Map<string, string>();
