@@ -1,6 +1,6 @@
 /** Visual effects: particles, slash arcs, flipbooks, damage numbers, ground rings. Pooled; no per-frame allocation in hot paths. */
 import Phaser from 'phaser';
-import { pixelText } from '../ui/pixeltext';
+import { pixelText } from '../pixeltext';
 
 type Emitter = Phaser.GameObjects.Particles.ParticleEmitter;
 

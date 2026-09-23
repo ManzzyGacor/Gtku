@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
-import { frameOf } from '../art/register';
-import { HeroCore } from '../core/entities/HeroCore';
-import { Archer, Bat, Boss, EnemyCore, Slime } from '../core/entities/enemies';
-import { pixelText } from '../ui/pixeltext';
+import { frameOf } from '../register';
+import { HeroCore } from '../../core/entities/HeroCore';
+import { Archer, Bat, Boss, EnemyCore, Slime } from '../../core/entities/enemies';
+import { pixelText } from '../pixeltext';
 
 const ANCHOR: Record<string, string> = { slime: 'slime_idle_0', archer: 'archer_d_idle_0', bat: 'bat_0', boss: 'boss_idle_0' };
 

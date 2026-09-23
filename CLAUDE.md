@@ -54,19 +54,27 @@ src/
     systems/         quest, puzzleLogic, daynight, interactables
     state/           GameState (quest, kill, flag, waktu) + serialisasi save
     (akar)           rng, save, storage, input, display, errors, settings, perf, graphics, anim
-  art/               PIPELINE SENI MURNI-KODE (tanpa DOM): Pixmap, palette, generator
-                     sprite/tile/fx/ui/font, registry sheet, bake (chunk → pixmap)
-  entities/          HeroView, EnemyView, NpcView (Phaser)
-  systems/           chunks, lighting, parallax, fx, cameraRig, EnemyDirector, PuzzleSystem (Phaser)
-  scenes/            Boot, Title, Game, UI (HUD + kontrol sentuh + dialog + minimap) (Phaser)
-tests/               tes logika (node:test + tsx) + smoke test + penjaga kemurnian core
+  art/               PIPELINE SENI MURNI-KODE (tanpa DOM, tanpa renderer): Pixmap, palette,
+                     generator sprite/tile/fx/ui/font, bake (chunk → pixmap), greybox (tekstur 3D)
+  ui/                OVERLAY UI NETRAL-RENDERER (DOM): menu Pengaturan, penghitung FPS,
+                     kontrol sentuh, antarmuka DiagnosticsSource — dilarang mengimpor phaser/three
+  render2d/          SEMUA KODE PHASER: boot2d, scenes (Boot/Title/Game/UI), entities *View,
+                     systems (chunks, lighting, parallax, fx, cameraRig, EnemyDirector, PuzzleSystem),
+                     register (pixmap → tekstur Phaser), pixeltext
+  render3d/          SEMUA KODE THREE.JS: boot3d, Game3D, PixelRenderer (pipeline pixel),
+                     IsoCamera, World3D, textures (pixmap → DataTexture),
+                     worldPlan (BEBAS three, jadi tata letak 3D bisa dites di Node)
+tests/               Vitest: logika inti, smoke test, dan tests/architecture.test.ts yang menjaga
+                     batas antar lapisan di atas
 scripts/             skrip node (ekspor sheet ke PNG, preview dunia)
 public/assets/override/   TARUH PNG buatan tangan di sini untuk menimpa aset generatif (lihat di bawah)
 docs/                OVERHAUL.md (rencana induk), GAME_DESIGN.md, PROGRESS.md, STORY.md
 ```
 
-Saat overhaul 3D berjalan, kode Phaser pindah ke `src/render2d/` dan kode Three.js ke `src/render3d/`
-(lihat `docs/OVERHAUL.md` §7).
+Aturan lapisan (dijaga `tests/architecture.test.ts`): `core` tidak tahu renderer apa pun,
+`art` juga tidak, `ui` tidak boleh mengimpor phaser/three, dan kedua folder renderer tidak boleh
+saling mengimpor. `main.ts` memilih renderer lewat `?renderer=2d|3d` (atau menu) dan hanya memuat
+bundle yang dipilih.
 
 ## Konvensi kode
 

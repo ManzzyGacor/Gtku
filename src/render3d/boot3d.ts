@@ -2,9 +2,9 @@
  * Boots the 3D (Three.js) renderer: the pixel pipeline, the isometric camera, the greybox
  * Desa Lentera, and the DOM touch controls (docs/OVERHAUL.md, Fase 1).
  */
-import { Game3D } from './render3d/Game3D';
-import type { DebugUi } from './ui/DebugUi';
-import { TouchControls } from './ui/TouchControls';
+import { Game3D } from './Game3D';
+import type { DebugUi } from '../ui/DebugUi';
+import { TouchControls } from '../ui/TouchControls';
 
 export interface Booted3D {
   game: Game3D;

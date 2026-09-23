@@ -7,10 +7,10 @@
  * Deterministic and cheap: ~300x135 canvas, ≤ 24 gradient blits per frame.
  */
 import Phaser from 'phaser';
-import { hashf } from '../core/rng';
-import { PROPS, type LightDef } from '../core/world/props';
+import { hashf } from '../../core/rng';
+import { PROPS, type LightDef } from '../../core/world/props';
 import type { LoadedChunk } from './chunks';
-import type { RGB } from '../core/systems/daynight';
+import type { RGB } from '../../core/systems/daynight';
 
 interface Light {
   x: number;

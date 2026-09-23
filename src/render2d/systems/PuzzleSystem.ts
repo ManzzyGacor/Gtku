@@ -1,10 +1,10 @@
 /** Phaser side of the cave puzzle: push-rock, pressure plate, sealed gate, and the boss-arena door. */
 import Phaser from 'phaser';
-import { TILE } from '../config';
-import { input } from '../core/input';
-import { frameOf } from '../art/register';
+import { TILE } from '../../config';
+import { input } from '../../core/input';
+import { frameOf } from '../register';
 import type { GameScene } from '../scenes/GameScene';
-import { pushIntent, RockPuzzle } from '../core/systems/puzzleLogic';
+import { pushIntent, RockPuzzle } from '../../core/systems/puzzleLogic';
 
 interface DoorDef {
   tx: number;

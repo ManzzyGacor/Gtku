@@ -3,7 +3,7 @@
  * drifting cloud shadows (daytime, outdoors) and floating cave motes. Cheap: a few dozen pooled images.
  */
 import Phaser from 'phaser';
-import { makeRng } from '../core/rng';
+import { makeRng } from '../../core/rng';
 
 interface Item {
   img: Phaser.GameObjects.Image;

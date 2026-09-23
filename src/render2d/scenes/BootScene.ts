@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
-import { buildAllSheets } from '../art';
-import { FONT_SHEET_KEY } from '../art/font';
-import { registerFont, registerSheet, replaceSheetPixels } from '../art/register';
+import { buildAllSheets } from '../../art';
+import { FONT_SHEET_KEY } from '../../art/font';
+import { registerFont, registerSheet, replaceSheetPixels } from '../register';
 
 /** Builds all generated art, applies optional hand-drawn overrides, then starts the game. */
 export class BootScene extends Phaser.Scene {

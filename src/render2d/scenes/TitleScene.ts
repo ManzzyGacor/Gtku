@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
-import { clearSave, hasSave } from '../core/save';
-import { P } from '../art/palette';
-import { pixelText } from '../ui/pixeltext';
+import { clearSave, hasSave } from '../../core/save';
+import { P } from '../../art/palette';
+import { pixelText } from '../pixeltext';
 
 interface Choice {
   label: string;

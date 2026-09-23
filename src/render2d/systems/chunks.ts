@@ -3,15 +3,15 @@
  * contains water) + prop sprites. Baking is spread over frames with a time budget so crossing chunk borders never hitches.
  */
 import Phaser from 'phaser';
-import { CHUNK_PX, CHUNK_TILES } from '../config';
-import { frameOf } from '../art/register';
-import type { Sheet } from '../art/sheet';
-import { WATER_FRAMES } from '../art/tiles';
-import { bakeChunk, chunkIsAnimated } from '../art/bake';
-import { PROPS, type PropPlacement, type PropType } from '../core/world/props';
-import type { ChunkData, WorldSource } from '../core/world/source';
-import { sheetToCanvas } from '../art/register';
-import { hashf } from '../core/rng';
+import { CHUNK_PX, CHUNK_TILES } from '../../config';
+import { frameOf } from '../register';
+import type { Sheet } from '../../art/sheet';
+import { WATER_FRAMES } from '../../art/tiles';
+import { bakeChunk, chunkIsAnimated } from '../../art/bake';
+import { PROPS, type PropPlacement, type PropType } from '../../core/world/props';
+import type { ChunkData, WorldSource } from '../../core/world/source';
+import { sheetToCanvas } from '../register';
+import { hashf } from '../../core/rng';
 
 export interface PropSprite {
   placement: PropPlacement;

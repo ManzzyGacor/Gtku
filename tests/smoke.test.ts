@@ -22,10 +22,10 @@ const dom = await import('./mocks/dom-mock');
 const doc = dom.installDom();
 
 const { buildAllSheets } = await import('../src/art');
-const { registerSheet, registerFont } = await import('../src/art/register');
+const { registerSheet, registerFont } = await import('../src/render2d/register');
 const { input } = await import('../src/core/input');
-const { GameScene } = await import('../src/scenes/GameScene');
-const { UIScene } = await import('../src/scenes/UIScene');
+const { GameScene } = await import('../src/render2d/scenes/GameScene');
+const { UIScene } = await import('../src/render2d/scenes/UIScene');
 const { TILE } = await import('../src/config');
 const { KILLS_NEEDED } = await import('../src/core/state/GameState');
 
@@ -252,7 +252,7 @@ test('roaming does not leak game objects (chunks stream in and out)', () => {
 });
 
 test('title screen builds and animates (with and without a save)', async () => {
-  const { TitleScene } = await import('../src/scenes/TitleScene');
+  const { TitleScene } = await import('../src/render2d/scenes/TitleScene');
   for (const withSave of [true, false]) {
     if (!withSave) store.clear();
     const t = new TitleScene();

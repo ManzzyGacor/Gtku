@@ -4,7 +4,7 @@
  * (docs/OVERHAUL.md §7 "aturan").
  */
 import Phaser from 'phaser';
-import { planDisplay } from './core/display';
+import { planDisplay } from '../core/display';
 import { BootScene } from './scenes/BootScene';
 import { GameScene } from './scenes/GameScene';
 import { TitleScene } from './scenes/TitleScene';

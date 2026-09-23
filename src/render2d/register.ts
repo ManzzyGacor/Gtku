@@ -1,7 +1,7 @@
 /** Bridges the pure art pipeline to Phaser textures. */
 import Phaser from 'phaser';
-import { FONT_LINE_H, FONT_SHEET_KEY, SPACE_W } from './font';
-import type { FrameRect, Sheet } from './sheet';
+import { FONT_LINE_H, FONT_SHEET_KEY, SPACE_W } from '../art/font';
+import type { FrameRect, Sheet } from '../art/sheet';
 
 /** All sheets by key, for anchor lookups (`frameOf`). */
 export const sheets = new Map<string, Sheet>();

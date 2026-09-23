@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
-import { frameOf } from '../art/register';
-import { HeroCore } from '../core/entities/HeroCore';
-import { pixelText } from '../ui/pixeltext';
-import type { NpcDef } from '../core/world/source';
+import { frameOf } from '../register';
+import { HeroCore } from '../../core/entities/HeroCore';
+import { pixelText } from '../pixeltext';
+import type { NpcDef } from '../../core/world/source';
 
 /** A standing NPC: idle animation, turns toward the hero when near, optional quest marker. */
 export class NpcView {
