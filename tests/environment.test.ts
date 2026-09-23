@@ -134,3 +134,53 @@ test('only the leafy textures are marked as vegetation that bends in the wind', 
   assert.equal(VEGETATION.has('stone'), false, 'walls do not');
   assert.equal(VEGETATION.has('roof'), false, 'nor do roofs');
 });
+
+test('the sun rises in the east, peaks at noon, and hands over to the moon at night', async () => {
+  const { sunDirection, timeLabel } = await import('../src/core/systems/daynight');
+
+  // t = 0.25 and 0.75 are the horizon itself, so sample just inside the day
+  const dawn = sunDirection(0.3);
+  const noon = sunDirection(0.5);
+  const dusk = sunDirection(0.7);
+  const midnight = sunDirection(0);
+
+  assert.ok(dawn.up && noon.up && dusk.up, 'the sun is up from dawn to dusk');
+  assert.equal(midnight.up, false, 'and down at midnight');
+  assert.equal(sunDirection(0.25).up, false, 'exactly on the horizon does not count as up');
+  assert.ok(dawn.x > 0.6, `dawn light comes from the east, got x=${dawn.x.toFixed(2)}`);
+  assert.ok(dusk.x < -0.6, `dusk light comes from the west, got x=${dusk.x.toFixed(2)}`);
+  assert.ok(noon.y > dawn.y && noon.y > dusk.y, 'highest at noon');
+  assert.ok(midnight.y > 0.5, 'the moon hangs high instead of skimming the horizon');
+
+  for (let i = 0; i <= 64; i++) {
+    const d = sunDirection(i / 64);
+    assert.ok(Math.abs(Math.hypot(d.x, d.y, d.z) - 1) < 1e-6, 'always a unit vector');
+    assert.ok(d.y > 0, 'never points up from below the ground');
+  }
+  assert.deepEqual(sunDirection(0), sunDirection(1), 'the day loops');
+  assert.match(timeLabel(0.5), /^\d\d:00$/);
+});
+
+test('house windows light up after dark and go dark again by day', () => {
+  const scene = new THREE.Scene();
+  const w3d = new World3D(scene, world, tileSheet);
+  w3d.setRenderDistance(2);
+  // the village plaza, where the houses are
+  w3d.preload(34, 64);
+  const focus = new THREE.Vector3(34, 0, 64);
+
+  w3d.update(0.5, focus, 0, 0); // noon
+  assert.equal(w3d.stats().windows, 0, 'nobody lights a lamp at noon');
+
+  w3d.update(0, focus, 0, 0); // midnight
+  const lit = w3d.stats().windows;
+  assert.ok(lit > 0, 'the village glows at night');
+
+  w3d.update(0.5, focus, 0, 0);
+  assert.equal(w3d.stats().windows, 0, 'and goes dark again');
+
+  // underground counts as dark, so a cave chunk would light its windows too — there are none there
+  w3d.update(0.5, focus, 1, 0);
+  assert.equal(w3d.stats().windows, lit, 'the cave is dark, so village windows behind you stay lit');
+  w3d.dispose();
+});

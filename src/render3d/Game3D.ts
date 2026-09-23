@@ -11,7 +11,7 @@ import { AdaptiveQuality, probeDevice, profileOf, suggestPreset } from '../core/
 import { input } from '../core/input';
 import { PerfMeter } from '../core/perf';
 import { settings } from '../core/settings';
-import { DAY_SECONDS, nightAmount, smooth } from '../core/systems/daynight';
+import { DAY_SECONDS, nightAmount, smooth, timeLabel } from '../core/systems/daynight';
 import { CAVE_X0, FOREST_X0 } from '../core/world/areas';
 import { HeroCore, type HeroInput } from '../core/entities/HeroCore';
 import { Collision } from '../core/world/collision';
@@ -217,7 +217,8 @@ export class Game3D {
       `render target: ${plan.renderW}x${plan.renderH}`,
       `chunk dimuat: ${s.chunks} (radius ${this.chunkRadius()}, antre ${s.queued})   instance: ${s.instances}   ` +
         `draw group: ${s.draws} (${s.pools} pool, ${s.water} air)   lampu: ${s.lights}`,
-      `atmosfer: malam ${(nightAmount(this.dayTime) * 100).toFixed(0)}%   hutan ${(this.forestWeight() * 100).toFixed(0)}%`,
+      `atmosfer: jam ${timeLabel(this.dayTime)}   malam ${(nightAmount(this.dayTime) * 100).toFixed(0)}%   ` +
+        `hutan ${(this.forestWeight() * 100).toFixed(0)}%   jendela menyala ${s.windows}`,
       `outline tersedia: ${this.pixels.canOutline ? 'ya' : 'tidak'}`,
       `hero: (${Math.round(this.hero.x)}, ${Math.round(this.hero.y)}) hp ${this.hero.hp}/${this.hero.maxHp} state ${this.hero.state}`,
       `area: ${this.world.areaAt(Math.floor(this.hero.x / 16), Math.floor(this.hero.y / 16))}`,

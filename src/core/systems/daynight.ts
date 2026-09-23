@@ -111,6 +111,26 @@ export function blendSky(outdoor: SkyColors, weight: number): SkyColors {
   };
 }
 
+/**
+ * Direction the light comes *from*, as a unit vector (x east, y up, z south).
+ *
+ * The sun rises in the east at t = 0.25, stands highest at noon and sets in the west, so shadows
+ * sweep across the ground over the day instead of being painted on. Once it is below the horizon
+ * the vector keeps a low tilt and `sunUp` reports false, which is the renderer's cue to switch to
+ * a cold moon from overhead.
+ */
+export function sunDirection(t: number): { x: number; y: number; z: number; up: boolean } {
+  const a = (wrapDay(t) - 0.25) * Math.PI * 2;
+  const elevation = Math.sin(a);
+  const up = elevation > 0;
+  // A little southward bias so the light is never perfectly side-on to the fixed camera.
+  const x = Math.cos(a);
+  const y = up ? Math.max(0.22, elevation) : 0.85;
+  const z = up ? 0.38 : 0.25;
+  const len = Math.hypot(x, y, z) || 1;
+  return { x: x / len, y: y / len, z: z / len, up };
+}
+
 export function timeLabel(t: number): string {
   const h = Math.floor(wrapDay(t + 0.0) * 24);
   return `${String(h).padStart(2, '0')}:00`;

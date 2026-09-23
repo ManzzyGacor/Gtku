@@ -17,7 +17,7 @@ import { CHUNK_PX, CHUNK_TILES } from '../config';
 import { bakeChunk, bakeWaterMask, chunkHasWater } from '../art/bake';
 import { buildGreyboxTextures, type GreyboxTexture } from '../art/greybox';
 import type { Sheet } from '../art/sheet';
-import { ambientAt, blendAmbient, nightAmount } from '../core/systems/daynight';
+import { ambientAt, blendAmbient, nightAmount, sunDirection } from '../core/systems/daynight';
 import { AREAS } from '../core/world/areas';
 import type { WorldSource } from '../core/world/source';
 import { InstancePool } from './InstancePool';
@@ -184,6 +184,8 @@ export class World3D {
   readonly group = new THREE.Group();
   private textures: Partial<Record<GreyboxTexture, THREE.Texture>> = {};
   private pools = new Map<string, InstancePool>();
+  /** Pools that only show after dark (lit windows). */
+  private nightPools = new Set<string>();
   private poolGeometries: THREE.BufferGeometry[] = [];
   private poolMaterials: THREE.Material[] = [];
   private groundGeometry: THREE.PlaneGeometry;
@@ -387,9 +389,10 @@ export class World3D {
     return out;
   }
 
-  private poolFor(groupKey: string, sample: { kind: ShapeKind; texture: GreyboxTexture; emissive?: boolean }): InstancePool {
+  private poolFor(groupKey: string, sample: { kind: ShapeKind; texture: GreyboxTexture; emissive?: boolean; nightOnly?: boolean }): InstancePool {
     let pool = this.pools.get(groupKey);
     if (pool) return pool;
+    if (sample.nightOnly) this.nightPools.add(groupKey);
     const geo = this.shapeGeometry(sample.kind);
     this.poolGeometries.push(geo);
     const map = this.textures[sample.texture]!;
@@ -477,10 +480,21 @@ export class World3D {
     const night = Math.max(nightAmount(dayTime), cave);
     this.hemi.color.setRGB(amb[0], amb[1], amb[2]);
     this.hemi.intensity = 0.55 + (1 - night) * 0.5;
-    this.sun.color.setRGB(Math.min(1, amb[0] * 1.15), amb[1], amb[2] * 0.95);
-    this.sun.intensity = (1 - night) * 1.2;
-    this.sun.position.copy(focus).add(new THREE.Vector3(-16, 40, 12));
+
+    // The sun really travels: it rises in the east, so shadows sweep over the day.
+    const dir = sunDirection(dayTime);
+    if (dir.up) this.sun.color.setRGB(Math.min(1, amb[0] * 1.15), amb[1], amb[2] * 0.95);
+    else this.sun.color.setRGB(0.55, 0.62, 0.95); // a cold moon from overhead
+    this.sun.intensity = (dir.up ? 1.25 : 0.35) * (1 - cave);
+    this.sun.position.set(focus.x + dir.x * 45, dir.y * 45, focus.z + dir.z * 45);
     this.sun.target.position.copy(focus);
+
+    // lit windows
+    const lightsOn = night > 0.22;
+    for (const key of this.nightPools) {
+      const pool = this.pools.get(key);
+      if (pool) pool.mesh.visible = lightsOn;
+    }
 
     if (!this.pool.length) return;
     const active = this.activeLights
@@ -509,11 +523,13 @@ export class World3D {
   }
 
   /** For the report. */
-  stats(): { chunks: number; queued: number; instances: number; draws: number; lights: number; pools: number; water: number } {
+  stats(): { chunks: number; queued: number; instances: number; draws: number; lights: number; pools: number; water: number; windows: number } {
     let instances = 0;
     for (const p of this.pools.values()) instances += p.liveCount;
     let water = 0;
     for (const c of this.loaded.values()) if (c.water?.mesh.visible) water++;
+    let windows = 0;
+    for (const key of this.nightPools) if (this.pools.get(key)?.mesh.visible) windows += this.pools.get(key)!.liveCount;
     return {
       chunks: this.loaded.size,
       queued: this.queue.length,
@@ -522,6 +538,7 @@ export class World3D {
       lights: this.pool.length,
       pools: this.pools.size,
       water,
+      windows,
     };
   }
 
@@ -529,6 +546,7 @@ export class World3D {
     for (const c of [...this.loaded.values()]) this.unloadChunk(c);
     for (const p of this.pools.values()) p.dispose();
     this.pools.clear();
+    this.nightPools.clear();
     for (const g of this.poolGeometries) g.dispose();
     for (const m of this.poolMaterials) m.dispose();
     this.poolGeometries = [];

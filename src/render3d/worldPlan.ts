@@ -41,6 +41,8 @@ export interface ShapeInstance {
   rotY?: number;
   /** Drawn unlit and at full brightness (lantern glass, crystals). */
   emissive?: boolean;
+  /** Only shown after dark — lit windows, which is what makes a village look inhabited at night. */
+  nightOnly?: boolean;
 }
 
 export interface PointLightPlan {
@@ -80,6 +82,7 @@ interface Part {
   color: number;
   texture: GreyboxTexture;
   emissive?: boolean;
+  nightOnly?: boolean;
 }
 
 const box = (sx: number, sy: number, sz: number, color: number, texture: GreyboxTexture, extra: Partial<Part> = {}): Part => ({
@@ -89,12 +92,20 @@ const prism = (sx: number, sy: number, sz: number, color: number, texture: Greyb
   kind: 'prism', sx, sy, sz, color, texture, ...extra,
 });
 
-/** A simple house: plaster body, shingled pyramid roof, wooden door. */
+/**
+ * A simple house: plaster body, shingled pyramid roof, wooden door — and two windows that only
+ * appear after dark. Lit windows are most of what makes a village read as inhabited at night.
+ */
 function house(w: number, h: number, d: number): Part[] {
+  const winY = h * 0.55;
+  const winX = w * 0.28;
   return [
     box(w, h, d, P.n2, 'plaster', { dy: h / 2 }),
     prism(w + 0.5, h * 0.55, d + 0.5, P.r1, 'roof', { dy: h + h * 0.275 }),
     box(0.8, h * 0.62, 0.12, P.o1, 'wood', { dy: h * 0.31, dz: d / 2 + 0.06 }),
+    box(0.5, 0.45, 0.08, P.y4, 'glow', { dy: winY, dz: d / 2 + 0.05, dx: -winX, emissive: true, nightOnly: true }),
+    box(0.5, 0.45, 0.08, P.y4, 'glow', { dy: winY, dz: d / 2 + 0.05, dx: winX, emissive: true, nightOnly: true }),
+    box(0.08, 0.45, 0.5, P.y4, 'glow', { dy: winY, dx: w / 2 + 0.05, emissive: true, nightOnly: true }),
   ];
 }
 
@@ -126,6 +137,8 @@ const RECIPES: Partial<Record<PropType, Part[]>> = {
     box(4.8, 3.0, 4.0, P.n2, 'plaster', { dy: 1.5 }),
     prism(5.4, 1.9, 4.6, P.r0, 'roof', { dy: 3.95 }),
     box(1.1, 2.0, 0.14, P.o1, 'wood', { dy: 1.0, dz: 2.07 }),
+    box(0.6, 0.7, 0.1, P.y4, 'glow', { dy: 2.0, dz: 2.05, dx: -1.5, emissive: true, nightOnly: true }),
+    box(0.6, 0.7, 0.1, P.y4, 'glow', { dy: 2.0, dz: 2.05, dx: 1.5, emissive: true, nightOnly: true }),
   ],
   well: [box(1.6, 0.7, 1.6, P.s2, 'stone', { dy: 0.35 }), box(0.16, 1.5, 0.16, P.o1, 'wood', { dy: 1.1, dx: -0.6 }), box(0.16, 1.5, 0.16, P.o1, 'wood', { dy: 1.1, dx: 0.6 }), prism(1.9, 0.6, 1.9, P.o3, 'roof', { dy: 2.1 })],
   lamp: [box(0.18, 1.9, 0.18, P.s1, 'metal', { dy: 0.95 }), box(0.42, 0.5, 0.42, P.y4, 'glow', { dy: 2.1, emissive: true })],
@@ -175,6 +188,7 @@ function partsToShapes(p: PropPlacement, out: ShapeInstance[]): void {
       color: part.color,
       texture: part.texture,
       emissive: part.emissive,
+      nightOnly: part.nightOnly,
     });
   }
 }
@@ -272,11 +286,12 @@ export interface ShapeGroup {
   kind: ShapeKind;
   texture: GreyboxTexture;
   emissive: boolean;
+  nightOnly: boolean;
   shapes: ShapeInstance[];
 }
 
 /** The group key a shape belongs to. The streamer uses it to find the right instance pool. */
-export const groupKeyOf = (s: ShapeInstance): string => `${s.kind}|${s.texture}|${s.emissive ? 1 : 0}`;
+export const groupKeyOf = (s: ShapeInstance): string => `${s.kind}|${s.texture}|${s.emissive ? 1 : 0}|${s.nightOnly ? 'n' : 'd'}`;
 
 export function groupShapes(shapes: readonly ShapeInstance[]): ShapeGroup[] {
   const groups = new Map<string, ShapeGroup>();
@@ -284,7 +299,7 @@ export function groupShapes(shapes: readonly ShapeInstance[]): ShapeGroup[] {
     const key = groupKeyOf(s);
     let g = groups.get(key);
     if (!g) {
-      g = { key, kind: s.kind, texture: s.texture, emissive: !!s.emissive, shapes: [] };
+      g = { key, kind: s.kind, texture: s.texture, emissive: !!s.emissive, nightOnly: !!s.nightOnly, shapes: [] };
       groups.set(key, g);
     }
     g.shapes.push(s);
