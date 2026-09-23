@@ -11,7 +11,7 @@
 import { formatErrors, recentErrors } from '../core/errors';
 import { PROFILES, probeDevice, profileOf } from '../core/graphics';
 import { buildReport, copyText } from '../core/report';
-import { PRESET_IDS, RANGES, settings, type NumericKey, type PresetId, type Settings } from '../core/settings';
+import { DEFAULTS, PRESET_IDS, RANGES, settings, type NumericKey, type PresetId, type Settings } from '../core/settings';
 import type { DiagnosticsSource } from './diagnostics';
 import { el, injectStyle, onTap } from './dom';
 
@@ -30,6 +30,16 @@ const ROWS: Row[] = [
   { kind: 'header', label: 'Grafik' },
   { kind: 'choice', label: 'Preset', key: 'preset', hint: 'AUTO menyesuaikan sendiri dari FPS' },
   { kind: 'toggle', label: 'Bloom', key: 'bloom', hint: 'Cahaya mekar; matikan bila berat' },
+  { kind: 'header', label: 'Kamera (mode 3D)' },
+  { kind: 'number', label: 'Sudut kamera', key: 'camPitch', fmt: (v) => `${v}\u00b0` },
+  { kind: 'number', label: 'Jarak / zoom', key: 'camZoom', fmt: mult },
+  {
+    kind: 'action',
+    label: 'Reset kamera',
+    button: 'Reset',
+    note: () => `Kembali ke ${DEFAULTS.camPitch}\u00b0 dan ${DEFAULTS.camZoom.toFixed(2)}x`,
+    run: () => settings.reset(['camPitch', 'camZoom']),
+  },
   { kind: 'header', label: 'Kontrol & teks' },
   { kind: 'number', label: 'Ukuran joystick', key: 'stickScale', fmt: mult },
   { kind: 'number', label: 'Joystick kiri-kanan', key: 'stickX', fmt: pct },

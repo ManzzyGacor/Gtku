@@ -181,6 +181,8 @@ export class Game3D {
       `outline tersedia: ${this.pixels.canOutline ? 'ya' : 'tidak'}`,
       `hero: (${Math.round(this.hero.x)}, ${Math.round(this.hero.y)}) hp ${this.hero.hp}/${this.hero.maxHp} state ${this.hero.state}`,
       `area: ${this.world.areaAt(Math.floor(this.hero.x / 16), Math.floor(this.hero.y / 16))}`,
+      `kamera: sudut ${this.camera.pitch}\u00b0  zoom ${this.camera.zoom.toFixed(2)}x  ` +
+        `target (${this.camera.target.x.toFixed(1)}, ${this.camera.target.z.toFixed(1)})  radius pandang ${this.camera.viewRadius.toFixed(1)} unit`,
     ];
   }
 
@@ -189,6 +191,7 @@ export class Game3D {
     this.stop();
     window.removeEventListener('resize', this.onResize);
     this.unsubscribe();
+    this.camera.dispose();
     this.heroMesh.dispose();
     this.scene3d.dispose();
     this.pixels.dispose();

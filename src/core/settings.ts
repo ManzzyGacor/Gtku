@@ -32,6 +32,10 @@ export interface Settings {
   buttonScale: number;
   /** Dialogue text scale (1 = small, 3 = large); HUD text follows at one step down. */
   textScale: number;
+  /** 3/4 camera tilt above the ground, in degrees. Lower = more side-on, more of the buildings visible. */
+  camPitch: number;
+  /** 3/4 camera zoom. Higher = closer to the hero. */
+  camZoom: number;
   musicVol: number;
   sfxVol: number;
   /** Set once the intro cutscene has been watched (or skipped) to the end. */
@@ -51,6 +55,8 @@ export const DEFAULTS: Settings = {
   stickY: 0.78,
   buttonScale: 1,
   textScale: 2,
+  camPitch: 38,
+  camZoom: 1.25,
   musicVol: 0.6,
   sfxVol: 0.8,
   cutsceneSeen: false,
@@ -63,6 +69,8 @@ export const RANGES = {
   stickY: { min: 0.4, max: 0.9, step: 0.02 },
   buttonScale: { min: 0.7, max: 1.8, step: 0.1 },
   textScale: { min: 1, max: 3, step: 1 },
+  camPitch: { min: 22, max: 55, step: 1 },
+  camZoom: { min: 0.8, max: 2.2, step: 0.05 },
   musicVol: { min: 0, max: 1, step: 0.1 },
   sfxVol: { min: 0, max: 1, step: 0.1 },
 } as const;
@@ -154,6 +162,14 @@ export class SettingsStore {
   /** Nudge a numeric setting by `dir` steps, clamped to its range. */
   step(key: NumericKey, dir: number): void {
     this.set(key, quantize(key, this.data[key] + RANGES[key].step * dir));
+  }
+
+  /** Put the named keys back to their defaults (the camera "reset" button). */
+  reset(keys: readonly (keyof Settings)[]): void {
+    for (const k of keys) {
+      if (this.locked.has(k)) continue;
+      this.set(k, DEFAULTS[k] as Settings[typeof k]);
+    }
   }
 
   isLocked(key: keyof Settings): boolean {

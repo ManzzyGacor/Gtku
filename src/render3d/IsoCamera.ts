@@ -1,58 +1,80 @@
 /**
- * Fixed-angle 3/4 isometric camera (docs/OVERHAUL.md §1).
+ * Fixed-angle 3/4 camera (docs/OVERHAUL.md §1).
  *
  * Orthographic, so the pixel grid never distorts with distance. The frustum width is derived from
  * the pixel buffer at exactly `TILE` pixels per world unit, which means one tile covers the same
  * number of pixels as it does in the 2D game — the view reads as the same world.
  *
- * The angle is fixed on purpose (no free rotation), and zoom is clamped to a narrow band so the
- * texel density stays close to 1:1.
+ * The *yaw* is fixed (no free rotation, so the isometric diamond never breaks), but the **tilt and
+ * zoom are player settings**: how side-on the view should be is a matter of taste and of what you
+ * want to see of the buildings, and only the person holding the phone can judge that.
  */
 import * as THREE from 'three';
 import { TILE } from '../config';
+import { RANGES, settings } from '../core/settings';
 
 /** Rotation around Y. 45° gives the classic isometric diamond. */
 export const ISO_YAW_DEG = 45;
-/**
- * Tilt from the horizon. 35.26° is true isometric; we use a slightly steeper angle so the player
- * can see past walls and the view still feels like the top-down original. Tune from a phone report.
- */
-export const ISO_PITCH_DEG = 42;
-
-export const ZOOM_MIN = 0.75;
-export const ZOOM_MAX = 1.6;
+/** Tilt above the ground, in degrees; the player's range. Lower = more side-on. */
+export const PITCH_MIN = RANGES.camPitch.min;
+export const PITCH_MAX = RANGES.camPitch.max;
+export const ZOOM_MIN = RANGES.camZoom.min;
+export const ZOOM_MAX = RANGES.camZoom.max;
 /** How far the camera sits from its target. Orthographic, so this only has to clear the geometry. */
-const DISTANCE = 60;
+const DISTANCE = 70;
+/**
+ * The camera aims a little above the ground — roughly the hero's chest. At a side-on tilt this
+ * keeps the hero in the middle of the screen instead of the bottom third.
+ */
+const TARGET_LIFT = 0.55;
 
 const deg = (d: number): number => (d * Math.PI) / 180;
+const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 
 export class IsoCamera {
-  readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 240);
-  /** Point the camera looks at, in world units. */
+  readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+  /** Ground point the camera is centred on, in world units. */
   readonly target = new THREE.Vector3();
+  private offset = new THREE.Vector3();
+  private pitchDeg = 38;
   private zoomLevel = 1;
-  private offset: THREE.Vector3;
   private pixelW = 480;
   private pixelH = 270;
+  private unsubscribe: () => void;
 
   constructor() {
-    // Direction from the target to the camera, from the two fixed angles.
-    const yaw = deg(ISO_YAW_DEG);
-    const pitch = deg(ISO_PITCH_DEG);
-    this.offset = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(DISTANCE);
+    this.readSettings();
+    this.unsubscribe = settings.on((key) => {
+      if (key === 'camPitch' || key === 'camZoom') this.readSettings();
+    });
+  }
+
+  private readSettings(): void {
+    this.pitchDeg = clamp(settings.get('camPitch'), PITCH_MIN, PITCH_MAX);
+    this.zoomLevel = clamp(settings.get('camZoom'), ZOOM_MIN, ZOOM_MAX);
+    this.rebuildOffset();
+    this.fit();
     this.apply();
+  }
+
+  private rebuildOffset(): void {
+    const yaw = deg(ISO_YAW_DEG);
+    const pitch = deg(this.pitchDeg);
+    // Direction from the target to the camera. Its elevation above the ground *is* `pitchDeg`.
+    this.offset
+      .set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch))
+      .multiplyScalar(DISTANCE);
+  }
+
+  get pitch(): number {
+    return this.pitchDeg;
   }
 
   get zoom(): number {
     return this.zoomLevel;
   }
 
-  setZoom(z: number): void {
-    this.zoomLevel = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
-    this.fit();
-  }
-
-  /** Match the frustum to the pixel buffer: `TILE` px = 1 world unit. */
+  /** Match the frustum to the pixel buffer: `TILE` px = 1 world unit at zoom 1. */
   setViewport(pixelW: number, pixelH: number): void {
     this.pixelW = pixelW;
     this.pixelH = pixelH;
@@ -70,9 +92,17 @@ export class IsoCamera {
     c.updateProjectionMatrix();
   }
 
+  /** Half-extent of the visible ground, in world units — what the chunk streamer needs. */
+  get viewRadius(): number {
+    const halfW = this.pixelW / TILE / 2 / this.zoomLevel;
+    const halfH = this.pixelH / TILE / 2 / this.zoomLevel;
+    // a tilted camera sees further along the ground than its vertical half-extent suggests
+    return Math.hypot(halfW, halfH / Math.max(0.35, Math.sin(deg(this.pitchDeg))));
+  }
+
   /** Snap straight to a world position (teleport, first frame). */
   snap(x: number, z: number): void {
-    this.target.set(x, 0, z);
+    this.target.set(x, TARGET_LIFT, z);
     this.apply();
   }
 
@@ -81,6 +111,7 @@ export class IsoCamera {
     const k = 1 - Math.exp(-lerp * dt);
     this.target.x += (x - this.target.x) * k;
     this.target.z += (z - this.target.z) * k;
+    this.target.y = TARGET_LIFT;
     this.apply();
   }
 
@@ -101,5 +132,9 @@ export class IsoCamera {
     // screen up (-y) maps to the camera's forward direction projected on the ground
     out.set(sx * cos + sy * sin, -sx * sin + sy * cos);
     return out;
+  }
+
+  dispose(): void {
+    this.unsubscribe();
   }
 }
