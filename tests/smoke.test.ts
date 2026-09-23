@@ -5,6 +5,8 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
+// Type-only: erased at runtime, so it cannot disturb the global setup order below.
+import type { FakeEl } from './mocks/dom-mock';
 
 // ---- browser globals ----
 const store = new Map<string, string>();
@@ -16,7 +18,8 @@ g.localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: st
 g.ImageData = class { constructor(public data: Uint8ClampedArray, public width: number, public height: number) {} };
 
 const mock = await import('./mocks/phaser-mock');
-g.document = { createElement: () => mock.makeCanvas(), getElementById: () => null };
+const dom = await import('./mocks/dom-mock');
+const doc = dom.installDom();
 
 const { buildAllSheets } = await import('../src/art');
 const { registerSheet, registerFont } = await import('../src/art/register');
@@ -257,4 +260,99 @@ test('title screen builds and animates (with and without a save)', async () => {
     for (let i = 0; i < 30; i++) t.update(i * DT, DT);
   }
   assert.ok(true);
+});
+
+// ───────────────────────── debug overlay (Fase 0 §6) ─────────────────────────
+
+/** The row in the settings menu whose label is `label`, as [row, buttons…]. */
+function settingsRow(label: string): { row: FakeEl; buttons: FakeEl[]; value: string } {
+  const span = dom.walkEls(doc.body).find((e) => e.tagName === 'SPAN' && e.textContent === label);
+  assert.ok(span, `no settings row labelled "${label}"`);
+  const row = span.parentNode?.parentNode;
+  assert.ok(row && row.classes.has('lm-row'), `"${label}" is not inside a row`);
+  const buttons = row.childNodes.filter((c) => c.tagName === 'BUTTON');
+  const value = row.childNodes.find((c) => c.classes.has('lm-val'))?.textContent ?? buttons[0]?.textContent ?? '';
+  return { row, buttons, value };
+}
+
+test('the settings menu opens from the gear, pauses the game and closes again', async () => {
+  const { debugUi } = await import('../src/ui/DebugUi');
+  const panel = debugUi.current;
+  assert.ok(panel, 'GameScene attached the debug overlay');
+
+  const gear = dom.walkEls(doc.body).find((e) => e.className === 'lm-gear');
+  assert.ok(gear, 'gear button exists');
+  gear.tap();
+  assert.equal(panel.settingsOpen, true, 'menu opened');
+  assert.equal(gear.style.display, 'none', 'gear hides behind the menu');
+
+  // while the menu is up the simulation must hold still
+  teleport(env, game.world.markers.playerStart.x, game.world.markers.playerStart.y);
+  const x0 = game.hero.x;
+  input.stick.x = 1;
+  run(env, 60);
+  input.stick.x = 0;
+  assert.equal(game.hero.x, x0, 'hero did not move while paused');
+
+  const close = dom.findByText(dom.walkEls(doc.body).find((e) => e.classes.has('lm-top'))!, 'Tutup');
+  assert.ok(close, 'close button exists');
+  close.tap();
+  assert.equal(panel.settingsOpen, false);
+  assert.equal(gear.style.display, 'block');
+
+  input.stick.x = 1;
+  run(env, 60);
+  input.stick.x = 0;
+  assert.ok(game.hero.x > x0 + 10, `hero moves again after closing (moved ${game.hero.x - x0})`);
+});
+
+test('the menu rows really drive the settings and the graphics preset', async () => {
+  const { settings } = await import('../src/core/settings');
+  const before = { preset: settings.get('preset'), auto: settings.get('presetAuto'), fps: settings.get('fpsCounter'), stick: settings.get('stickScale') };
+
+  const fpsRow = settingsRow('Penghitung FPS');
+  assert.equal(fpsRow.buttons.length, 1);
+  fpsRow.buttons[0].tap();
+  assert.equal(settings.get('fpsCounter'), !before.fps, 'toggle flipped the stored setting');
+  assert.equal(settingsRow('Penghitung FPS').value, settings.get('fpsCounter') ? 'Nyala' : 'Mati', 'label follows the value');
+
+  // AUTO → first concrete level; the game applies it without throwing
+  assert.equal(settingsRow('Preset').value, 'AUTO');
+  const presetRow = settingsRow('Preset');
+  presetRow.buttons[1].tap(); // "▸"
+  assert.equal(settings.get('presetAuto'), false, 'picking a level leaves AUTO');
+  assert.equal(settings.get('preset'), 'vlow');
+  assert.equal(settingsRow('Preset').value, 'Sangat Rendah');
+  run(env, 30);
+
+  const stickRow = settingsRow('Ukuran joystick');
+  const [minus, plus] = stickRow.buttons;
+  plus.tap();
+  assert.ok(settings.get('stickScale') > before.stick, 'joystick grew');
+  minus.tap();
+  minus.tap();
+  assert.ok(settings.get('stickScale') < before.stick, 'and shrank again');
+  run(env, 30);
+
+  settings.set('preset', before.preset);
+  settings.set('presetAuto', before.auto);
+  settings.set('fpsCounter', before.fps);
+  settings.set('stickScale', before.stick);
+});
+
+test('"Salin laporan" produces a report with the live numbers in it', async () => {
+  const { debugUi } = await import('../src/ui/DebugUi');
+  const { recordError } = await import('../src/core/errors');
+  recordError('contoh error dari tes', 'smoke');
+  run(env, 120); // give the FPS meter some history
+
+  settingsRow('Salin laporan').buttons[0].tap();
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+
+  const dump = dom.walkEls(doc.body).find((e) => e.classes.has('lm-dump'));
+  assert.ok(dump, 'the report is shown so it can be copied by hand if the clipboard refuses');
+  for (const needle of ['Lentera Malam — laporan tes', 'renderer: phaser2d', 'objek aktif:', 'smoke: contoh error dari tes']) {
+    assert.ok(dump.textContent.includes(needle), `report is missing "${needle}"`);
+  }
+  assert.ok(debugUi.current);
 });

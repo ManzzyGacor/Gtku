@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { WORLD_PX_H, WORLD_PX_W } from '../config';
 import { input } from '../core/input';
 import { recordError } from '../core/errors';
+import { ensureDebugUi } from '../ui/DebugUi';
+import type { DiagnosticsSource } from '../ui/diagnostics';
 import { loadGame, saveGame } from '../core/save';
 import { PuzzleSystem } from '../systems/PuzzleSystem';
 import { nearestInteractable, type Interactable } from '../core/systems/interactables';
@@ -66,6 +68,8 @@ export class GameScene extends Phaser.Scene {
   private pickups: Pickup[] = [];
   private deathT = -1;
   private lastHp = 0;
+  /** True while the settings menu is open: the simulation holds still, rendering keeps the last frame. */
+  private paused = false;
 
   constructor() {
     super('Game');
@@ -85,6 +89,25 @@ export class GameScene extends Phaser.Scene {
 
   get ui(): UIScene | undefined {
     return this.scene.isActive('UI') ? (this.scene.get('UI') as UIScene) : undefined;
+  }
+
+  /** What the debug overlay reads. Implemented here so the overlay never imports Phaser. */
+  diagnostics(): DiagnosticsSource {
+    const countOf = (s: Phaser.Scene | undefined): number => s?.children?.list?.length ?? 0;
+    return {
+      name: 'phaser2d',
+      fps: () => ({ avg: this.perf.avg, low: this.perf.low }),
+      objects: () => countOf(this) + countOf(this.ui),
+      view: () => ({ w: Math.round(this.scale.width), h: Math.round(this.scale.height) }),
+      setPaused: (p) => this.setPaused(p),
+    };
+  }
+
+  private setPaused(p: boolean): void {
+    this.paused = p;
+    input.enabled = !p && !this.ui?.dialogOpen;
+    if (p) input.reset();
+    else input.clear();
   }
 
   create(): void {
@@ -121,6 +144,7 @@ export class GameScene extends Phaser.Scene {
     this.chunks.preload(this.rig.view, 1);
     this.setupPost();
     this.setupQuality();
+    ensureDebugUi().attach(this.diagnostics());
 
     this.events.on('enemy-killed', (e: EnemyCore) => this.onEnemyKilled(e));
     this.events.on('boss-wake', () => this.puzzle.closeBossDoor());
@@ -508,6 +532,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   override update(time: number, deltaMs: number): void {
+    if (this.paused) return;
     const realDt = Math.min(deltaMs / 1000, 1 / 20);
     let dt = realDt;
     if (this.freezeLeft > 0) {

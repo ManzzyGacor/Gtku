@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { input, type Action } from '../core/input';
-import { wrapText } from '../art/font';
+import { FONT_LINE_H, wrapText } from '../art/font';
+import { settings } from '../core/settings';
 import { P } from '../art/palette';
 import { pixelText } from '../ui/pixeltext';
 import { trackerLines } from '../core/systems/quest';
@@ -28,7 +29,9 @@ export interface DialogSpec {
   onDone?: () => void;
 }
 
-const DEFAULT_STICK_R = 24;
+const BASE_STICK_R = 24;
+/** Dialogue box height in logical px. */
+const DLG_H = 86;
 
 /** HUD, touch controls, dialogue box, banners. Runs on top of GameScene with its own (unzoomed) camera. */
 export class UIScene extends Phaser.Scene {
@@ -40,6 +43,7 @@ export class UIScene extends Phaser.Scene {
   private stickCenter = { x: 0, y: 0 };
   private btns: Btn[] = [];
   private touchUI = false;
+  private unsubscribeSettings: (() => void) | null = null;
 
   // HUD
   private hpTrail!: Phaser.GameObjects.Rectangle;
@@ -105,12 +109,55 @@ export class UIScene extends Phaser.Scene {
     this.setQuest(trackerLines(this.game_.state));
     this.setNpcMarks(this.game_.npcMarks());
 
+    this.applySettings();
+    this.unsubscribeSettings = settings.on((key) => {
+      if (key === 'stickScale' || key === 'stickX' || key === 'stickY' || key === 'buttonScale' || key === 'textScale') this.applySettings();
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.unsubscribeSettings?.();
+      this.unsubscribeSettings = null;
+    });
     this.scale.on(Phaser.Scale.Events.RESIZE, () => this.layout());
     this.input.on('pointerdown', this.onDown, this);
     this.input.on('pointermove', this.onMove, this);
     this.input.on('pointerup', this.onUp, this);
     this.input.on('pointerupoutside', this.onUp, this);
     this.input.on('gameout', () => this.releaseAll());
+  }
+
+  /** Joystick throw in px at the player's chosen size. */
+  private get stickR(): number {
+    return BASE_STICK_R * settings.get('stickScale');
+  }
+
+  /** Dialogue text scale; the HUD sits one step smaller so it never covers the action. */
+  private get hudTextScale(): number {
+    return Math.max(1, settings.get('textScale') - 1);
+  }
+
+  /** Push the touch-layout and text-size settings into the objects, then re-place everything. */
+  private applySettings(): void {
+    const ss = settings.get('stickScale');
+    const bs = settings.get('buttonScale');
+    this.joyBase.setScale(ss);
+    this.joyKnob.setScale(ss);
+    for (const b of this.btns) {
+      b.img.setScale(bs);
+      b.dim.setScale(bs);
+      b.ico.setScale((b.action === 'attack' ? 2 : b.action === 'skill' ? 1.5 : 1) * bs);
+      b.label.setScale(bs);
+    }
+    const hud = this.hudTextScale;
+    this.questText.setScale(hud);
+    this.hint.setScale(hud);
+    this.toastText.setScale(hud);
+    this.dlgText.setScale(settings.get('textScale'));
+    this.layout();
+    if (this.dialogOpen && this.dlgSpec) {
+      this.repaginateDialog();
+      this.dlgPage = Math.min(this.dlgPage, Math.max(0, this.dlgPages.length - 1));
+      this.dlgChars = 0;
+    }
   }
 
   // ───────────────────────────── build ─────────────────────────────
@@ -129,10 +176,7 @@ export class UIScene extends Phaser.Scene {
     mk('dodge', 30, 'ic_roll', '');
     mk('skill', 36, 'ic_burst', '');
     mk('interact', 26, 'ic_talk', '');
-    for (const b of this.btns) {
-      if (b.action === 'attack') b.ico.setScale(2);
-      else if (b.action === 'skill') b.ico.setScale(1.5);
-    }
+    // icon sizes come from applySettings(), which runs right after create() builds everything
     this.setTouchVisible(this.touchUI);
   }
 
@@ -243,7 +287,12 @@ export class UIScene extends Phaser.Scene {
     const w = this.scale.width;
     const h = this.scale.height;
     this.flashRect.setSize(w, h);
-    this.joyHome = { x: 62, y: h - 58 };
+    const ss = settings.get('stickScale');
+    const bs = settings.get('buttonScale');
+    this.joyHome = {
+      x: Math.round(Phaser.Math.Clamp(w * settings.get('stickX'), 34 * ss, w * 0.5 - 10)),
+      y: Math.round(Phaser.Math.Clamp(h * settings.get('stickY'), 40 * ss, h - 34 * ss)),
+    };
     if (this.stickPointer < 0) this.placeStick(this.joyHome.x, this.joyHome.y, 0, 0);
     const place = (a: Action, x: number, y: number): void => {
       const b = this.btns.find((q) => q.action === a)!;
@@ -251,10 +300,10 @@ export class UIScene extends Phaser.Scene {
       b.cy = y;
       for (const o of [b.img, b.ico, b.dim, b.label]) o.setPosition(x, y);
     };
-    place('attack', w - 48, h - 50);
-    place('dodge', w - 100, h - 34);
-    place('skill', w - 90, h - 84);
-    place('interact', w - 48, h - 106);
+    place('attack', w - 48 * bs, h - 50 * bs);
+    place('dodge', w - 100 * bs, h - 34 * bs);
+    place('skill', w - 90 * bs, h - 84 * bs);
+    place('interact', w - 48 * bs, h - 106 * bs);
     this.fsBtn.setPosition(w - 12, 12);
     this.mapPos = { x: w - 104, y: 22 };
     this.mapFrame.setPosition(this.mapPos.x, this.mapPos.y).setSize(100, 68);
@@ -273,7 +322,7 @@ export class UIScene extends Phaser.Scene {
     const w = this.scale.width;
     const h = this.scale.height;
     const bw = Math.min(w - 16, 480);
-    const bh = 86;
+    const bh = DLG_H;
     const x = Math.round((w - bw) / 2);
     const y = h - bh - 8;
     this.dlgBox.setPosition(x, y);
@@ -301,7 +350,7 @@ export class UIScene extends Phaser.Scene {
   private hitButton(x: number, y: number): Btn | null {
     for (const b of this.btns) {
       if (!b.img.visible) continue;
-      if (Math.hypot(x - b.cx, y - b.cy) <= b.size / 2 + 8) return b;
+      if (Math.hypot(x - b.cx, y - b.cy) <= (b.size / 2) * settings.get('buttonScale') + 8) return b;
     }
     return null;
   }
@@ -339,25 +388,26 @@ export class UIScene extends Phaser.Scene {
   }
 
   private updateStick(p: Phaser.Input.Pointer): void {
+    const R = this.stickR;
     let dx = p.x - this.stickCenter.x;
     let dy = p.y - this.stickCenter.y;
     const len = Math.hypot(dx, dy);
-    if (len > DEFAULT_STICK_R) {
-      dx = (dx / len) * DEFAULT_STICK_R;
-      dy = (dy / len) * DEFAULT_STICK_R;
+    if (len > R) {
+      dx = (dx / len) * R;
+      dy = (dy / len) * R;
       // drag the base along so the thumb never runs out of room
       this.stickCenter.x += (p.x - this.stickCenter.x) - dx;
       this.stickCenter.y += (p.y - this.stickCenter.y) - dy;
     }
-    const m = Math.min(1, Math.hypot(dx, dy) / DEFAULT_STICK_R);
+    const m = Math.min(1, Math.hypot(dx, dy) / R);
     const dead = 0.14;
     if (m < dead) {
       input.stick.x = 0;
       input.stick.y = 0;
     } else {
       const k = (m - dead) / (1 - dead);
-      input.stick.x = (dx / (m * DEFAULT_STICK_R)) * k;
-      input.stick.y = (dy / (m * DEFAULT_STICK_R)) * k;
+      input.stick.x = (dx / (m * R)) * k;
+      input.stick.y = (dy / (m * R)) * k;
     }
     this.placeStick(this.stickCenter.x, this.stickCenter.y, dx, dy);
   }
@@ -432,14 +482,23 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
-  showDialog(spec: DialogSpec): void {
-    this.dlgSpec = spec;
-    const maxW = Math.floor((Math.min(this.scale.width - 16, 480) - 82) / 2);
+  /** Split the current dialogue into pages that fit the box at the player's text size. */
+  private repaginateDialog(): void {
+    const spec = this.dlgSpec;
+    if (!spec) return;
+    const scale = settings.get('textScale');
+    const maxW = Math.floor((Math.min(this.scale.width - 16, 480) - 82) / scale);
+    const perPage = Math.max(1, Math.floor((DLG_H - 22) / (FONT_LINE_H * scale)));
     this.dlgPages = [];
     for (const line of spec.lines) {
       const wrapped = wrapText(line, maxW);
-      for (let i = 0; i < wrapped.length; i += 2) this.dlgPages.push(wrapped.slice(i, i + 2).join('\n'));
+      for (let i = 0; i < wrapped.length; i += perPage) this.dlgPages.push(wrapped.slice(i, i + perPage).join('\n'));
     }
+  }
+
+  showDialog(spec: DialogSpec): void {
+    this.dlgSpec = spec;
+    this.repaginateDialog();
     this.dlgPage = 0;
     this.dlgChars = 0;
     this.dialogOpen = true;
