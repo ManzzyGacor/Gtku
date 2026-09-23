@@ -7,9 +7,12 @@ export const TILE = 16;
 export const CHUNK_TILES = 16;
 export const CHUNK_PX = TILE * CHUNK_TILES;
 
-/** World size in chunks (Phase 1: 8 x 5 chunks = 128 x 80 tiles). */
-export const WORLD_CHUNKS_W = 8;
-export const WORLD_CHUNKS_H = 5;
+/**
+ * World size in chunks. Batch 2 grew this from 8x5 (128x80 tiles) to 16x8 (256x128), roughly
+ * tripling every area; chunk streaming is what keeps that affordable (docs/OVERHAUL.md, Batch 2).
+ */
+export const WORLD_CHUNKS_W = 16;
+export const WORLD_CHUNKS_H = 8;
 export const WORLD_TILES_W = WORLD_CHUNKS_W * CHUNK_TILES;
 export const WORLD_TILES_H = WORLD_CHUNKS_H * CHUNK_TILES;
 export const WORLD_PX_W = WORLD_TILES_W * TILE;

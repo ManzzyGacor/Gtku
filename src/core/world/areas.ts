@@ -17,9 +17,9 @@ export const AREAS: Record<AreaId, AreaDef> = {
   cave: { id: 'cave', name: 'Gua Kelam', indoor: true, ambient: [0.22, 0.2, 0.38] },
 };
 
-/** Area boundaries in tiles (x only; Phase 1 is a west→east journey). Areas blend seamlessly, no loading. */
-export const FOREST_X0 = 3 * CHUNK_TILES; // 48
-export const CAVE_X0 = 94;
+/** Area boundaries in tiles (x only; the journey runs west→east). Areas blend seamlessly, no loading. */
+export const FOREST_X0 = 6 * CHUNK_TILES; // 96
+export const CAVE_X0 = 12 * CHUNK_TILES; // 192
 
 export function areaAtTile(tx: number): AreaId {
   if (tx >= CAVE_X0) return 'cave';

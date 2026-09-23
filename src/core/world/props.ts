@@ -5,7 +5,7 @@ export type PropType =
   | 'bush_a' | 'bush_b' | 'rock_a' | 'rock_b' | 'stump' | 'log'
   | 'tallgrass' | 'mushroom' | 'reeds' | 'lily' | 'flowerbed' | 'haystack'
   | 'house_a' | 'house_b' | 'house_c' | 'hall'
-  | 'well' | 'lamp' | 'fence_h' | 'fence_v' | 'sign' | 'barrel' | 'crate' | 'stall'
+  | 'well' | 'lamp' | 'fence_h' | 'fence_v' | 'sign' | 'barrel' | 'crate' | 'chest' | 'stall'
   | 'great_lantern' | 'shrine'
   | 'torch' | 'crystal_a' | 'crystal_b' | 'stalagmite' | 'pillar' | 'gate' | 'plate' | 'boss_door';
 
@@ -65,6 +65,8 @@ export const PROPS: Record<PropType, PropDef> = {
   sign: { fp: [-6, -6, 12, 6] },
   barrel: { fp: TILE1 },
   crate: { fp: TILE1 },
+  // A landmark for exploring; opening it and its loot arrive with Batch 4 progression.
+  chest: { fp: TILE1 },
   stall: { fp: [-24, -18, 48, 18] },
   great_lantern: { fp: [-14, -20, 28, 20], frames: 3, fps: 6 },
   shrine: { fp: [-8, -10, 16, 10], frames: 3, fps: 7, light: { radius: 84, color: 0xffb04a, strength: 0.95, flicker: 0.1, lift: 14 } },

@@ -129,6 +129,7 @@ const RECIPES: Partial<Record<PropType, Part[]>> = {
   sign: [box(0.14, 0.8, 0.14, P.o1, 'wood', { dy: 0.4 }), box(0.9, 0.55, 0.1, P.o3, 'wood', { dy: 0.9 })],
   barrel: [box(0.7, 0.9, 0.7, P.o2, 'wood', { dy: 0.45 })],
   crate: [box(0.8, 0.8, 0.8, P.o3, 'wood', { dy: 0.4 })],
+  chest: [box(1.1, 0.55, 0.8, P.o2, 'wood', { dy: 0.28 }), box(1.14, 0.3, 0.84, P.o3, 'wood', { dy: 0.68 }), box(0.22, 0.24, 0.86, P.y3, 'metal', { dy: 0.56 })],
   stall: [box(2.8, 1.0, 1.4, P.o2, 'wood', { dy: 0.5 }), prism(3.2, 0.8, 1.8, P.r2, 'roof', { dy: 1.4 })],
   great_lantern: [
     box(1.6, 0.5, 1.6, P.s2, 'stone', { dy: 0.25 }),

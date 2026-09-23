@@ -470,6 +470,35 @@ export function crate(): Pixmap {
   return finish(b, { cx: 10, cy: 17, rx: 8, ry: 2 });
 }
 
+/**
+ * A banded chest, the reward marker for exploring. Closed for now: opening it and its loot arrive
+ * with the progression work in Batch 4 (docs/OVERHAUL.md §5), so until then it is a landmark.
+ */
+export function chest(): Pixmap {
+  const b = new Pixmap(22, 20);
+  // body
+  b.rect(2, 8, 18, 9, P.o2);
+  b.hline(2, 8, 18, P.o3);
+  b.frame(2, 8, 18, 9, P.o1);
+  for (let x = 4; x < 19; x += 4) b.vline(x, 9, 7, P.o1);
+  // domed lid
+  for (let i = 0; i < 5; i++) {
+    const inset = i === 4 ? 3 : i === 3 ? 2 : i === 2 ? 1 : 0;
+    b.hline(2 + inset, 7 - i, 18 - inset * 2, i > 2 ? P.o4 : P.o3);
+  }
+  b.hline(5, 3, 12, P.o5);
+  // iron bands + lock
+  b.vline(6, 3, 14, P.s3);
+  b.vline(15, 3, 14, P.s3);
+  b.vline(7, 3, 14, P.s2);
+  b.vline(16, 3, 14, P.s2);
+  b.rect(9, 8, 4, 5, P.y3);
+  b.rect(10, 10, 2, 2, P.o0);
+  b.set(9, 8, P.y4);
+  b.set(12, 8, P.y4);
+  return finish(b, { cx: 11, cy: 17, rx: 9, ry: 2.2 });
+}
+
 export function stall(): Pixmap {
   const b = new Pixmap(52, 44);
   // counter
@@ -751,6 +780,7 @@ export function buildPropSheet(): Sheet {
   add('sign', sign(), 22);
   add('barrel', barrel(), 17);
   add('crate', crate(), 17);
+  add('chest', chest(), 17);
   add('stall', stall(), 40);
   for (let f = 0; f < 3; f++) add(`great_lantern_${f}`, greatLantern(f, true), 68);
   add('great_lantern_off', greatLantern(0, false), 68);

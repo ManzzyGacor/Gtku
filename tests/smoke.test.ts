@@ -26,7 +26,7 @@ const { registerSheet, registerFont } = await import('../src/render2d/register')
 const { input } = await import('../src/core/input');
 const { GameScene } = await import('../src/render2d/scenes/GameScene');
 const { UIScene } = await import('../src/render2d/scenes/UIScene');
-const { TILE } = await import('../src/config');
+const { TILE, WORLD_CHUNKS_H, WORLD_CHUNKS_W } = await import('../src/config');
 const { KILLS_NEEDED } = await import('../src/core/state/GameState');
 
 const boot = new mock.Scene('Boot');
@@ -60,6 +60,28 @@ function run(env: { game: InstanceType<typeof GameScene>; ui: InstanceType<typeo
   }
 }
 
+/**
+ * Look things up by id rather than by chunk coordinate: the world grew in Batch 2 and will grow
+ * again, and a test that hardcodes "chunk (3, 1)" only ever tells you the map moved.
+ */
+function eachChunk<T>(pick: (c: { spawns: any[]; npcs: any[] }) => T[]): T[] {
+  const out: T[] = [];
+  for (let cy = 0; cy < WORLD_CHUNKS_H; cy++) for (let cx = 0; cx < WORLD_CHUNKS_W; cx++) out.push(...pick(game.world.chunk(cx, cy)));
+  return out;
+}
+
+const findSpawn = (kind: string): any => {
+  const hit = eachChunk((c) => c.spawns).find((s: any) => s.kind === kind);
+  assert.ok(hit, `the world has no "${kind}" spawn`);
+  return hit;
+};
+
+const findNpc = (id: string): any => {
+  const hit = eachChunk((c) => c.npcs).find((n: any) => n.id === id);
+  assert.ok(hit, `the world has no npc "${id}"`);
+  return hit;
+};
+
 function teleport(env: ReturnType<typeof makeGame>, x: number, y: number): void {
   env.game.hero.reset(x, y);
   env.game.hero.invuln = 0;
@@ -85,8 +107,7 @@ test('the hero walks east along the road', () => {
 });
 
 test('talking to the elder opens dialogue, advances it and starts the quest', () => {
-  const wulan = game.world.chunk(1, 2).npcs.find((n) => n.id === 'wulan') ?? game.world.chunk(1, 2).npcs[0];
-  assert.ok(wulan, 'elder exists in chunk data');
+  const wulan = findNpc('wulan');
   teleport(env, wulan.x + 14, wulan.y + 6);
   run(env, 30);
   input.press('interact');
@@ -103,8 +124,7 @@ test('talking to the elder opens dialogue, advances it and starts the quest', ()
 
 test('the hero can defeat a slime (aim assist + combo) and counts toward the quest', () => {
   game.director.resetAll(game.chunks.loaded.values());
-  const spawn = game.world.chunk(3, 1).spawns.find((s) => s.kind === 'slime') ?? game.world.chunk(3, 1).spawns[0];
-  assert.ok(spawn);
+  const spawn = findSpawn('slime');
   teleport(env, spawn.x - 34, spawn.y);
   run(env, 5);
   const slimes = game.director.world.enemies.filter((e) => e.kind === 'slime');
@@ -125,13 +145,13 @@ test('the hero can defeat a slime (aim assist + combo) and counts toward the que
 
 test('all enemy kinds run their AI against the hero without throwing (god mode)', () => {
   game.director.resetAll(game.chunks.loaded.values());
-  const arch = game.world.chunk(4, 1).spawns.find((s) => s.kind === 'archer') ?? game.world.chunk(4, 1).spawns[0];
+  const arch = findSpawn('archer');
   teleport(env, arch.x - 60, arch.y);
   run(env, 60 * 12, (i) => {
     game.hero.invuln = 0.5;
     if (i % 90 === 0) input.press('skill');
   });
-  const cave = game.world.chunk(6, 1).spawns.find((s) => s.kind === 'bats') ?? game.world.chunk(6, 1).spawns[0];
+  const cave = findSpawn('bats');
   teleport(env, cave.x, cave.y + 40);
   run(env, 60 * 12, (i) => {
     game.hero.invuln = 0.5;
@@ -173,7 +193,7 @@ test('the push-rock puzzle is solvable through real hero input and opens the gat
 test('boss fight: wakes, closes the door, changes phases, dies, quest advances, door reopens', () => {
   game.director.resetAll(game.chunks.loaded.values());
   const arena = game.world.markers.boss.arena;
-  teleport(env, (arena.x0 + 6) * TILE, 40 * TILE);
+  teleport(env, (arena.x0 + 6) * TILE, Math.round((arena.y0 + arena.y1) / 2) * TILE);
   let woke = false;
   let doorClosedSeen = false;
   const door = game.world.markers.boss.door;
@@ -196,7 +216,7 @@ test('boss fight: wakes, closes the door, changes phases, dies, quest advances, 
 });
 
 test('returning the crystal to the elder completes the quest and lights the lantern', () => {
-  const wulan = game.world.chunk(1, 2).npcs.find((n) => n.id === 'wulan')!;
+  const wulan = findNpc('wulan');
   teleport(env, wulan.x + 14, wulan.y + 6);
   run(env, 30);
   input.press('interact');

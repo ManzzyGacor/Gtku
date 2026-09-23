@@ -87,6 +87,38 @@ test('the boss arena cannot be reached except through both doors (block gate col
   assert.equal(seen[tileOf(b.y) * world.widthTiles + tileOf(b.x)], 0);
 });
 
+test('the world is the size Batch 2 grew it to, with all three areas', () => {
+  assert.equal(world.widthTiles, 256);
+  assert.equal(world.heightTiles, 128);
+  assert.equal(world.areaAt(10, 64), 'village');
+  assert.equal(world.areaAt(140, 64), 'forest');
+  assert.equal(world.areaAt(240, 64), 'cave');
+  // each area has to be big enough to be worth exploring
+  const widths = { village: 0, forest: 0, cave: 0 };
+  for (let x = 0; x < world.widthTiles; x++) widths[world.areaAt(x, 64)]++;
+  for (const [id, w] of Object.entries(widths)) assert.ok(w >= 60, `${id} is only ${w} tiles wide`);
+});
+
+test('the landmarks worth exploring exist and are spread out', () => {
+  const props = [];
+  for (let cy = 0; cy < WORLD_CHUNKS_H; cy++) for (let cx = 0; cx < WORLD_CHUNKS_W; cx++) props.push(...world.chunk(cx, cy).props);
+  const count = (type: string): number => props.filter((p) => p.type === type).length;
+
+  assert.ok(count('chest') >= 5, `expected hidden chests to find, got ${count('chest')}`);
+  assert.equal(count('great_lantern'), 1);
+  assert.ok(count('shrine') >= 2, 'a forest altar and a cave altar');
+  assert.ok(count('house_a') + count('house_b') + count('house_c') >= 7, 'a village plus outskirts');
+  assert.ok(count('haystack') >= 3, 'the farm and the mill');
+  assert.ok(count('pillar') >= 8, 'arena pillars plus the ruins');
+  assert.ok(count('lamp') >= 8, 'street lamps to light the way at night');
+  assert.ok(props.filter((p) => p.text).length >= 6, 'signs to read');
+
+  // the chests must not all be huddled in one corner
+  const chests = props.filter((p) => p.type === 'chest');
+  const xs = chests.map((c) => c.x / TILE);
+  assert.ok(Math.max(...xs) - Math.min(...xs) > 120, 'chests should be spread across the world');
+});
+
 test('every chunk returns data and props belong to their chunk', () => {
   let total = 0;
   for (let cy = 0; cy < WORLD_CHUNKS_H; cy++)
@@ -98,5 +130,5 @@ test('every chunk returns data and props belong to their chunk', () => {
         assert.equal(Math.floor((p.y - 1) / TILE / 16), cy);
       }
     }
-  assert.ok(total > 500);
+  assert.ok(total > 2000, `a world this size should be full of scenery, got ${total}`);
 });
