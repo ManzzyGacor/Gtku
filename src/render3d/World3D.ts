@@ -1,13 +1,16 @@
 /**
- * Builds the 3D world from the plan in `worldPlan.ts` (docs/OVERHAUL.md, Fase 1).
+ * Streams the 3D world around the hero (docs/OVERHAUL.md, Batch 2).
  *
- * Performance rules from the plan are baked in from the start:
- *   • the ground is **one textured mesh per chunk**, reusing the existing 2D chunk baker, so the
- *     ground art in 3D *is* the ground art in 2D;
- *   • every prop and wall block is an **InstancedMesh**, grouped by (shape, texture) — a whole
- *     village is a handful of draw calls;
- *   • dynamic point lights come from a **fixed pool** that follows the camera, so the light count
- *     never depends on how much scenery is in view.
+ * Performance rules from the plan are the shape of this file:
+ *   • **ground** = one textured mesh per chunk, baked with the very same `bakeChunk` the 2D renderer
+ *     uses, so the ground art in 3D *is* the ground art in 2D. Baking is budgeted per frame so
+ *     crossing a chunk border never hitches;
+ *   • **props and walls** = shared `InstancePool`s keyed by (shape, texture, lit). However many
+ *     chunks are loaded, the scenery still draws in a handful of calls;
+ *   • **dynamic lights** = a fixed pool that follows the camera, so the light count depends on the
+ *     preset and never on how much scenery is in view;
+ *   • chunks load and unload by distance from the hero, with one chunk of hysteresis so walking
+ *     along a border does not thrash.
  */
 import * as THREE from 'three';
 import { CHUNK_PX, CHUNK_TILES } from '../config';
@@ -16,15 +19,16 @@ import { buildGreyboxTextures, type GreyboxTexture } from '../art/greybox';
 import type { Sheet } from '../art/sheet';
 import { ambientAt, blendAmbient, nightAmount } from '../core/systems/daynight';
 import { AREAS } from '../core/world/areas';
-import type { TileRect, WorldSource } from '../core/world/source';
+import type { WorldSource } from '../core/world/source';
+import { InstancePool } from './InstancePool';
 import { FADE_LIFT, FADE_RADIUS } from './occlusion';
 import { pixmapTexture } from './textures';
-import { countKinds, groupShapes, planArea, u, type ShapeKind, type WorldPlan } from './worldPlan';
+import { groupKeyOf, planChunk, u, type ChunkPlan, type PointLightPlan, type ShapeKind } from './worldPlan';
 
 /**
  * Per-instance UV scaling. Without it a 16x16 texture stretches across whatever face it lands on
  * and every object ends up with differently sized pixels. `aSize` carries the instance's world
- * size; the vertex shader picks the two components facing the camera-facing normal.
+ * size; the vertex shader picks the two components facing the fragment's normal.
  */
 const UV_SCALE_CHUNK = /* glsl */ `
 #ifdef USE_MAP
@@ -36,19 +40,6 @@ const UV_SCALE_CHUNK = /* glsl */ `
 #endif
 `;
 
-/**
- * Cut a hole in whatever stands between the camera and the hero.
- *
- * A fixed 3/4 camera means roofs, tree crowns and cave walls regularly park themselves in front of
- * the player. Rather than raycasting and fading whole objects on the CPU, each fragment asks: am I
- * nearer the camera than the hero, and do I sit within an ellipse around the hero on screen? If so
- * it dissolves away. The dissolve is an ordered 4x4 dither and a `discard`, not alpha blending —
- * that keeps the pixel-art look, needs no transparency sorting, and leaves the depth buffer clean
- * so the outline pass still works.
- *
- * `vOccView` is the fragment's view-space position; under an orthographic camera its xy *is* the
- * screen position, which is what makes the test this cheap.
- */
 /**
  * Cut a hole in whatever stands between the camera and the hero.
  *
@@ -111,24 +102,41 @@ function patchInstanceMaterial(material: THREE.Material, occlusion: OcclusionUni
     shader.uniforms.uFadeRadius = occlusion.uFadeRadius;
     shader.uniforms.uFadeOn = occlusion.uFadeOn;
   };
-  // Instances with different UV scaling still share one program.
+  // Instances differing only in per-instance data still share one program.
   material.customProgramCacheKey = () => 'lm-instance';
+}
+
+const keyOf = (cx: number, cy: number): number => cy * 1000 + cx;
+
+interface LoadedChunk3D {
+  cx: number;
+  cy: number;
+  ground: THREE.Mesh;
+  texture: THREE.Texture;
+  material: THREE.Material;
+  lights: PointLightPlan[];
 }
 
 export class World3D {
   readonly group = new THREE.Group();
   private textures: Partial<Record<GreyboxTexture, THREE.Texture>> = {};
-  private groundMeshes: THREE.Mesh[] = [];
-  private instanced: THREE.InstancedMesh[] = [];
-  private materials: THREE.Material[] = [];
-  private geometries: THREE.BufferGeometry[] = [];
+  private pools = new Map<string, InstancePool>();
+  private poolGeometries: THREE.BufferGeometry[] = [];
+  private poolMaterials: THREE.Material[] = [];
+  private groundGeometry: THREE.PlaneGeometry;
+
+  private loaded = new Map<number, LoadedChunk3D>();
+  private planCache = new Map<number, ChunkPlan>();
+  private queue: { cx: number; cy: number; pri: number }[] = [];
+  private activeLights: PointLightPlan[] = [];
+  private radiusChunks = 2;
+  private shadowsOn = true;
 
   // lighting
   private hemi = new THREE.HemisphereLight(0xbfd4ff, 0x3a2f5e, 1);
   private sun = new THREE.DirectionalLight(0xfff2c0, 1.1);
   private pool: THREE.PointLight[] = [];
-  private plan: WorldPlan | null = null;
-  /** Shared by every instanced material; see `OCCLUSION_FRAGMENT`. */
+
   private readonly occlusion: OcclusionUniforms = {
     uHeroView: { value: new THREE.Vector3(0, 0, -1e9) },
     uFadeRadius: { value: new THREE.Vector2(FADE_RADIUS.x, FADE_RADIUS.y) },
@@ -143,6 +151,19 @@ export class World3D {
     scene.add(this.group);
     this.sun.position.set(-0.4, 1, 0.3).multiplyScalar(40);
     scene.add(this.hemi, this.sun, this.sun.target);
+
+    const pix = buildGreyboxTextures();
+    for (const [name, pm] of Object.entries(pix)) this.textures[name as GreyboxTexture] = pixmapTexture(pm, { tile: true });
+
+    this.groundGeometry = new THREE.PlaneGeometry(CHUNK_TILES, CHUNK_TILES);
+    this.groundGeometry.rotateX(-Math.PI / 2);
+  }
+
+  // ───────────────────────── settings ─────────────────────────
+
+  /** How many chunks around the hero stay loaded. */
+  setRenderDistance(chunks: number): void {
+    this.radiusChunks = Math.max(1, Math.round(chunks));
   }
 
   /** How many dynamic point lights the current preset allows. */
@@ -162,6 +183,7 @@ export class World3D {
 
   setShadows(mode: 'off' | 'low' | 'high'): void {
     const on = mode !== 'off';
+    this.shadowsOn = on;
     this.sun.castShadow = on;
     if (on) {
       const size = mode === 'high' ? 1024 : 512;
@@ -177,45 +199,119 @@ export class World3D {
       cam.updateProjectionMatrix();
       this.sun.shadow.bias = -0.0012;
     }
-    for (const m of this.instanced) {
-      m.castShadow = on;
-      m.receiveShadow = on;
-    }
-    for (const m of this.groundMeshes) m.receiveShadow = on;
+    for (const p of this.pools.values()) p.setShadows(on);
+    for (const c of this.loaded.values()) c.ground.receiveShadow = on;
   }
 
-  // ───────────────────────── building ─────────────────────────
+  // ───────────────────────── streaming ─────────────────────────
 
-  build(rect: TileRect): WorldPlan {
-    this.clear();
-    const pix = buildGreyboxTextures();
-    for (const [name, pm] of Object.entries(pix)) {
-      this.textures[name as GreyboxTexture] = pixmapTexture(pm, { tile: true });
+  private chunkPlan(cx: number, cy: number): ChunkPlan {
+    const key = keyOf(cx, cy);
+    let plan = this.planCache.get(key);
+    if (!plan) {
+      plan = planChunk(this.world, cx, cy);
+      this.planCache.set(key, plan);
     }
-    const plan = planArea(this.world, rect);
-    this.plan = plan;
-    this.buildGround(plan);
-    this.buildShapes(plan);
     return plan;
   }
 
-  /** One plane per chunk, textured with the very same bake the 2D renderer uses. */
-  private buildGround(plan: WorldPlan): void {
-    const geo = new THREE.PlaneGeometry(CHUNK_TILES, CHUNK_TILES);
-    geo.rotateX(-Math.PI / 2);
-    this.geometries.push(geo);
-    for (const { cx, cy } of plan.chunks) {
-      const pm = bakeChunk(this.world, this.tileSheet, cx, cy, 0);
-      // Pixmap row 0 is north; a flat plane has v = 1 there, so the rows are flipped on upload.
-      const tex = pixmapTexture(pm, { flipRows: true });
-      const mat = new THREE.MeshLambertMaterial({ map: tex });
-      this.materials.push(mat);
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(u(cx * CHUNK_PX) + CHUNK_TILES / 2, 0, u(cy * CHUNK_PX) + CHUNK_TILES / 2);
-      mesh.receiveShadow = true;
-      this.group.add(mesh);
-      this.groundMeshes.push(mesh);
+  private chunksWide(): number {
+    return Math.ceil(this.world.widthTiles / CHUNK_TILES);
+  }
+
+  private chunksHigh(): number {
+    return Math.ceil(this.world.heightTiles / CHUNK_TILES);
+  }
+
+  /** Chunk coordinates wanted around a world position, nearest first. */
+  private desired(focusX: number, focusZ: number, margin: number): { cx: number; cy: number; pri: number }[] {
+    const hx = focusX / CHUNK_TILES;
+    const hy = focusZ / CHUNK_TILES;
+    const r = this.radiusChunks + margin;
+    const out: { cx: number; cy: number; pri: number }[] = [];
+    for (let cy = Math.floor(hy - r); cy <= Math.ceil(hy + r); cy++)
+      for (let cx = Math.floor(hx - r); cx <= Math.ceil(hx + r); cx++) {
+        if (cx < 0 || cy < 0 || cx >= this.chunksWide() || cy >= this.chunksHigh()) continue;
+        const pri = Math.hypot(cx + 0.5 - hx, cy + 0.5 - hy);
+        if (pri > r + 0.75) continue;
+        out.push({ cx, cy, pri });
+      }
+    out.sort((a, b) => a.pri - b.pri);
+    return out;
+  }
+
+  /**
+   * Queue the chunks near `focus`, drop the far ones. Loading itself is budgeted by `step`.
+   * Unloading uses one chunk of hysteresis so walking along a border does not thrash.
+   */
+  private stream(focusX: number, focusZ: number): void {
+    const want = this.desired(focusX, focusZ, 0);
+    const keep = new Set(this.desired(focusX, focusZ, 1).map((c) => keyOf(c.cx, c.cy)));
+    let changed = false;
+    for (const [key, c] of this.loaded) {
+      if (keep.has(key)) continue;
+      this.unloadChunk(c);
+      changed = true;
     }
+    this.queue = want.filter((c) => !this.loaded.has(keyOf(c.cx, c.cy)));
+    if (changed) this.rebuildLightList();
+  }
+
+  /** Bake at most `budget` queued chunks. Baking a 256x256 ground texture is the expensive part. */
+  step(budget = 1): void {
+    for (let i = 0; i < budget && this.queue.length; i++) {
+      const t = this.queue.shift()!;
+      if (!this.loaded.has(keyOf(t.cx, t.cy))) this.loadChunk(t.cx, t.cy);
+    }
+  }
+
+  /** Load everything within range right now (first frame, teleports). */
+  preload(focusX: number, focusZ: number): void {
+    this.stream(focusX, focusZ);
+    this.step(this.queue.length);
+  }
+
+  private loadChunk(cx: number, cy: number): void {
+    const plan = this.chunkPlan(cx, cy);
+    const pm = bakeChunk(this.world, this.tileSheet, cx, cy, 0);
+    // Pixmap row 0 is north; a flat plane has v = 1 there, so the rows are flipped on upload.
+    const texture = pixmapTexture(pm, { flipRows: true });
+    const material = new THREE.MeshLambertMaterial({ map: texture });
+    const ground = new THREE.Mesh(this.groundGeometry, material);
+    ground.position.set(u(cx * CHUNK_PX) + CHUNK_TILES / 2, 0, u(cy * CHUNK_PX) + CHUNK_TILES / 2);
+    ground.receiveShadow = this.shadowsOn;
+    this.group.add(ground);
+
+    const key = keyOf(cx, cy);
+    for (const [groupKey, shapes] of this.byGroup(plan)) this.poolFor(groupKey, shapes[0]).addChunk(key, shapes);
+    this.loaded.set(key, { cx, cy, ground, texture, material, lights: plan.lights });
+    this.rebuildLightList();
+  }
+
+  private byGroup(plan: ChunkPlan): Map<string, typeof plan.shapes> {
+    const out = new Map<string, typeof plan.shapes>();
+    for (const s of plan.shapes) {
+      const k = groupKeyOf(s);
+      const list = out.get(k);
+      if (list) list.push(s);
+      else out.set(k, [s]);
+    }
+    return out;
+  }
+
+  private poolFor(groupKey: string, sample: { kind: ShapeKind; texture: GreyboxTexture; emissive?: boolean }): InstancePool {
+    let pool = this.pools.get(groupKey);
+    if (pool) return pool;
+    const geo = this.shapeGeometry(sample.kind);
+    this.poolGeometries.push(geo);
+    const map = this.textures[sample.texture]!;
+    const mat = sample.emissive ? new THREE.MeshBasicMaterial({ map }) : new THREE.MeshLambertMaterial({ map });
+    patchInstanceMaterial(mat, this.occlusion);
+    this.poolMaterials.push(mat);
+    // Room for a generous chunk neighbourhood; the pool doubles itself if a dense area needs more.
+    pool = new InstancePool(this.group, geo, mat, 2048, !sample.emissive);
+    this.pools.set(groupKey, pool);
+    return pool;
   }
 
   private shapeGeometry(kind: ShapeKind): THREE.BufferGeometry {
@@ -228,45 +324,21 @@ export class World3D {
     return new THREE.BoxGeometry(1, 1, 1);
   }
 
-  private buildShapes(plan: WorldPlan): void {
-    const groups = groupShapes(plan.shapes);
-    const m4 = new THREE.Matrix4();
-    const quat = new THREE.Quaternion();
-    const pos = new THREE.Vector3();
-    const scale = new THREE.Vector3();
-    const color = new THREE.Color();
-
-    for (const g of groups) {
-      const geo = this.shapeGeometry(g.kind);
-      this.geometries.push(geo);
-      const map = this.textures[g.texture]!;
-      const mat = g.emissive
-        ? new THREE.MeshBasicMaterial({ map })
-        : new THREE.MeshLambertMaterial({ map });
-      patchInstanceMaterial(mat, this.occlusion);
-      this.materials.push(mat);
-
-      const mesh = new THREE.InstancedMesh(geo, mat, g.shapes.length);
-      const sizes = new Float32Array(g.shapes.length * 3);
-      g.shapes.forEach((s, i) => {
-        pos.set(s.x, s.y, s.z);
-        quat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.rotY ?? 0);
-        scale.set(s.sx, s.sy, s.sz);
-        mesh.setMatrixAt(i, m4.compose(pos, quat, scale));
-        mesh.setColorAt(i, color.setHex(s.color));
-        sizes[i * 3] = s.sx;
-        sizes[i * 3 + 1] = s.sy;
-        sizes[i * 3 + 2] = s.sz;
-      });
-      geo.setAttribute('aSize', new THREE.InstancedBufferAttribute(sizes, 3));
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-      mesh.castShadow = !g.emissive;
-      mesh.receiveShadow = !g.emissive;
-      this.group.add(mesh);
-      this.instanced.push(mesh);
-    }
+  private unloadChunk(c: LoadedChunk3D): void {
+    const key = keyOf(c.cx, c.cy);
+    for (const pool of this.pools.values()) pool.removeChunk(key);
+    this.group.remove(c.ground);
+    c.material.dispose();
+    c.texture.dispose();
+    this.loaded.delete(key);
   }
+
+  private rebuildLightList(): void {
+    this.activeLights = [];
+    for (const c of this.loaded.values()) this.activeLights.push(...c.lights);
+  }
+
+  // ───────────────────────── per frame ─────────────────────────
 
   /**
    * Tell the shaders where the hero is, in view space, so anything in front of them dissolves.
@@ -279,10 +351,11 @@ export class World3D {
     this.occlusion.uHeroView.value.set(heroWorld.x, heroWorld.y + FADE_LIFT, heroWorld.z).applyMatrix4(camera.matrixWorldInverse);
   }
 
-  // ───────────────────────── per frame ─────────────────────────
+  /** Stream, then colour the world for the time of day and move the light pool. */
+  update(dayTime: number, focus: THREE.Vector3, cave = 0, loadBudget = 1): void {
+    this.stream(focus.x, focus.z);
+    this.step(loadBudget);
 
-  /** Day/night colouring plus the nearest planned lights, moved into the light pool. */
-  update(dayTime: number, focus: THREE.Vector3, cave = 0): void {
     const amb = blendAmbient(ambientAt(dayTime), AREAS.cave.ambient, cave);
     // Inside the cave the sun is irrelevant: torches and crystals do the lighting.
     const night = Math.max(nightAmount(dayTime), cave);
@@ -293,10 +366,8 @@ export class World3D {
     this.sun.position.copy(focus).add(new THREE.Vector3(-16, 40, 12));
     this.sun.target.position.copy(focus);
 
-    if (!this.pool.length || !this.plan) return;
-    const lights = this.plan.lights;
-    // nearest-first, but only the ones that are actually on right now
-    const active = lights
+    if (!this.pool.length) return;
+    const active = this.activeLights
       .filter((l) => !l.nightOnly || night > 0.15)
       .map((l) => ({ l, d: (l.x - focus.x) ** 2 + (l.z - focus.z) ** 2 }))
       .sort((a, b) => a.d - b.d)
@@ -316,37 +387,33 @@ export class World3D {
     });
   }
 
-  private clear(): void {
-    for (const m of this.groundMeshes) this.group.remove(m);
-    for (const m of this.instanced) {
-      this.group.remove(m);
-      m.dispose();
-    }
-    this.groundMeshes = [];
-    this.instanced = [];
-    for (const g of this.geometries) g.dispose();
-    for (const m of this.materials) m.dispose();
-    for (const t of Object.values(this.textures)) t?.dispose();
-    this.geometries = [];
-    this.materials = [];
-    this.textures = {};
-  }
-
-  /** For the report: how much the plan actually produced. */
-  stats(): { chunks: number; instances: number; draws: number; lights: number } {
+  /** For the report. */
+  stats(): { chunks: number; queued: number; instances: number; draws: number; lights: number; pools: number } {
+    let instances = 0;
+    for (const p of this.pools.values()) instances += p.liveCount;
     return {
-      chunks: this.groundMeshes.length,
-      instances: this.plan ? this.plan.shapes.length : 0,
-      draws: this.groundMeshes.length + this.instanced.length,
+      chunks: this.loaded.size,
+      queued: this.queue.length,
+      instances,
+      draws: this.loaded.size + this.pools.size,
       lights: this.pool.length,
+      pools: this.pools.size,
     };
   }
 
   dispose(): void {
-    this.clear();
+    for (const c of [...this.loaded.values()]) this.unloadChunk(c);
+    for (const p of this.pools.values()) p.dispose();
+    this.pools.clear();
+    for (const g of this.poolGeometries) g.dispose();
+    for (const m of this.poolMaterials) m.dispose();
+    this.poolGeometries = [];
+    this.poolMaterials = [];
+    this.groundGeometry.dispose();
+    for (const t of Object.values(this.textures)) t?.dispose();
+    this.textures = {};
+    this.planCache.clear();
     this.scene.remove(this.group, this.hemi, this.sun, this.sun.target);
     this.setLightBudget(0);
   }
 }
-
-export { countKinds };

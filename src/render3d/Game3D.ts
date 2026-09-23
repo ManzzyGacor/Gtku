@@ -6,7 +6,6 @@
  * `input` hub, the same graphics presets and the same FPS watchdog. Nothing here is a second copy
  * of the game — it is a second *view* of it.
  */
-import { WORLD_TILES_H, WORLD_TILES_W } from '../config';
 import { buildTileSheet } from '../art/tiles';
 import { AdaptiveQuality, probeDevice, profileOf, suggestPreset } from '../core/graphics';
 import { input } from '../core/input';
@@ -56,14 +55,6 @@ export class Game3D {
     this.sky = new Sky(this.pixels.scene);
     this.scene3d = new World3D(this.pixels.scene, this.world, this.tileSheet);
 
-    /*
-     * The whole existing world is built in one go. It measures 40 ground chunks and ~6.7k instances
-     * in 10 draw groups (see `npx tsx scripts/plan-stats.ts`), which instancing handles easily, and
-     * it means the player can walk anywhere instead of hitting an invisible edge. Chunk streaming
-     * in Batch 6 turns this into an optimisation rather than a fix.
-     */
-    this.scene3d.build({ x0: 0, y0: 0, x1: WORLD_TILES_W, y1: WORLD_TILES_H });
-
     const start = this.world.markers.playerStart;
     this.hero = new HeroCore(start.x, start.y);
     this.heroMesh = new HeroMesh3D(this.pixels.scene);
@@ -81,6 +72,8 @@ export class Game3D {
 
     this.applyProfile();
     this.resize();
+    // Everything within range is ready before the first frame, so the player never sees a hole.
+    this.scene3d.preload(u(start.x), u(start.y));
     window.addEventListener('resize', this.onResize);
   }
 
@@ -98,6 +91,16 @@ export class Game3D {
     this.scene3d.setLightBudget(LIGHT_BUDGET[p.id] ?? 4);
     this.scene3d.setShadows(p.shadows);
     this.resize();
+    this.scene3d.setRenderDistance(this.chunkRadius());
+  }
+
+  /**
+   * How many chunks to keep loaded: enough to fill the screen at the current camera angle and zoom,
+   * plus the preset's own margin. A flatter camera or a wider zoom therefore streams more.
+   */
+  private chunkRadius(): number {
+    const needed = Math.ceil(this.camera.viewRadius / 16) + 1;
+    return Math.max(profileOf(settings.get('preset')).renderDistance, needed);
   }
 
   // ───────────────────────── loop ─────────────────────────
@@ -136,7 +139,8 @@ export class Game3D {
     const [fogNear, fogFar] = this.camera.fogRange();
     this.sky.update(this.dayTime, cave, fogNear, fogFar);
     this.pixels.renderer.setClearColor(this.sky.haze, 1);
-    this.scene3d.update(this.dayTime, this.camera.target, cave);
+    this.scene3d.setRenderDistance(this.chunkRadius());
+    this.scene3d.update(this.dayTime, this.camera.target, cave, this.paused ? 0 : 1);
     this.pixels.render(this.camera.camera);
   }
 
@@ -192,7 +196,8 @@ export class Game3D {
     return [
       `grid pixel: ${plan.pixelW}x${plan.pixelH} (zoom ${plan.zoom})`,
       `render target: ${plan.renderW}x${plan.renderH}`,
-      `chunk tanah: ${s.chunks}   instance: ${s.instances}   draw group: ${s.draws}   lampu: ${s.lights}`,
+      `chunk dimuat: ${s.chunks} (radius ${this.chunkRadius()}, antre ${s.queued})   instance: ${s.instances}   ` +
+        `draw group: ${s.draws} (${s.pools} pool)   lampu: ${s.lights}`,
       `outline tersedia: ${this.pixels.canOutline ? 'ya' : 'tidak'}`,
       `hero: (${Math.round(this.hero.x)}, ${Math.round(this.hero.y)}) hp ${this.hero.hp}/${this.hero.maxHp} state ${this.hero.state}`,
       `area: ${this.world.areaAt(Math.floor(this.hero.x / 16), Math.floor(this.hero.y / 16))}`,

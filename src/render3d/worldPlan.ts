@@ -8,7 +8,7 @@
  *
  * The 2D world's `y` (down the screen) becomes 3D `z` (south), and `y` in 3D is up.
  */
-import { TILE } from '../config';
+import { CHUNK_TILES, TILE } from '../config';
 import { P } from '../art/palette';
 import type { GreyboxTexture } from '../art/greybox';
 import type { PropPlacement, PropType } from '../core/world/props';
@@ -188,32 +188,33 @@ function propLight(p: PropPlacement, out: PointLightPlan[]): void {
   });
 }
 
+/** Geometry and lights belonging to one chunk. Planned lazily by the streamer and cached. */
+export interface ChunkPlan {
+  cx: number;
+  cy: number;
+  shapes: ShapeInstance[];
+  lights: PointLightPlan[];
+}
+
 /**
- * Build the 3D plan for a tile rectangle. Only chunks fully inside the rect are listed, which is
- * what the Fase 1 "one area at a time" build wants; chunk streaming arrives in Batch 6.
+ * Plan one chunk: every prop whose foot stands in it, plus its wall tiles.
+ *
+ * Chunk membership follows the foot position, exactly like the 2D renderer, so a house whose roof
+ * overhangs the border still belongs to one chunk and can never be counted twice.
  */
-export function planArea(world: WorldSource, rect: TileRect, opts: { walls?: boolean } = {}): WorldPlan {
+export function planChunk(world: WorldSource, cx: number, cy: number, opts: { walls?: boolean } = {}): ChunkPlan {
   const shapes: ShapeInstance[] = [];
   const lights: PointLightPlan[] = [];
-  const chunks: { cx: number; cy: number }[] = [];
-
-  const cx0 = Math.floor(rect.x0 / 16);
-  const cy0 = Math.floor(rect.y0 / 16);
-  const cx1 = Math.floor((rect.x1 - 1) / 16);
-  const cy1 = Math.floor((rect.y1 - 1) / 16);
-  for (let cy = cy0; cy <= cy1; cy++)
-    for (let cx = cx0; cx <= cx1; cx++) {
-      chunks.push({ cx, cy });
-      for (const p of world.chunk(cx, cy).props) {
-        if (PROPS[p.type].special) continue;
-        partsToShapes(p, shapes);
-        propLight(p, lights);
-      }
-    }
-
+  for (const p of world.chunk(cx, cy).props) {
+    if (PROPS[p.type].special) continue;
+    partsToShapes(p, shapes);
+    propLight(p, lights);
+  }
   if (opts.walls !== false) {
-    for (let ty = rect.y0; ty < rect.y1; ty++)
-      for (let tx = rect.x0; tx < rect.x1; tx++) {
+    const tx0 = cx * CHUNK_TILES;
+    const ty0 = cy * CHUNK_TILES;
+    for (let ty = ty0; ty < ty0 + CHUNK_TILES; ty++)
+      for (let tx = tx0; tx < tx0 + CHUNK_TILES; tx++) {
         if (world.tileAt(tx, ty) !== T.WALL) continue;
         shapes.push({
           kind: 'box',
@@ -228,6 +229,29 @@ export function planArea(world: WorldSource, rect: TileRect, opts: { walls?: boo
         });
       }
   }
+  return { cx, cy, shapes, lights };
+}
+
+/**
+ * Build the 3D plan for a whole tile rectangle by planning each chunk it covers.
+ * Used by `scripts/plan-stats.ts` and by the tests; the renderer streams `planChunk` instead.
+ */
+export function planArea(world: WorldSource, rect: TileRect, opts: { walls?: boolean } = {}): WorldPlan {
+  const shapes: ShapeInstance[] = [];
+  const lights: PointLightPlan[] = [];
+  const chunks: { cx: number; cy: number }[] = [];
+
+  const cx0 = Math.floor(rect.x0 / CHUNK_TILES);
+  const cy0 = Math.floor(rect.y0 / CHUNK_TILES);
+  const cx1 = Math.floor((rect.x1 - 1) / CHUNK_TILES);
+  const cy1 = Math.floor((rect.y1 - 1) / CHUNK_TILES);
+  for (let cy = cy0; cy <= cy1; cy++)
+    for (let cx = cx0; cx <= cx1; cx++) {
+      chunks.push({ cx, cy });
+      const plan = planChunk(world, cx, cy, opts);
+      shapes.push(...plan.shapes);
+      lights.push(...plan.lights);
+    }
 
   return { chunks, shapes, lights, rect };
 }
@@ -244,14 +268,16 @@ export interface ShapeGroup {
   shapes: ShapeInstance[];
 }
 
+/** The group key a shape belongs to. The streamer uses it to find the right instance pool. */
+export const groupKeyOf = (s: ShapeInstance): string => `${s.kind}|${s.texture}|${s.emissive ? 1 : 0}`;
+
 export function groupShapes(shapes: readonly ShapeInstance[]): ShapeGroup[] {
   const groups = new Map<string, ShapeGroup>();
   for (const s of shapes) {
-    const emissive = !!s.emissive;
-    const key = `${s.kind}|${s.texture}|${emissive ? 1 : 0}`;
+    const key = groupKeyOf(s);
     let g = groups.get(key);
     if (!g) {
-      g = { key, kind: s.kind, texture: s.texture, emissive, shapes: [] };
+      g = { key, kind: s.kind, texture: s.texture, emissive: !!s.emissive, shapes: [] };
       groups.set(key, g);
     }
     g.shapes.push(s);
