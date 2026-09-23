@@ -1,5 +1,8 @@
 /** Global game constants. Keep magic numbers here. */
 
+/** Shown in the "Salin laporan" report so a bug report says which build it came from. */
+export const GAME_VERSION = '0.2.0';
+
 export const TILE = 16;
 export const CHUNK_TILES = 16;
 export const CHUNK_PX = TILE * CHUNK_TILES;

@@ -1,9 +1,9 @@
 {
   "name": "gtku",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Open-world 2D top-down pixel-art action RPG (Phaser 4 + TypeScript + Vite)",
+  "description": "Open-world pixel-art action RPG, migrating from 2D (Phaser) to 3D (Three.js)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

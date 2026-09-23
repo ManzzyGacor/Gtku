@@ -8,13 +8,14 @@
 import { LEGACY_SETTINGS_KEY, SETTINGS_KEY } from '../config';
 import { readRaw, writeRaw } from './storage';
 
-export type PresetId = 'low' | 'medium' | 'high' | 'ultra';
-export const PRESET_IDS: readonly PresetId[] = ['low', 'medium', 'high', 'ultra'];
+/** Concrete quality levels, weakest first. "AUTO" is not a level — it is the `presetAuto` flag. */
+export type PresetId = 'vlow' | 'low' | 'medium' | 'high' | 'ultra';
+export const PRESET_IDS: readonly PresetId[] = ['vlow', 'low', 'medium', 'high', 'ultra'];
 
 export interface Settings {
-  /** Graphics preset. `ultra` additionally needs the downloaded HD pack. */
+  /** The quality level currently in effect (persisted, so a reload resumes where AUTO left off). */
   preset: PresetId;
-  /** True until the player picks a preset by hand; lets auto-detect / auto-drop act freely. */
+  /** AUTO mode: the watchdog may raise and lower `preset` by itself. Off once the player pins one. */
   presetAuto: boolean;
   fpsCounter: boolean;
   bloom: boolean;
@@ -31,12 +32,10 @@ export interface Settings {
   sfxVol: number;
   /** Set once the intro cutscene has been watched (or skipped) to the end. */
   cutsceneSeen: boolean;
-  /** Version string of the installed HD pack, or null when it is not installed. */
-  hdVersion: string | null;
 }
 
 export const DEFAULTS: Settings = {
-  preset: 'high',
+  preset: 'medium',
   presetAuto: true,
   fpsCounter: false,
   bloom: true,
@@ -48,7 +47,6 @@ export const DEFAULTS: Settings = {
   musicVol: 0.6,
   sfxVol: 0.8,
   cutsceneSeen: false,
-  hdVersion: null,
 };
 
 /** Allowed range + step for the numeric settings, shared by the settings panel and clamping. */
@@ -80,7 +78,6 @@ function sanitize(raw: unknown): Partial<Settings> {
   if (typeof o.preset === 'string' && PRESET_IDS.includes(o.preset as PresetId)) out.preset = o.preset as PresetId;
   for (const k of ['presetAuto', 'fpsCounter', 'bloom', 'cutsceneSeen'] as const) if (typeof o[k] === 'boolean') out[k] = o[k] as boolean;
   for (const k of Object.keys(RANGES) as NumericKey[]) if (typeof o[k] === 'number' && Number.isFinite(o[k])) out[k] = quantize(k, o[k] as number);
-  if (typeof o.hdVersion === 'string' || o.hdVersion === null) out.hdVersion = o.hdVersion as string | null;
   return out;
 }
 
@@ -116,11 +113,15 @@ export class SettingsStore {
   private data: Settings;
   /** Keys pinned by the URL: changing them in the panel would be a lie, so the panel shows them locked. */
   readonly locked: ReadonlySet<keyof Settings>;
+  /** True when nothing was stored yet, so AUTO may pick a starting preset from the device. */
+  readonly firstRun: boolean;
   private listeners = new Set<SettingsListener>();
 
   constructor(search = typeof location !== 'undefined' ? location.search : '') {
     const overrides = parseUrlOverrides(search);
-    this.data = { ...DEFAULTS, ...readStored(), ...overrides };
+    const stored = readStored();
+    this.firstRun = Object.keys(stored).length === 0;
+    this.data = { ...DEFAULTS, ...stored, ...overrides };
     // `presetAuto` rides along with `preset` but must not show up as a locked row of its own.
     this.locked = new Set((Object.keys(overrides) as (keyof Settings)[]).filter((k) => k !== 'presetAuto'));
   }

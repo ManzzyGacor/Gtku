@@ -12,7 +12,7 @@ g.localStorage = {
 
 const { SettingsStore, parseUrlOverrides, quantize, DEFAULTS } = await import('../src/core/settings');
 const { PerfMeter } = await import('../src/core/perf');
-const { AdaptiveQuality, suggestPreset, lowerPreset, PROFILES, FPS_FLOOR } = await import('../src/core/graphics');
+const { AdaptiveQuality, suggestPreset, lowerPreset, higherPreset, PROFILES, FPS_FLOOR, FPS_CEIL } = await import('../src/core/graphics');
 const { SETTINGS_KEY } = await import('../src/config');
 
 test('URL overrides are parsed and lock their keys', () => {
@@ -74,38 +74,85 @@ test('the FPS meter reports a smoothed average and the worst half-second', () =>
   assert.ok(m.low > 1);
 });
 
-test('the watchdog drops exactly one preset step after a sustained dip', () => {
+test('AUTO steps the quality down after a sustained dip, then settles', () => {
   const m = new PerfMeter();
   const q = new AdaptiveQuality(m);
-  const drops: string[] = [];
-  q.onDrop = (_from, to) => drops.push(to);
-  let preset = 'high' as ReturnType<typeof lowerPreset> & string;
+  const changes: string[] = [];
+  let preset = 'high' as Parameters<typeof lowerPreset>[0];
+  q.onChange = (_from, to, why) => {
+    changes.push(`${why}:${to}`);
+    preset = to;
+  };
   const run = (fps: number, seconds: number): void => {
-    for (let i = 0; i < fps * seconds; i++) {
+    for (let i = 0; i < Math.round(fps * seconds); i++) {
       m.push(1 / fps);
       q.update(1 / fps, preset);
-      if (drops.length) preset = drops[drops.length - 1] as typeof preset;
     }
   };
   run(60, 6);
-  assert.deepEqual(drops, [], 'a healthy phone is left alone');
+  assert.deepEqual(changes, [], 'a healthy phone is left alone');
   run(30, 12);
-  assert.deepEqual(drops, ['medium'], 'one step, then a cooldown');
-  run(30, 20);
-  assert.deepEqual(drops, ['medium', 'low'], 'still bad after the cooldown: one more step');
-  run(30, 30);
-  assert.deepEqual(drops, ['medium', 'low'], 'low is the floor');
-  assert.ok(FPS_FLOOR === 45);
+  assert.deepEqual(changes, ['drop:medium'], 'one step, then a cooldown');
+  run(30, 12);
+  assert.deepEqual(changes, ['drop:medium', 'drop:low'], 'still bad after the cooldown: one more step');
+  run(30, 12);
+  assert.deepEqual(changes, ['drop:medium', 'drop:low', 'drop:vlow'], 'down to the bottom rung');
+  run(30, 60);
+  assert.deepEqual(changes, ['drop:medium', 'drop:low', 'drop:vlow'], 'vlow is the floor');
+  assert.equal(preset, 'vlow');
+  assert.ok(FPS_FLOOR === 45 && FPS_CEIL === 57);
+});
+
+test('AUTO raises the quality again when the phone proves it can cope', () => {
+  const m = new PerfMeter();
+  const q = new AdaptiveQuality(m);
+  const changes: string[] = [];
+  let preset = 'low' as Parameters<typeof lowerPreset>[0];
+  q.onChange = (_from, to, why) => {
+    changes.push(`${why}:${to}`);
+    preset = to;
+  };
+  const run = (fps: number, seconds: number): void => {
+    for (let i = 0; i < Math.round(fps * seconds); i++) {
+      m.push(1 / fps);
+      q.update(1 / fps, preset);
+    }
+  };
+  run(60, 4);
+  assert.deepEqual(changes, [], 'a raise has to be earned over several seconds');
+  run(60, 20);
+  assert.deepEqual(changes, ['raise:medium']);
+  run(50, 40);
+  assert.deepEqual(changes, ['raise:medium'], '50 fps is fine but not good enough to raise again');
+});
+
+test('a pinned preset is never touched by the watchdog', () => {
+  const m = new PerfMeter();
+  const q = new AdaptiveQuality(m);
+  q.auto = false;
+  let changed = false;
+  q.onChange = () => (changed = true);
+  for (let i = 0; i < 30 * 40; i++) {
+    m.push(1 / 20);
+    q.update(1 / 20, 'ultra');
+  }
+  assert.equal(changed, false);
 });
 
 test('preset suggestion follows the device, and never picks ultra by itself', () => {
   const base = { screenW: 2340, screenH: 1080, dpr: 3, touch: true, ua: '' };
   assert.equal(suggestPreset({ ...base, cores: 8, memoryGB: 8, webgl2: true }), 'high');
-  assert.equal(suggestPreset({ ...base, cores: 4, memoryGB: 4, webgl2: true }), 'medium');
-  assert.equal(suggestPreset({ ...base, cores: 4, memoryGB: 2, webgl2: false }), 'low');
-  assert.equal(suggestPreset({ ...base, cores: 0, memoryGB: 0, webgl2: true }), 'medium', 'unknown device: middle of the road');
+  assert.equal(suggestPreset({ ...base, cores: 6, memoryGB: 4, webgl2: true }), 'medium');
+  assert.equal(suggestPreset({ ...base, cores: 4, memoryGB: 2, webgl2: true }), 'vlow');
+  assert.equal(suggestPreset({ ...base, cores: 4, memoryGB: 2, webgl2: false }), 'vlow', 'no WebGL2 at all: bottom rung');
+  assert.equal(suggestPreset({ ...base, cores: 0, memoryGB: 0, webgl2: true }), 'low', 'unknown device: err on the safe side');
+  assert.notEqual(suggestPreset({ ...base, cores: 16, memoryGB: 16, webgl2: true }), 'ultra', 'ultra is opt-in, never suggested');
   assert.equal(lowerPreset('ultra'), 'high');
-  assert.equal(lowerPreset('low'), null);
-  assert.equal(PROFILES.ultra.hd, true);
-  assert.equal(PROFILES.high.hd, false);
+  assert.equal(lowerPreset('low'), 'vlow');
+  assert.equal(lowerPreset('vlow'), null);
+  assert.equal(higherPreset('ultra'), null);
+  assert.equal(higherPreset('vlow'), 'low');
+  assert.equal(PROFILES.vlow.parallax, false);
+  assert.equal(PROFILES.high.bloom, true);
+  assert.ok(PROFILES.ultra.pixelHeight >= PROFILES.vlow.pixelHeight);
 });

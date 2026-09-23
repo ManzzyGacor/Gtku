@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { WORLD_PX_H, WORLD_PX_W } from '../config';
 import { input } from '../core/input';
+import { recordError } from '../core/errors';
 import { loadGame, saveGame } from '../core/save';
 import { PuzzleSystem } from '../systems/PuzzleSystem';
 import { nearestInteractable, type Interactable } from '../core/systems/interactables';
@@ -16,7 +17,9 @@ import { Lighting } from '../systems/lighting';
 import { Parallax } from '../systems/parallax';
 import { blendAmbient, ambientAt, nightAmount, smooth, DAY_SECONDS } from '../core/systems/daynight';
 import { AREAS, CAVE_X0, FOREST_X0 } from '../core/world/areas';
-import { Quality, type QualityLevel } from '../core/quality';
+import { AdaptiveQuality, probeDevice, profileOf, suggestPreset } from '../core/graphics';
+import { PerfMeter } from '../core/perf';
+import { settings } from '../core/settings';
 import { HeroCore, type HeroEvent, type HeroInput } from '../core/entities/HeroCore';
 import { HeroView } from '../entities/HeroView';
 import type { EnemyCore } from '../core/entities/enemies';
@@ -45,7 +48,10 @@ export class GameScene extends Phaser.Scene {
   director!: EnemyDirector;
   lighting!: Lighting;
   private parallax!: Parallax;
-  private quality = new Quality();
+  /** Frame-time history; the HUD reads it for the FPS counter. */
+  readonly perf = new PerfMeter();
+  private adaptive = new AdaptiveQuality(this.perf);
+  private unsubscribeSettings: (() => void) | null = null;
   private bloom: { setActive(v: boolean): unknown } | null = null;
   private leafT = 0;
   puzzle!: PuzzleSystem;
@@ -114,8 +120,7 @@ export class GameScene extends Phaser.Scene {
     this.rig.snap(this.hero.x, this.hero.y);
     this.chunks.preload(this.rig.view, 1);
     this.setupPost();
-    this.quality.onChange = (l) => this.applyQuality(l);
-    this.applyQuality(this.quality.level);
+    this.setupQuality();
 
     this.events.on('enemy-killed', (e: EnemyCore) => this.onEnemyKilled(e));
     this.events.on('boss-wake', () => this.puzzle.closeBossDoor());
@@ -131,6 +136,8 @@ export class GameScene extends Phaser.Scene {
       this.chunks.destroy();
       this.director.destroy();
       this.fx.destroy();
+      this.unsubscribeSettings?.();
+      this.unsubscribeSettings = null;
     });
   }
 
@@ -150,21 +157,45 @@ export class GameScene extends Phaser.Scene {
 
   /** Bloom via camera filters (WebGL only). Wrapped so an unsupported device just skips it. */
   private setupPost(): void {
-    if (new URLSearchParams(location.search).get('bloom') === '0') return;
     try {
       if (this.renderer.type !== Phaser.WEBGL) return;
       const out = Phaser.Actions.AddEffectBloom(this.cameras.main, { threshold: 0.66, blurRadius: 2, blurSteps: 3, blendAmount: 0.5 });
       this.bloom = out[0].parallelFilters;
     } catch (err) {
-      console.warn('bloom unavailable', err);
+      recordError(`bloom tidak tersedia: ${String(err)}`, 'GameScene.setupPost');
       this.bloom = null;
     }
   }
 
-  private applyQuality(level: QualityLevel): void {
-    this.bloom?.setActive(level >= 2);
-    this.fx.quality = level >= 1 ? 1 : 0.5;
-    this.lighting.everyN = level >= 1 ? 1 : 2;
+  /**
+   * Hook the graphics preset up: pick a starting level from the device on the very first run,
+   * follow the settings panel, and let AUTO adjust while playing.
+   */
+  private setupQuality(): void {
+    if (settings.firstRun && settings.get('presetAuto') && !settings.isLocked('preset')) {
+      settings.set('preset', suggestPreset(probeDevice()));
+    }
+    this.adaptive.auto = settings.get('presetAuto') && !settings.isLocked('preset');
+    this.adaptive.onChange = (_from, to, why) => {
+      settings.set('preset', to);
+      const name = profileOf(to).name;
+      this.ui?.toast(why === 'drop' ? `Grafik diturunkan ke ${name} (FPS rendah)` : `Grafik dinaikkan ke ${name}`);
+    };
+    this.unsubscribeSettings = settings.on((key) => {
+      if (key === 'presetAuto') this.adaptive.auto = settings.get('presetAuto') && !settings.isLocked('preset');
+      if (key === 'preset' || key === 'bloom' || key === 'presetAuto') this.applyProfile();
+    });
+    this.applyProfile();
+  }
+
+  /** Push the active preset into every system that has a quality knob. */
+  private applyProfile(): void {
+    const p = profileOf(settings.get('preset'));
+    this.bloom?.setActive(p.bloom && settings.get('bloom'));
+    this.fx.quality = p.particles;
+    this.lighting.everyN = p.lightmapEveryN;
+    this.lighting.maxHalos = p.halos;
+    this.parallax.enabled = p.parallax;
   }
 
   // ───────────────────────── helpers ─────────────────────────
@@ -513,7 +544,8 @@ export class GameScene extends Phaser.Scene {
     this.updatePickups(realDt);
     this.heroView.update(dt, realDt, time / 1000);
     this.fx.update(realDt);
-    this.quality.update(realDt);
+    this.perf.push(realDt);
+    this.adaptive.update(realDt, settings.get('preset'));
 
     // walking through tall grass bends it and kicks up a leaf
     if (dt > 0 && Math.hypot(this.hero.vx, this.hero.vy) > 20 && this.chunks.disturb(this.hero.x, this.hero.y, 11) > 0) {
