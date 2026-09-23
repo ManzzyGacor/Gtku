@@ -83,6 +83,86 @@ Tanpa mengubah tampilan game. 82 tes hijau.
    memuat grid pixel, ukuran render target, jumlah chunk/instance/lampu, ketersediaan outline,
    posisi hero, dan area.
 
+---
+
+## Batch 2 — kamera, dunia luas, lingkungan hidup (selesai)
+
+131 tes hijau. Laporan tes Batch 1 dari HP: **59,7 fps rata-rata (terendah 56,1) di preset Ultra**,
+2318x759 dpr 2,8, 8 core / 8 GB, WebGL2 ada, 0 error.
+
+### 1. Kamera (dari laporan: "terlalu tinggi")
+- Sudut default **42° → 38°** dari tanah, zoom default **1,0 → 1,25** (lebih dekat ke hero).
+- **Sudut (22–55°) dan zoom (0,8–2,2x) jadi setelan pemain** + tombol **Reset kamera**. Yaw tetap
+  dipaku 45° supaya diamond isometriknya tidak pernah rusak.
+- Kamera membidik 0,55 unit di atas tanah (dada hero), jadi hero duduk di tengah layar.
+- **Langit + kabut jarak jauh**: kamera ortografik tidak punya titik hilang, jadi dunia yang
+  berhingga tadinya "berhenti" begitu saja. Sekarang ada gradien langit (siang/sore/malam/gua,
+  dengan dither supaya tidak berpita di 270 px) dan kabut linear berwarna sama, jadi tanah jauh
+  larut ke latar — sekaligus menyembunyikan batas chunk.
+- **Objek tinggi yang menghalangi hero larut**: tiap fragment bertanya sendiri apakah ia lebih
+  dekat ke kamera daripada hero dan berada di dalam elips di sekitarnya; kalau ya ia `discard`
+  lewat dither Bayer 4x4. Tanpa raycast, tanpa sorting transparansi, depth buffer tetap bersih.
+
+### 2. Dunia diperluas ~3x per area
+Dari 8x5 chunk (128x80 tile) ke **16x8 (256x128)** — 128 chunk, ~19.000 instance.
+- **Desa Lentera**: plaza, balai, lima rumah inti, **pinggiran desa** (ladang utara berpagar
+  dengan jerami, kincir selatan), kolam diperbesar, **anak sungai** sebagai tepi timur desa
+  dengan jembatan di jalan utama, dan tujuh jalan setapak baru.
+- **Hutan Bisik**: sungai dengan **dua jembatan + satu ford**, danau diperbesar, **empat tanah
+  lapang** yang benar-benar tanah terbuka, **reruntuhan** (cincin pilar patah) di dua tempat,
+  dan **titik pandang** di timur laut dengan bangku batang kayu.
+- **Gua Kelam**: bukan lorong tunggal lagi — balai puzzle, cavern utara & selatan, **grotto
+  kristal buntu**, dan **dua jalur memutar**. Semua cabang tetap di barat gerbang, jadi gerbang
+  puzzle masih satu-satunya jalan ke boss (dibuktikan tes).
+- **6 peti tersembunyi** jauh dari jalan (membukanya + loot menyusul Batch 4).
+- **Streaming chunk**: chunk dimuat dari yang terdekat dengan anggaran bake per frame dan dilepas
+  dengan histeresis, memakai kolam instance bersama (`InstancePool`) dengan swap-remove — jadi
+  dunia 3x lebih luas justru menggambar lebih sedikit instance daripada sebelumnya.
+- Minimap 2D ikut menyesuaikan sendiri karena digerakkan ukuran dunia.
+
+### 3. Lingkungan hidup
+- **Angin di vertex shader dengan instancing** (bukan loop JS per helai): embusan dua frekuensi
+  yang fasenya dari posisi dunia tiap instance, jadi sehamparan rumput tidak bergerak serempak.
+  **Hero menyibak tumbuhan** dengan rumus yang sama.
+- **Air beriak**: dua rangkaian gelombang bersilangan dari koordinat dunia, dikuantisasi jadi
+  empat pita (gradien mulus akan terlihat salah di samping pixel art), puncaknya memungut warna
+  langit sebagai pantulan murah.
+- **64 kunang-kunang** billboard aditif, digerakkan di shader dari seed per-instance dengan fase
+  kedip masing-masing. Hanya malam, tidak pernah di gua.
+- **Kabut tanah bergerak**: dua lapis noise beda kecepatan, paling tebal di gua, lalu hutan saat
+  malam, dan selapis tipis saat fajar.
+- **Obor & api altar berkedip** memakai nilai flicker dari definisi cahaya 2D yang sama.
+- **Matahari benar-benar bergerak**: terbit di timur, puncak tengah hari, terbenam di barat, jadi
+  bayangan menyapu tanah. Setelah terbenam berganti bulan dingin dari atas.
+- **Jendela rumah menyala saat malam** — ini yang membuat desa terbaca ada penghuninya.
+
+### Cara mengetes Batch 2 di HP
+
+1. **Kamera dulu.** Gerigi → Pengaturan → **Sudut kamera** dan **Jarak / zoom**. Coba beberapa
+   nilai, lalu **Salin laporan** — angkanya ikut terkirim. Kalau ada yang paling enak, sebutkan
+   saja dan aku jadikan default.
+2. **Sembunyi di balik rumah/pohon**: berdiri sampai atap atau tajuk menutupi hero, pastikan ia
+   benar-benar larut (bukan hilang total, bukan tetap menutupi).
+3. **Jelajahi**: ikuti jalan ke ladang utara, kincir selatan, kolam, lalu timur menyeberangi
+   jembatan anak sungai → hutan → dua jembatan sungai → reruntuhan → titik pandang → gua.
+   Cari 6 peti. Perhatikan apakah ada chunk yang terlambat muncul (pop-in) di tepi layar.
+4. **Tunggu malam** (siklus ±7 menit). Yang harus terlihat: langit berubah, jendela rumah menyala,
+   kunang-kunang keluar, obor berkedip, lentera hero menerangi, kabut menebal di hutan.
+5. **Rumput**: jalan menembus rumput tinggi, lihat apakah tersibak dan tertiup angin.
+6. **Air**: kolam desa, danau hutan, dan sungai — riaknya harus bergerak dan memantulkan langit.
+
+### Lokasi paling berat untuk diukur FPS
+
+Ukur di sini dengan **Ultra, Sedang, dan Rendah**, sambil penghitung FPS menyala:
+
+| Lokasi | Kenapa berat |
+| --- | --- |
+| **Tengah Hutan Bisik saat malam**, sekitar jembatan sungai utama (ikuti jalan utama ke timur sampai jembatan kedua) | Paling berat: pohon terpadat + air beriak + kabut hutan + kunang-kunang + angin, semuanya sekaligus |
+| **Danau hutan** (jalur bercabang ke selatan dari jalan utama) | Permukaan air paling luas di satu layar |
+| **Plaza Desa Lentera saat malam** | Jendela menyala + lampu jalan + Lentera Agung = paling banyak cahaya dinamis |
+| **Grotto kristal di Gua Kelam** (cabang buntu di barat balai puzzle) | Kristal terpadat + kabut gua paling tebal |
+| **Arena boss** | Ruang terbuka terbesar sekaligus dinding terbanyak di layar |
+
 ### Yang belum ada di mode 3D
 
 Musuh & kombat (Batch 3), stats & inventaris (Batch 4), NPC/quest/cutscene/audio/menu (Batch 5),

@@ -49,7 +49,7 @@ Semua aset, nama, dan cerita **original**.
 
 Detail tiap sistem diputuskan saat fase-nya dikerjakan. Ringkasan target:
 
-**Dunia.** Desa Lentera, Hutan Bisik, Gua Kelam dulu. Area berikutnya disiapkan sebagai *slot data* saja:
+**Dunia.** Desa Lentera, Hutan Bisik, Gua Kelam dulu (Batch 2: 256x128 tile, ~3x per area). Area berikutnya disiapkan sebagai *slot data* saja:
 Pantai Senja, Rawa Kelam, Pegunungan Arunika, Lembah Kabut, Hutan Purba, Kota Tua, Gurun Bara,
 Kepulauan Lentera, Ruins, dungeon rahasia.
 
@@ -132,7 +132,7 @@ chunk streaming, jumlah cahaya dinamis & bayangan dibatasi.
 | Batch | Isi | Status |
 | --- | --- | --- |
 | **1** | Fase 0 (persiapan), Fase 1 (fondasi 3D), Fase 2 (player 3D) | ✅ selesai |
-| 2 | Lingkungan desa, cahaya & atmosfer, animasi rumput, air, pohon | ⬜ |
+| 2 | Lingkungan desa, cahaya & atmosfer, animasi rumput, air, pohon + perbaikan kamera & perluasan dunia | ✅ selesai |
 | 3 | Migrasi combat, dua senjata, sistem elemen (4 elemen) | ⬜ |
 | 4 | Stats, equipment, Lantern Core, inventaris, progresi | ⬜ |
 | 5 | Cutscene pembuka + sistem cutscene, audio, UI/HUD, menu | ⬜ |
