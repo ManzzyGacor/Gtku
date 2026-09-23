@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ambientAt, blendAmbient, luminance, nightAmount, wrapDay } from '../src/systems/daynight';
+import { ambientAt, blendAmbient, luminance, nightAmount, wrapDay } from '../src/core/systems/daynight';
 
 test('noon is fully bright and midnight is dark', () => {
   assert.deepEqual(ambientAt(0.5), [1, 1, 1]);

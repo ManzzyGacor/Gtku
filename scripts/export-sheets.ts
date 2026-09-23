@@ -3,7 +3,7 @@
  * Also writes upscaled `<key>@Nx.png` previews. Usage: npm run assets
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { buildAllSheets } from '../src/art/index';
+import { buildAllSheets } from '../src/art';
 import { encodePng, upscale } from './png';
 
 const out = new URL('../.preview/', import.meta.url).pathname;

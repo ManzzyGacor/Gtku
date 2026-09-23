@@ -1,4 +1,4 @@
-import { CHUNK_TILES } from '../config';
+import { CHUNK_TILES } from '../../config';
 
 export type AreaId = 'village' | 'forest' | 'cave';
 

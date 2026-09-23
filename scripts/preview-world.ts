@@ -1,11 +1,11 @@
 /** Render the whole generated world (ground + props as coloured boxes/sprites) to .preview/world.png. */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { CHUNK_TILES, TILE, WORLD_CHUNKS_H, WORLD_CHUNKS_W, WORLD_PX_H, WORLD_PX_W } from '../src/config';
-import { buildAllSheets } from '../src/art/index';
+import { buildAllSheets } from '../src/art';
 import { Pixmap } from '../src/art/pixmap';
-import { bakeChunk } from '../src/world/bake';
-import { GeneratedWorld } from '../src/world/worldgen';
-import { PROPS } from '../src/world/props';
+import { bakeChunk } from '../src/art/bake';
+import { GeneratedWorld } from '../src/core/world/worldgen';
+import { PROPS } from '../src/core/world/props';
 import { encodePng, upscale } from './png';
 
 const out = new URL('../.preview/', import.meta.url).pathname;

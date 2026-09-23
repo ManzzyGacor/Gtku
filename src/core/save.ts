@@ -1,5 +1,5 @@
 import { LEGACY_SAVE_KEY, SAVE_KEY } from '../config';
-import type { SaveData } from '../state/GameState';
+import type { SaveData } from './state/GameState';
 import { readRaw, removeRaw, writeRaw } from './storage';
 
 /** localStorage persistence. Every access is guarded: private windows / blocked storage must never crash the game. */

@@ -27,7 +27,7 @@ const { input } = await import('../src/core/input');
 const { GameScene } = await import('../src/scenes/GameScene');
 const { UIScene } = await import('../src/scenes/UIScene');
 const { TILE } = await import('../src/config');
-const { KILLS_NEEDED } = await import('../src/state/GameState');
+const { KILLS_NEEDED } = await import('../src/core/state/GameState');
 
 const boot = new mock.Scene('Boot');
 const sheets = buildAllSheets();

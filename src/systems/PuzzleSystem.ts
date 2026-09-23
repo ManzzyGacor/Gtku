@@ -4,7 +4,7 @@ import { TILE } from '../config';
 import { input } from '../core/input';
 import { frameOf } from '../art/register';
 import type { GameScene } from '../scenes/GameScene';
-import { pushIntent, RockPuzzle } from './puzzleLogic';
+import { pushIntent, RockPuzzle } from '../core/systems/puzzleLogic';
 
 interface DoorDef {
   tx: number;

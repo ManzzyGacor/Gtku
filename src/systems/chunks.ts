@@ -7,9 +7,9 @@ import { CHUNK_PX, CHUNK_TILES } from '../config';
 import { frameOf } from '../art/register';
 import type { Sheet } from '../art/sheet';
 import { WATER_FRAMES } from '../art/tiles';
-import { bakeChunk, chunkIsAnimated } from '../world/bake';
-import { PROPS, type PropPlacement, type PropType } from '../world/props';
-import type { ChunkData, WorldSource } from '../world/source';
+import { bakeChunk, chunkIsAnimated } from '../art/bake';
+import { PROPS, type PropPlacement, type PropType } from '../core/world/props';
+import type { ChunkData, WorldSource } from '../core/world/source';
 import { sheetToCanvas } from '../art/register';
 import { hashf } from '../core/rng';
 

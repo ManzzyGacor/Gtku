@@ -1,5 +1,5 @@
 /** Day/night cycle: pure functions (testable). `t` is the day fraction: 0 = midnight, 0.5 = noon. */
-import { clamp, lerp } from '../core/rng';
+import { clamp, lerp } from '../rng';
 
 export type RGB = [number, number, number];
 

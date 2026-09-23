@@ -2,7 +2,7 @@
  * Pure enemy AI (no Phaser): Lendir Lumut (chaser), Pemanah Duri (ranged kiter), Kelelawar Kelam (pack flankers),
  * Kolosus Kelam (boss). The scene renders them and feeds `EnemyEvent`s back into hero damage, particles, camera shake.
  */
-import { clamp } from '../core/rng';
+import { clamp } from '../rng';
 import type { Collision } from '../world/collision';
 
 export type EnemyKind = 'slime' | 'archer' | 'bat' | 'boss';

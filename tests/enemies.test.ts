@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { makeRng } from '../src/core/rng';
-import { Archer, Boss, EnemyWorld, inArc, Slime, type HeroRef, type WorldEvent } from '../src/entities/enemies';
-import { Collision } from '../src/world/collision';
-import type { WorldSource } from '../src/world/source';
+import { Archer, Boss, EnemyWorld, inArc, Slime, type HeroRef, type WorldEvent } from '../src/core/entities/enemies';
+import { Collision } from '../src/core/world/collision';
+import type { WorldSource } from '../src/core/world/source';
 
 const open: WorldSource = {
   widthTiles: 200,

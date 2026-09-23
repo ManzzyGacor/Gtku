@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { Animator } from '../core/anim';
 import { frameOf } from '../art/register';
-import { HeroCore } from './HeroCore';
+import { HeroCore } from '../core/entities/HeroCore';
 
 const CLIP_FPS = { idle: 2.2, walk: 9.5 };
 

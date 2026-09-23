@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Collision } from '../src/world/collision';
-import type { WorldSource } from '../src/world/source';
-import { ATTACKS, HeroCore, type HeroInput, HERO_STATS } from '../src/entities/HeroCore';
+import { Collision } from '../src/core/world/collision';
+import type { WorldSource } from '../src/core/world/source';
+import { ATTACKS, HeroCore, type HeroInput, HERO_STATS } from '../src/core/entities/HeroCore';
 
 const open: WorldSource = {
   widthTiles: 100,

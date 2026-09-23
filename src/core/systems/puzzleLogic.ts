@@ -1,5 +1,5 @@
 /** Push-rock puzzle logic (pure). The rock lives on tiles; the hero pushes it one tile at a time. */
-import { TILE } from '../config';
+import { TILE } from '../../config';
 
 export interface TilePos {
   tx: number;

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { TILE, WORLD_CHUNKS_H, WORLD_CHUNKS_W } from '../src/config';
-import { GeneratedWorld } from '../src/world/worldgen';
-import type { WorldSource } from '../src/world/source';
+import { GeneratedWorld } from '../src/core/world/worldgen';
+import type { WorldSource } from '../src/core/world/source';
 
 const world = new GeneratedWorld();
 

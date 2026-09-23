@@ -2,7 +2,7 @@
  * Pure hero state machine: movement, 3-hit combo, dodge roll, skill, damage. No Phaser.
  * The scene drains `events` every frame to spawn hit tests, particles, sounds, camera shake, etc.
  */
-import { clamp } from '../core/rng';
+import { clamp } from '../rng';
 import type { Collision } from '../world/collision';
 
 export type HeroState = 'free' | 'attack' | 'roll' | 'hurt' | 'cast' | 'dead';

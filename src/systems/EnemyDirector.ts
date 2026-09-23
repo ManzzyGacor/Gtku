@@ -5,11 +5,11 @@
 import Phaser from 'phaser';
 import { TILE } from '../config';
 import { makeRng } from '../core/rng';
-import { Archer, Boss, EnemyCore, EnemyWorld, inArc, Slime, type Projectile, type WorldEvent } from '../entities/enemies';
+import { Archer, Boss, EnemyCore, EnemyWorld, inArc, Slime, type Projectile, type WorldEvent } from '../core/entities/enemies';
 import { EnemyView } from '../entities/EnemyView';
-import type { SwingEvent } from '../entities/HeroCore';
+import type { SwingEvent } from '../core/entities/HeroCore';
 import { P } from '../art/palette';
-import type { SpawnDef } from '../world/source';
+import type { SpawnDef } from '../core/world/source';
 import { frameOf } from '../art/register';
 import type { GameScene } from '../scenes/GameScene';
 import type { LoadedChunk } from './chunks';

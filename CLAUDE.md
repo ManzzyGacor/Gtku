@@ -44,20 +44,27 @@ npm run assets     # ekspor semua sheet seni ke .preview/*.png (untuk dilihat/di
 ```
 src/
   main.ts            entry: konfigurasi Phaser + skala integer (core/display.ts)
-  config.ts          konstanta global (TILE, ukuran dunia, key save)
-  core/              utilitas tanpa/sedikit Phaser: display, input, save, kualitas adaptif, rng, error overlay
-  art/               PIPELINE SENI MURNI-KODE (tanpa DOM): Pixmap, palette, generator sprite/tile/fx/ui/font, registry sheet
-  world/             data dunia: tile, worldgen, chunk, WorldSource, koordinat area, collision grid
-  entities/          HeroCore/HeroView, enemies (AI murni) + EnemyView, NpcView
-  systems/           chunks, lighting, daynight, parallax, fx, cameraRig, EnemyDirector, PuzzleSystem(+Logic), quest, interactables
-  state/             GameState (quest, kill, flag, waktu) + serialisasi save
-  data/              (cadangan) data konten
-  scenes/            Boot, Title, Game, UI (HUD + kontrol sentuh + dialog + minimap)
-tests/               tes logika (node:test + tsx)
+  config.ts          konstanta global (TILE, ukuran dunia, key save/setelan)
+  core/              LOGIKA GAME MURNI — dilarang mengimpor phaser/three, dan hanya boleh
+                     mengimpor src/core/** + src/config (dijaga tests/core-purity.test.ts)
+    world/           tile, worldgen, chunk data, WorldSource, koordinat area, collision grid
+    entities/        HeroCore (gerak/kombo/HP), enemies (AI musuh & boss)
+    systems/         quest, puzzleLogic, daynight, interactables
+    state/           GameState (quest, kill, flag, waktu) + serialisasi save
+    (akar)           rng, save, storage, input, display, errors, settings, perf, graphics, anim
+  art/               PIPELINE SENI MURNI-KODE (tanpa DOM): Pixmap, palette, generator
+                     sprite/tile/fx/ui/font, registry sheet, bake (chunk → pixmap)
+  entities/          HeroView, EnemyView, NpcView (Phaser)
+  systems/           chunks, lighting, parallax, fx, cameraRig, EnemyDirector, PuzzleSystem (Phaser)
+  scenes/            Boot, Title, Game, UI (HUD + kontrol sentuh + dialog + minimap) (Phaser)
+tests/               tes logika (node:test + tsx) + smoke test + penjaga kemurnian core
 scripts/             skrip node (ekspor sheet ke PNG, preview dunia)
 public/assets/override/   TARUH PNG buatan tangan di sini untuk menimpa aset generatif (lihat di bawah)
-docs/                GAME_DESIGN.md, PROGRESS.md
+docs/                OVERHAUL.md (rencana induk), GAME_DESIGN.md, PROGRESS.md, STORY.md
 ```
+
+Saat overhaul 3D berjalan, kode Phaser pindah ke `src/render2d/` dan kode Three.js ke `src/render3d/`
+(lihat `docs/OVERHAUL.md` §7).
 
 ## Konvensi kode
 

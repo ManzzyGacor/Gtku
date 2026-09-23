@@ -1,4 +1,4 @@
-import { TILE } from '../config';
+import { TILE } from '../../config';
 import type { WorldSource } from './source';
 import { TILE_INFO } from './tiles';
 

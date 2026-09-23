@@ -2,8 +2,8 @@
  * Deterministic generator for the Phase 1 world: 128x80 tiles = 8x5 chunks, three seamless areas
  * (Desa Lentera → Hutan Bisik → Gua Kelam). Pure logic, no Phaser.
  */
-import { CHUNK_TILES, TILE, WORLD_TILES_H, WORLD_TILES_W } from '../config';
-import { clamp, fbm, hashf, makeRng, valueNoise } from '../core/rng';
+import { CHUNK_TILES, TILE, WORLD_TILES_H, WORLD_TILES_W } from '../../config';
+import { clamp, fbm, hashf, makeRng, valueNoise } from '../rng';
 import { areaAtTile, CAVE_X0, FOREST_X0, type AreaId } from './areas';
 import { PROPS, type PropPlacement, type PropType } from './props';
 import type { ChunkData, NpcDef, SpawnDef, TileRect, WorldMarkers, WorldSource } from './source';

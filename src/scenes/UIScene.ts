@@ -3,9 +3,9 @@ import { input, type Action } from '../core/input';
 import { wrapText } from '../art/font';
 import { P } from '../art/palette';
 import { pixelText } from '../ui/pixeltext';
-import { trackerLines } from '../systems/quest';
+import { trackerLines } from '../core/systems/quest';
 import { TILE, WORLD_TILES_H, WORLD_TILES_W } from '../config';
-import { T } from '../world/tiles';
+import { T } from '../core/world/tiles';
 import type { GameScene } from './GameScene';
 
 interface Btn {

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { TILE } from '../src/config';
-import { GeneratedWorld } from '../src/world/worldgen';
-import { Collision } from '../src/world/collision';
-import { pushIntent, RockPuzzle } from '../src/systems/puzzleLogic';
+import { GeneratedWorld } from '../src/core/world/worldgen';
+import { Collision } from '../src/core/world/collision';
+import { pushIntent, RockPuzzle } from '../src/core/systems/puzzleLogic';
 
 const world = new GeneratedWorld();
 const col = new Collision(world);

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { TILE } from '../src/config';
-import { Collision } from '../src/world/collision';
-import type { WorldSource } from '../src/world/source';
+import { Collision } from '../src/core/world/collision';
+import type { WorldSource } from '../src/core/world/source';
 
 /** 10x10 world, wall column at x=5. */
 const fake: WorldSource = {

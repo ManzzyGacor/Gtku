@@ -4,11 +4,11 @@
  */
 import { CHUNK_PX, CHUNK_TILES, TILE } from '../config';
 import { hash2 } from '../core/rng';
-import type { Sheet } from '../art/sheet';
-import { VARIANTS, WATER_FRAMES } from '../art/tiles';
-import { Pixmap } from '../art/pixmap';
-import type { WorldSource } from './source';
-import { isGrassy, isWater, T, TILE_INFO } from './tiles';
+import type { Sheet } from './sheet';
+import { VARIANTS, WATER_FRAMES } from './tiles';
+import { Pixmap } from './pixmap';
+import type { WorldSource } from '../core/world/source';
+import { isGrassy, isWater, T, TILE_INFO } from '../core/world/tiles';
 
 const SIDE_DELTAS: [string, number, number][] = [
   ['n', 0, -1],

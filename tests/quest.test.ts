@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { GameState, KILLS_NEEDED, RESPAWN_SECONDS } from '../src/state/GameState';
-import { advanceQuest, dialogueFor, trackerLines } from '../src/systems/quest';
+import { GameState, KILLS_NEEDED, RESPAWN_SECONDS } from '../src/core/state/GameState';
+import { advanceQuest, dialogueFor, trackerLines } from '../src/core/systems/quest';
 
 test('quest progresses stage by stage and lights the lantern at the end', () => {
   const s = new GameState();
