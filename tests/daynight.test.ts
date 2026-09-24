@@ -34,7 +34,7 @@ test('cave blend interpolates', () => {
 });
 
 test('the 3D sky palette is continuous, plausible and darker at night than at noon', async () => {
-  const { skyAt, blendSky, CAVE_SKY, nightAmount, luminance } = await import('../src/core/systems/daynight');
+  const { skyAt, blendSky, CAVE_SKY } = await import('../src/core/systems/daynight');
 
   // every channel stays in range and the curve never jumps
   // Sunrise is genuinely fast, so the bound is per-sample rather than absolute: a discontinuity at

@@ -37,7 +37,7 @@ export interface Pose {
   /** Hand target relative to its shoulder. */
   armL?: [number, number];
   armR?: [number, number];
-  sword?: { angle: number; len?: number; behind?: boolean };
+  sword?: { angle: number; len?: number; behind?: boolean } | undefined;
   face?: 'normal' | 'hurt';
   scarfWave?: number;
 }

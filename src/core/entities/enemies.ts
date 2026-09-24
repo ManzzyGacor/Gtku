@@ -789,7 +789,7 @@ export class EnemyWorld {
   }
 
   clearAll(): void {
-    for (const e of [...this.enemies]) this.remove(e);
+    for (let i = this.enemies.length - 1; i >= 0; i--) this.remove(this.enemies[i]);
     this.projectiles.length = 0;
     this.shockwaves.length = 0;
     this.packs.length = 0;

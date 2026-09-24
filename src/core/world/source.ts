@@ -10,7 +10,7 @@ export interface SpawnDef {
   x: number;
   y: number;
   /** Pack size for `bats`. */
-  count?: number;
+  count?: number | undefined;
 }
 
 export type NpcLook = 'elder' | 'smith' | 'kid' | 'guard';

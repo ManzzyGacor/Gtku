@@ -116,7 +116,8 @@ export class EnemyMesh3D {
 
   update(realDt: number, time: number): void {
     const c = this.core;
-    this.root.position.set(u(c.x), u(c.h) * 0.0, u(c.y));
+    // y stays 0: the root sits on the floor and `body.position.y` carries the hover/bob.
+    this.root.position.set(u(c.x), 0, u(c.y));
     // bats hover; everything else stands on the floor
     const lift = c.kind === 'bat' ? u(c.cy - c.y) : 0;
     this.body.position.y = -lift + this.bob;

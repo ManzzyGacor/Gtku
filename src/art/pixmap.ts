@@ -19,13 +19,17 @@ export function mix(a: Color, b: Color, t: number): Color {
 }
 
 export interface BlitOpts {
-  flipX?: boolean;
+  flipX?: boolean | undefined;
   flipY?: boolean;
   /** 0..1 multiplier on source alpha. */
   alpha?: number;
   /** Optional per-pixel recolor. Return a new color. */
   map?: (c: Color, x: number, y: number) => Color;
 }
+
+/** Signed area of the triangle (a, b, p) — the half-plane test the rasteriser below runs. */
+const edge = (ax: number, ay: number, bx: number, by: number, px: number, py: number): number =>
+  (px - ax) * (by - ay) - (py - ay) * (bx - ax);
 
 export class Pixmap {
   readonly data: Uint8ClampedArray;
@@ -164,8 +168,6 @@ export class Pixmap {
     const maxX = Math.ceil(Math.max(x0, x1, x2));
     const minY = Math.floor(Math.min(y0, y1, y2));
     const maxY = Math.ceil(Math.max(y0, y1, y2));
-    const edge = (ax: number, ay: number, bx: number, by: number, px: number, py: number): number =>
-      (px - ax) * (by - ay) - (py - ay) * (bx - ax);
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
         const px = x + 0.5;

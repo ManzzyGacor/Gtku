@@ -51,13 +51,18 @@ export function formatErrors(): string[] {
 export function installErrorOverlay(): void {
   const el = typeof document !== 'undefined' ? document.getElementById('err') : null;
 
+  const hide = (): void => {
+    if (el) el.style.display = 'none';
+  };
+  // Registered once, with `once: false`, instead of reassigning `el.onclick` inside `show()`:
+  // `show()` runs again on every error, so an assignment there would pile up work and could
+  // silently replace whatever else was listening on the overlay.
+  el?.addEventListener('click', hide);
+
   const show = (): void => {
     if (!el) return;
     el.style.display = 'block';
-    el.textContent = `${formatErrors().slice().reverse().join('\n')}\n\n(ketuk untuk menutup)`;
-    el.onclick = () => {
-      el.style.display = 'none';
-    };
+    el.textContent = `${[...formatErrors()].reverse().join('\n')}\n\n(ketuk untuk menutup)`;
   };
 
   const capture = (msg: string, where: string): void => {

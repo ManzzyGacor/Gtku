@@ -177,6 +177,17 @@ export function areaOfTile(tx: number): AreaId {
   return areaAtTile(tx);
 }
 
+/** Centre line of the forest river at row `y` — two sine terms so it never reads as a canal. */
+const riverCx = (y: number): number => RIVER_X + Math.sin(y * 0.07 + 1.2) * 4 + Math.sin(y * 0.19) * 1.2;
+/** Centre line of the village brook. */
+const brookCx = (y: number): number => BROOK_X + Math.sin(y * 0.09) * 1.6;
+/** Inside the part of the map the player is meant to walk (used to keep borders out of it). */
+const playable = (x: number, y: number): boolean => {
+  if (x >= CAVE_X0) return false;
+  if (x >= FOREST_X0) return y >= FOREST_PLAY.y0 && y <= FOREST_PLAY.y1 && x <= FOREST_PLAY.x1 + 1;
+  return x >= VILLAGE_PLAY.x0 && y >= VILLAGE_PLAY.y0 && y <= VILLAGE_PLAY.y1;
+};
+
 export class GeneratedWorld implements WorldSource {
   readonly widthTiles = WORLD_TILES_W;
   readonly heightTiles = WORLD_TILES_H;
@@ -326,8 +337,6 @@ export class GeneratedWorld implements WorldSource {
   /** Forest river with two bridges and a ford, the village brook, the pond and the forest lake. */
   private rivers(seed: number): void {
     const g = this.g;
-    const riverCx = (y: number): number => RIVER_X + Math.sin(y * 0.07 + 1.2) * 4 + Math.sin(y * 0.19) * 1.2;
-
     for (let y = 0; y < g.h; y++) {
       const cx = riverCx(y);
       const ford = y >= FORD_Y0 && y <= FORD_Y1;
@@ -343,7 +352,6 @@ export class GeneratedWorld implements WorldSource {
     }
 
     // village brook: narrow, marks the eastern edge of the village
-    const brookCx = (y: number): number => BROOK_X + Math.sin(y * 0.09) * 1.6;
     for (let y = VILLAGE_PLAY.y0 - 4; y <= VILLAGE_PLAY.y1 + 4; y++) {
       const cx = brookCx(y);
       for (let x = Math.floor(cx - 3); x <= Math.ceil(cx + 3); x++) {
@@ -636,11 +644,6 @@ export class GeneratedWorld implements WorldSource {
   private borders(seed: number): void {
     const g = this.g;
     const rng = makeRng(seed + 99);
-    const playable = (x: number, y: number): boolean => {
-      if (x >= CAVE_X0) return false;
-      if (x >= FOREST_X0) return y >= FOREST_PLAY.y0 && y <= FOREST_PLAY.y1 && x <= FOREST_PLAY.x1 + 1;
-      return x >= VILLAGE_PLAY.x0 && y >= VILLAGE_PLAY.y0 && y <= VILLAGE_PLAY.y1;
-    };
     for (let y = 0; y < g.h; y++)
       for (let x = 0; x < CAVE_X0; x++) {
         if (playable(x, y)) continue;

@@ -105,11 +105,12 @@ function readStored(): Partial<Settings> {
   }
 }
 
+const bool = (v: string | null): boolean | null => (v === '1' || v === 'on' ? true : v === '0' || v === 'off' ? false : null);
+
 /** Parse `?fps=1&bloom=0&preset=ultra&q=1` into a partial settings patch. */
 export function parseUrlOverrides(search: string): Partial<Settings> {
   const out: Partial<Settings> = {};
   const q = new URLSearchParams(search);
-  const bool = (v: string | null): boolean | null => (v === '1' || v === 'on' ? true : v === '0' || v === 'off' ? false : null);
   const fps = bool(q.get('fps'));
   if (fps !== null) out.fpsCounter = fps;
   const bloom = bool(q.get('bloom'));

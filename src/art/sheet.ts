@@ -6,8 +6,8 @@ export interface FrameRect {
   w: number;
   h: number;
   /** Anchor inside the frame (px from the frame's top-left), used as sprite origin. Defaults to centre. */
-  ax?: number;
-  ay?: number;
+  ax?: number | undefined;
+  ay?: number | undefined;
 }
 
 export interface Sheet {
@@ -18,7 +18,7 @@ export interface Sheet {
 
 /** Simple shelf packer that turns many small pixmaps into one atlas with named frames. */
 export class SheetBuilder {
-  private items: { name: string; pm: Pixmap; ax?: number; ay?: number }[] = [];
+  private items: { name: string; pm: Pixmap; ax?: number | undefined; ay?: number | undefined }[] = [];
 
   constructor(
     readonly key: string,

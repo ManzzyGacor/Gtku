@@ -116,7 +116,7 @@ function frame(env: Env, inp: Partial<HeroInput> = {}): void {
 }
 
 function run(env: Env, frames: number, inp: Partial<HeroInput> = {}, each?: (i: number) => Partial<HeroInput> | void): void {
-  for (let n = 0; n < frames; n++) frame(env, { ...inp, ...(each?.(n) ?? {}) });
+  for (let n = 0; n < frames; n++) frame(env, { ...inp, ...each?.(n) });
 }
 
 function teleport(env: Env, x: number, y: number): void {

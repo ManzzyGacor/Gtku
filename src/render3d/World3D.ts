@@ -265,6 +265,9 @@ export class World3D {
   private planCache = new Map<number, ChunkPlan>();
   private queue: { cx: number; cy: number; pri: number }[] = [];
   private activeLights: PointLightPlan[] = [];
+  /** Scratch for `pickNearestLights`, sized once to the light pool so no frame allocates. */
+  private lightPick: (PointLightPlan | null)[] = [];
+  private lightDist: number[] = [];
   private radiusChunks = 2;
   /**
    * Camera ground extents and the projection onto its axes. `setView` replaces these with the real
@@ -320,6 +323,8 @@ export class World3D {
       l.position.set(0, -1000, 0);
       scene.add(l);
       this.pool.push(l);
+      this.lightPick.push(null);
+      this.lightDist.push(Infinity);
     }
 
     const pix = buildGreyboxTextures();
@@ -562,7 +567,7 @@ export class World3D {
     return out;
   }
 
-  private poolFor(groupKey: string, sample: { kind: ShapeKind; texture: GreyboxTexture; emissive?: boolean; nightOnly?: boolean }): InstancePool {
+  private poolFor(groupKey: string, sample: { kind: ShapeKind; texture: GreyboxTexture; emissive?: boolean | undefined; nightOnly?: boolean | undefined }): InstancePool {
     let pool = this.pools.get(groupKey);
     if (pool) return pool;
     if (sample.nightOnly) this.nightPools.add(groupKey);
@@ -710,19 +715,15 @@ export class World3D {
       }
     }
 
-    const active = this.activeLights
-      .filter((l) => !l.nightOnly || night > 0.15)
-      .map((l) => ({ l, d: (l.x - focus.x) ** 2 + (l.z - focus.z) ** 2 }))
-      .sort((a, b) => a.d - b.d)
-      .slice(0, this.lightBudget);
-    this.pool.forEach((p, i) => {
-      const hit = active[i];
-      if (!hit) {
+    this.pickNearestLights(focus, night);
+    for (let i = 0; i < this.pool.length; i++) {
+      const p = this.pool[i];
+      const l = this.lightPick[i] ?? null;
+      if (!l) {
         // parked, not hidden: hiding it would change the light count and recompile the shaders
         p.intensity = 0;
-        return;
+        continue;
       }
-      const l = hit.l;
       p.position.set(l.x, l.y, l.z);
       p.color.setHex(l.color);
       p.distance = l.radius;
@@ -732,7 +733,39 @@ export class World3D {
         ? 1 + l.flicker * (Math.sin(this.clock * 9 + phase) * 0.6 + Math.sin(this.clock * 23 + phase * 1.7) * 0.4)
         : 1;
       p.intensity = l.intensity * flick * (l.nightOnly ? Math.min(1, night * 2) : 1) * 2.2;
-    });
+    }
+  }
+
+  /**
+   * Choose the `lightBudget` lamps nearest the camera focus, into `lightPick`, **without
+   * allocating**.
+   *
+   * This used to be `filter().map().sort().slice()`: three arrays plus one wrapper object per lamp,
+   * thrown away every single frame, over every lamp in every loaded chunk (a few hundred at night
+   * in the village). That is exactly the kind of steady drip that shows up as a GC hiccup every
+   * couple of seconds on a phone — and all of it to pick three of them. An insertion into a
+   * three-slot sorted list is both cheaper and garbage-free.
+   */
+  private pickNearestLights(focus: { x: number; z: number }, night: number): void {
+    const budget = Math.min(this.lightBudget, this.pool.length);
+    for (let i = 0; i < this.pool.length; i++) {
+      this.lightPick[i] = null;
+      this.lightDist[i] = Infinity;
+    }
+    for (const l of this.activeLights) {
+      if (l.nightOnly && night <= 0.15) continue;
+      const d = (l.x - focus.x) ** 2 + (l.z - focus.z) ** 2;
+      for (let i = 0; i < budget; i++) {
+        if (d >= this.lightDist[i]) continue;
+        for (let j = budget - 1; j > i; j--) {
+          this.lightDist[j] = this.lightDist[j - 1];
+          this.lightPick[j] = this.lightPick[j - 1];
+        }
+        this.lightDist[i] = d;
+        this.lightPick[i] = l;
+        break;
+      }
+    }
   }
 
   /** For the report. */
@@ -761,6 +794,8 @@ export class World3D {
       l.dispose();
     }
     this.pool.length = 0;
+    // the copy is deliberate: unloadChunk deletes from `loaded` as it goes
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const c of [...this.loaded.values()]) this.unloadChunk(c);
     for (const p of this.pools.values()) p.dispose();
     this.pools.clear();

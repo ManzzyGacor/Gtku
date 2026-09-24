@@ -41,9 +41,9 @@ export interface ShapeInstance {
   /** Rotate around Y in radians (fences, bridges). */
   rotY?: number;
   /** Drawn unlit and at full brightness (lantern glass, crystals). */
-  emissive?: boolean;
+  emissive?: boolean | undefined;
   /** Only shown after dark — lit windows, which is what makes a village look inhabited at night. */
-  nightOnly?: boolean;
+  nightOnly?: boolean | undefined;
 }
 
 export interface PointLightPlan {
@@ -82,8 +82,8 @@ interface Part {
   sz: number;
   color: number;
   texture: GreyboxTexture;
-  emissive?: boolean;
-  nightOnly?: boolean;
+  emissive?: boolean | undefined;
+  nightOnly?: boolean | undefined;
 }
 
 const box = (sx: number, sy: number, sz: number, color: number, texture: GreyboxTexture, extra: Partial<Part> = {}): Part => ({

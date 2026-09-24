@@ -501,7 +501,6 @@ export class Game3D {
    * Each one is applied on top of the player's *own* settings, one change at a time.
    */
   private probeScenarios(): ProbeScenario[] {
-    const p = () => profileOf(settings.get('preset'));
     return [
       { id: 'base', label: 'semua menyala', apply: () => undefined },
       { id: 'lights', label: 'tanpa lampu dinamis', apply: () => this.scene3d.setLightBudget(0) },
@@ -516,7 +515,7 @@ export class Game3D {
       {
         id: 'half',
         label: 'skala render 60%',
-        apply: () => this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, p().pixelHeight, 0.6),
+        apply: () => this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, profileOf(settings.get('preset')).pixelHeight, 0.6),
       },
       {
         id: 'px360',

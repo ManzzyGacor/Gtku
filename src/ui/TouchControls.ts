@@ -123,10 +123,10 @@ export class TouchControls {
 
     const bs = settings.get('buttonScale');
     for (const b of this.buttons) {
-      const r = b.r * bs;
+      const br = b.r * bs;
       Object.assign(b.node.style, {
-        width: `${r * 2}px`,
-        height: `${r * 2}px`,
+        width: `${br * 2}px`,
+        height: `${br * 2}px`,
         left: `${w - b.ox * bs}px`,
         top: `${h - b.oy * bs}px`,
         fontSize: `${Math.max(8, Math.round(9 * bs))}px`,

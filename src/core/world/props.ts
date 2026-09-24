@@ -86,7 +86,7 @@ export interface PropPlacement {
   x: number;
   y: number;
   /** Optional variant/flip flag. */
-  flip?: boolean;
+  flip?: boolean | undefined;
   /** Sign text (Indonesian) shown when interacting. */
   text?: string;
 }

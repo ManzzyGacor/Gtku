@@ -62,9 +62,9 @@ export class GameState {
   load(d: SaveData): void {
     this.worldTime = d.worldTime ?? 0;
     this.dayTime = d.dayTime ?? 0.33;
-    this.killed = { ...(d.killed ?? {}) };
+    this.killed = { ...d.killed };
     this.quest = { ...(d.quest ?? { stage: 0, kills: 0 }) };
-    this.flags = { ...(d.flags ?? {}) };
+    this.flags = { ...d.flags };
     this.puzzleSolved = !!d.puzzle?.solved;
     this.bossDefeated = !!d.bossDefeated;
     this.checkpoint = d.checkpoint ?? 'cp_village';

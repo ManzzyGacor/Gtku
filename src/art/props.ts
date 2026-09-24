@@ -58,14 +58,14 @@ export function treePine(seed: number): Pixmap {
     [5, 10, 5],
   ];
   const rng = makeRng(seed);
-  tiers.forEach(([y, w, h], ti) => {
+  tiers.forEach(([y, w, h]) => {
     for (let i = 0; i < h; i++) {
       const half = Math.round((w / 2) * ((i + 1) / h));
       const yy = y + i - 4;
       for (let x = -half; x <= half; x++) {
         const t = (x + half) / (half * 2 + 1);
         const c = t < 0.28 ? P.g3 : t < 0.55 ? P.g2 : t < 0.8 ? P.g1 : P.g0;
-        b.set(13 + x, yy + ti * 0, i === h - 1 && rng() < 0.4 ? P.g0 : c);
+        b.set(13 + x, yy, i === h - 1 && rng() < 0.4 ? P.g0 : c);
       }
     }
   });

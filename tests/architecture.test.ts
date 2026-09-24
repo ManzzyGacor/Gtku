@@ -65,12 +65,12 @@ function localTargets(dir: string): { file: string; line: number; target: string
 
 test('src/core has files and none of them import a renderer', () => {
   assert.ok(FILES.length >= 20, `expected the moved logic, found ${FILES.length} files`);
-  const banned = ['phaser', 'three'];
+  const banned = new Set(['phaser', 'three']);
   const bad: string[] = [];
   for (const file of FILES) {
     for (const { spec, line } of specifiers(readFileSync(file, 'utf8'))) {
       const pkg = spec.startsWith('.') ? '' : spec.split('/')[0];
-      if (banned.includes(pkg)) bad.push(`${relative(ROOT, file)}:${line} imports "${spec}"`);
+      if (banned.has(pkg)) bad.push(`${relative(ROOT, file)}:${line} imports "${spec}"`);
     }
   }
   assert.deepEqual(bad, [], `src/core must stay renderer-free:\n${bad.join('\n')}`);
@@ -91,7 +91,7 @@ test('src/core only reaches into src/core and src/config', () => {
 });
 
 test('the logic that Fase 0 was supposed to move actually lives in src/core now', () => {
-  const rel = FILES.map((f) => relative(ROOT, f).split('\\').join('/'));
+  const rel = new Set(FILES.map((f) => relative(ROOT, f).split('\\').join('/')));
   for (const expected of [
     'src/core/world/worldgen.ts',
     'src/core/world/collision.ts',
@@ -103,7 +103,7 @@ test('the logic that Fase 0 was supposed to move actually lives in src/core now'
     'src/core/systems/daynight.ts',
     'src/core/state/GameState.ts',
   ]) {
-    assert.ok(rel.includes(expected), `${expected} is missing`);
+    assert.ok(rel.has(expected), `${expected} is missing`);
   }
 });
 

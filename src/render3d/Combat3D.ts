@@ -33,7 +33,7 @@ interface Flying {
   life: number;
   dmg: number;
   pierce: number;
-  element?: ElementId;
+  element?: ElementId | undefined;
   hit: Set<EnemyCore>;
   mesh: THREE.Mesh;
 }

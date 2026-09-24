@@ -391,7 +391,7 @@ export class SettingsPanel {
 
   showErrors(): void {
     const lines = formatErrors();
-    this.showDump(lines.length ? lines.slice().reverse().join('\n') : 'Belum ada error yang tercatat.');
+    this.showDump(lines.length ? [...lines].reverse().join('\n') : 'Belum ada error yang tercatat.');
   }
 
   private showDump(text: string): void {

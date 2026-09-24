@@ -43,7 +43,7 @@ export interface ShootEvent {
   pierce: number;
   /** 0..1, for effect scale and sound pitch. */
   charge: number;
-  element?: ElementId;
+  element?: ElementId | undefined;
   shot: string;
 }
 

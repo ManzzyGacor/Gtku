@@ -19,7 +19,7 @@ for (let cy = 0; cy < WORLD_CHUNKS_H; cy++)
   for (let cx = 0; cx < WORLD_CHUNKS_W; cx++) full.blit(bakeChunk(world, tiles, cx, cy, 0), cx * CHUNK_TILES * TILE, cy * CHUNK_TILES * TILE);
 
 // props, y-sorted
-const all: { type: keyof typeof PROPS; x: number; y: number; flip?: boolean }[] = [];
+const all: { type: keyof typeof PROPS; x: number; y: number; flip?: boolean | undefined }[] = [];
 for (let cy = 0; cy < WORLD_CHUNKS_H; cy++) for (let cx = 0; cx < WORLD_CHUNKS_W; cx++) all.push(...world.chunk(cx, cy).props);
 all.sort((a, b) => a.y - b.y);
 for (const p of all) {
