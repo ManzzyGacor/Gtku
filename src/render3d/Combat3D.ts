@@ -44,6 +44,13 @@ export interface CombatHooks {
   shake(amount: number, seconds: number): void;
   /** A burst of sparks at a world position (2D px). */
   spark(x: number, y: number, color: number, big: boolean): void;
+  /** A rising damage number at a world position (2D px). */
+  damage(x: number, y: number, amount: number, color: string, big: boolean): void;
+  /** An enemy died: the quest counts it, and it may leave a heal orb. */
+  killed(kind: string, x: number, y: number): void;
+  /** The boss woke up / was defeated, so the arena doors can react. */
+  bossWoke(): void;
+  bossDefeated(x: number, y: number): void;
 }
 
 export class Combat3D {
@@ -155,6 +162,7 @@ export class Combat3D {
       if (!e.hurt(dmg, hero.x, hero.y - 6, ev.knock, stun, { emit: (x) => this.world.events.push(x) })) continue;
       hits++;
       this.meshes.get(e)?.flash();
+      this.hooks.damage(e.x, e.y - e.h - 2, dmg, res.reaction ? `#${res.reaction.color.toString(16).padStart(6, '0')}` : hero.isHeavy ? '#ffd15a' : '#ffffff', hero.isHeavy || !!res.reaction);
       this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : el ? ELEMENTS[el].color : 0xffe9a8, hero.isHeavy);
       if (res.reaction) {
         reacted = true;
@@ -191,9 +199,11 @@ export class Combat3D {
       if (Math.hypot(e.x - x, e.cy - y) > radius + e.radius) continue;
       const bag = this.statusOf(e);
       const res = hero.element ? applyElement(bag, hero.element) : { damageMult: 1, reaction: null };
-      if (!e.hurt(Math.round(dmg * res.damageMult), x, y, knock, stun, { emit: (ev) => this.world.events.push(ev) })) continue;
+      const blastDmg = Math.round(dmg * res.damageMult);
+      if (!e.hurt(blastDmg, x, y, knock, stun, { emit: (ev) => this.world.events.push(ev) })) continue;
       hits++;
       this.meshes.get(e)?.flash();
+      this.hooks.damage(e.x, e.y - e.h - 2, blastDmg, '#ffe066', true);
       this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : 0xffe066, true);
       if (res.reaction) this.burst(e, res.reaction.burst, res.reaction.element, dmg);
     }
@@ -244,6 +254,7 @@ export class Combat3D {
           const dmg = Math.round(a.dmg * res.damageMult);
           if (e.hurt(dmg, a.x - a.vx * 0.02, a.y - a.vy * 0.02, 90, 0.16, { emit: (x) => this.world.events.push(x) })) {
             this.meshes.get(e)?.flash();
+            this.hooks.damage(e.x, e.y - e.h - 2, dmg, res.reaction ? '#ffe066' : '#ffe9a8', a.pierce > 1);
             this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : 0xffe9a8, false);
             this.hooks.freeze(HERO_STATS.hitStopMs * 0.5);
             sfx.hit(false);
@@ -336,8 +347,14 @@ export class Combat3D {
           this.hooks.shake(2, 0.12);
           sfx.die();
           this.state.markKilled(ev.enemy.spawnId || `${ev.enemy.kind}`);
+          this.hooks.killed(ev.enemy.kind, ev.enemy.x, ev.enemy.y);
+          if (ev.enemy.kind === 'boss') this.hooks.bossDefeated(ev.enemy.x, ev.enemy.cy);
           break;
         }
+        case 'roar':
+          // the boss's wake-up roar: the arena doors slam on this
+          if (ev.enemy.kind === 'boss') this.hooks.bossWoke();
+          break;
         case 'removed':
           this.dropMesh(ev.enemy);
           break;

@@ -27,8 +27,7 @@ const host = document.getElementById('game') ?? document.body;
 async function boot(): Promise<void> {
   if (settings.get('renderer') === '3d') {
     const { start3d } = await import('./render3d/boot3d');
-    const booted = start3d(host, debug);
-    (window as unknown as { __game3d: unknown }).__game3d = booted;
+    (window as unknown as { __game3d: unknown }).__game3d = await start3d(host, debug);
   } else {
     const { start2d } = await import('./render2d/boot2d');
     (window as unknown as { __game: unknown }).__game = start2d(host);

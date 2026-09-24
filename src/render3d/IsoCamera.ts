@@ -81,6 +81,11 @@ export class IsoCamera {
     return this.pitchDeg;
   }
 
+  /** The fixed yaw in radians, for anything that wants to face the camera (NPCs, billboards). */
+  get yawRadians(): number {
+    return deg(ISO_YAW_DEG);
+  }
+
   get zoom(): number {
     return this.zoomLevel;
   }

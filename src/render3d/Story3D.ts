@@ -1,0 +1,288 @@
+/**
+ * Everything that makes the world a game rather than a sandbox: villagers, the things you can
+ * talk to or touch, the main quest, the checkpoints you rest at, the Great Lantern's payoff, and
+ * the heal orbs enemies drop.
+ *
+ * Ported from the 2D `GameScene`, and it runs the *same* pure logic — `advanceQuest`,
+ * `dialogueFor`, `nearestInteractable` — so the quest reaches the same four stages in the same
+ * order, with the same dialogue.
+ */
+import * as THREE from 'three';
+import { TILE, WORLD_CHUNKS_H, WORLD_CHUNKS_W } from '../config';
+import { sfx } from '../core/audio';
+import { input } from '../core/input';
+import { nearestInteractable, type Interactable } from '../core/systems/interactables';
+import { advanceQuest, dialogueFor, QUEST_TITLE, trackerLines, type NpcId, type QuestEvent } from '../core/systems/quest';
+import type { GameState } from '../core/state/GameState';
+import type { HeroCore } from '../core/entities/HeroCore';
+import type { Collision } from '../core/world/collision';
+import type { NpcDef, WorldSource } from '../core/world/source';
+import type { DialogueSpec } from '../ui/Dialogue';
+import type { MapMark } from '../ui/Minimap';
+import { NpcMesh3D } from './NpcMesh3D';
+import { u } from './worldPlan';
+
+/** A heal orb an enemy dropped. */
+interface Pickup {
+  x: number;
+  y: number;
+  age: number;
+  heal: number;
+  mesh: THREE.Mesh;
+}
+
+export interface StoryHooks {
+  dialogue(spec: DialogueSpec): void;
+  toast(text: string): void;
+  banner(text: string): void;
+  hint(text: string | null): void;
+  /** Rising text at a world position (px). */
+  float(x: number, y: number, text: string, color: string, big?: boolean): void;
+  spark(x: number, y: number, color: number, big: boolean): void;
+  save(force?: boolean): void;
+  shake(amount: number, seconds: number): void;
+}
+
+export class Story3D {
+  private npcs: NpcMesh3D[] = [];
+  private interactables: Interactable[] = [];
+  private pickups: Pickup[] = [];
+  private orbGeo: THREE.BufferGeometry;
+  private orbMat: THREE.MeshBasicMaterial;
+  /** The Great Lantern's beacon, switched on when the quest completes. */
+  private beacon: THREE.PointLight;
+  private beaconGlow: THREE.Mesh;
+  private beaconMat: THREE.MeshBasicMaterial;
+  private clock = 0;
+
+  constructor(
+    private readonly scene: THREE.Object3D,
+    private readonly world: WorldSource,
+    private readonly collision: Collision,
+    private readonly state: GameState,
+    private readonly hooks: StoryHooks,
+  ) {
+    this.orbGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
+    this.orbMat = new THREE.MeshBasicMaterial({ color: 0x7cf07c });
+
+    const m = this.world.markers.lantern;
+    this.beacon = new THREE.PointLight(0xffd08a, 0, 26, 1.4);
+    this.beacon.position.set(u(m.x), 4.2, u(m.y));
+    scene.add(this.beacon);
+    this.beaconMat = new THREE.MeshBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.beaconGlow = new THREE.Mesh(new THREE.SphereGeometry(1.6, 10, 8), this.beaconMat);
+    this.beaconGlow.position.copy(this.beacon.position);
+    this.beaconGlow.visible = false;
+    scene.add(this.beaconGlow);
+
+    this.build();
+  }
+
+  // ───────────────────────── world scan ─────────────────────────
+
+  /**
+   * Walk every chunk once and collect the villagers, the readable signs and the checkpoints.
+   * The world is 128 chunks, and this runs at load: cheaper than tracking it during streaming,
+   * and it means an NPC never fails to exist because their chunk happened to be unloaded.
+   */
+  private build(): void {
+    for (let cy = 0; cy < WORLD_CHUNKS_H; cy++)
+      for (let cx = 0; cx < WORLD_CHUNKS_W; cx++) {
+        const chunk = this.world.chunk(cx, cy);
+        for (const n of chunk.npcs) {
+          this.npcs.push(new NpcMesh3D(this.scene, n));
+          // villagers are solid, so you cannot walk through the elder
+          this.collision.addBlocker(Math.floor(n.x / TILE), Math.floor(n.y / TILE));
+          this.interactables.push({
+            id: n.id,
+            x: n.x,
+            y: n.y,
+            range: 34,
+            label: () => 'Bicara',
+            interact: () => this.talk(n),
+          });
+        }
+        for (const p of chunk.props) {
+          if (p.type !== 'sign' || !p.text) continue;
+          const text = p.text;
+          this.interactables.push({
+            id: `sign_${p.x}_${p.y}`,
+            x: p.x,
+            y: p.y - 4,
+            range: 26,
+            label: () => 'Baca',
+            interact: () => this.hooks.dialogue({ name: 'Papan', lines: [text] }),
+          });
+        }
+      }
+    for (const cp of this.world.markers.checkpoints) {
+      this.interactables.push({
+        id: cp.id,
+        x: cp.x,
+        y: cp.y - 4,
+        range: 32,
+        label: () => 'Istirahat',
+        interact: () => this.rest(cp.id, cp.name),
+      });
+    }
+    this.refreshMarkers();
+    this.setLanternLit(!!this.state.flags.lanternLit, false);
+  }
+
+  // ───────────────────────── quest ─────────────────────────
+
+  private talk(n: NpcDef): void {
+    const script = dialogueFor(n.id as NpcId, this.state);
+    this.hooks.dialogue({
+      name: n.name,
+      look: n.look,
+      lines: script.lines,
+      onDone: () => {
+        if (script.onDone) this.questEvent(script.onDone);
+      },
+    });
+  }
+
+  /** Apply a quest event, tell the player, and persist. Same rules as the 2D build. */
+  questEvent(ev: QuestEvent): void {
+    const r = advanceQuest(this.state, ev);
+    if (!r.changed) return;
+    if (r.message) this.hooks.toast(r.message);
+    if (r.lightLantern) this.lightLantern();
+    this.refreshMarkers();
+    if (ev.type !== 'kill' || r.message) this.hooks.save();
+  }
+
+  private refreshMarkers(): void {
+    const stage = this.state.quest.stage;
+    for (const npc of this.npcs) {
+      if (npc.def.id !== 'wulan') {
+        npc.setMarker(null);
+        continue;
+      }
+      npc.setMarker(stage === 0 ? 'quest' : stage === 3 ? 'turnin' : null);
+    }
+  }
+
+  /** The finale: the Great Lantern burns again. */
+  private lightLantern(): void {
+    const m = this.world.markers.lantern;
+    this.setLanternLit(true, true);
+    this.hooks.spark(m.x, m.y - 40, 0xffd98a, true);
+    this.hooks.banner('Lentera Agung menyala kembali!');
+    this.hooks.shake(3, 0.6);
+  }
+
+  private setLanternLit(lit: boolean, announce: boolean): void {
+    this.state.flags.lanternLit = lit;
+    this.beacon.intensity = lit ? 6 : 0;
+    this.beaconGlow.visible = lit;
+    this.beaconMat.opacity = lit ? 0.5 : 0;
+    void announce;
+  }
+
+  /** Shrine / lantern: heal fully, remember the checkpoint, save. */
+  private rest(id: string, name: string): void {
+    this.state.checkpoint = id;
+    this.hooks.toast(`${name}: HP pulih, progres tersimpan`);
+    this.hooks.save(true);
+    this.onRest();
+  }
+
+  /** Set by the game so resting can heal the hero. */
+  onRest: () => void = () => undefined;
+
+  // ───────────────────────── pickups ─────────────────────────
+
+  /** Enemies sometimes leave a heal orb behind. */
+  dropHeal(x: number, y: number, heal = 2): void {
+    const mesh = new THREE.Mesh(this.orbGeo, this.orbMat);
+    mesh.position.set(u(x), 0.6, u(y));
+    this.scene.add(mesh);
+    this.pickups.push({ x, y, age: 0, heal, mesh });
+  }
+
+  private updatePickups(realDt: number, hero: HeroCore): void {
+    for (let i = this.pickups.length - 1; i >= 0; i--) {
+      const p = this.pickups[i];
+      p.age += realDt;
+      const d = Math.hypot(hero.x - p.x, hero.y - 6 - p.y);
+      // after a moment they drift toward the hero, so a kill never leaves loot stranded
+      if (p.age > 0.35 && d < 50 && hero.alive && d > 0.001) {
+        p.x += ((hero.x - p.x) / d) * 130 * realDt;
+        p.y += ((hero.y - 6 - p.y) / d) * 130 * realDt;
+      }
+      p.mesh.position.set(u(p.x), 0.6 + Math.sin(p.age * 5) * 0.12, u(p.y));
+      p.mesh.rotation.y += realDt * 3;
+      if (d < 10 && hero.alive && hero.hp < hero.maxHp) {
+        hero.heal(p.heal);
+        this.hooks.float(hero.x, hero.y - 26, `+${p.heal}`, '#7cf07c');
+        this.hooks.spark(p.x, p.y, 0x7cf07c, false);
+        p.mesh.removeFromParent();
+        this.pickups.splice(i, 1);
+      } else if (p.age > 18) {
+        p.mesh.removeFromParent();
+        this.pickups.splice(i, 1);
+      }
+    }
+  }
+
+  // ───────────────────────── per frame ─────────────────────────
+
+  /** @returns the interact prompt to show, if any. */
+  update(dt: number, realDt: number, hero: HeroCore, cameraYaw: number, dialogueOpen: boolean): void {
+    this.clock += realDt;
+    for (const npc of this.npcs) npc.update(realDt, cameraYaw);
+    this.updatePickups(realDt, hero);
+
+    if (this.beaconGlow.visible) {
+      const flicker = 0.42 + Math.sin(this.clock * 2.2) * 0.06 + Math.sin(this.clock * 5.7) * 0.03;
+      this.beaconMat.opacity = flicker;
+      this.beacon.intensity = 5.4 + flicker * 2;
+    }
+
+    let label: string | null = null;
+    if (!dialogueOpen && hero.alive && dt > 0) {
+      const it = nearestInteractable(this.interactables, hero.x, hero.y);
+      label = it ? it.label() : null;
+      if (it && input.consume('interact', 120)) {
+        it.interact();
+        sfx.swap();
+      }
+    }
+    this.hooks.hint(label);
+  }
+
+  /** Markers for the minimap: villagers, checkpoints and the current objective. */
+  mapMarks(): MapMark[] {
+    const stage = this.state.quest.stage;
+    const out: MapMark[] = [];
+    for (const npc of this.npcs) {
+      const highlight = npc.def.id === 'wulan' && (stage === 0 || stage === 3);
+      out.push({ x: npc.def.x, y: npc.def.y, color: highlight ? '#ffd15a' : '#66e0ff', size: highlight ? 3 : 2 });
+    }
+    for (const cp of this.world.markers.checkpoints) out.push({ x: cp.x, y: cp.y, color: '#ffb04a' });
+    if (stage === 2) {
+      const b = this.world.markers.boss.spawn;
+      out.push({ x: b.x, y: b.y, color: '#ff5a4a', size: 3 });
+    }
+    return out;
+  }
+
+  questText(): { title: string; lines: string[] } {
+    return { title: QUEST_TITLE, lines: trackerLines(this.state) };
+  }
+
+  dispose(): void {
+    for (const npc of this.npcs) npc.dispose();
+    this.npcs = [];
+    for (const p of this.pickups) p.mesh.removeFromParent();
+    this.pickups = [];
+    this.beaconGlow.removeFromParent();
+    this.beacon.removeFromParent();
+    this.beaconGlow.geometry.dispose();
+    this.beaconMat.dispose();
+    this.orbGeo.dispose();
+    this.orbMat.dispose();
+  }
+}

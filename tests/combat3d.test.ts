@@ -21,11 +21,15 @@ interface Log {
   freezes: number[];
   shakes: number[];
   sparks: number[];
+  damages: number[];
+  killed: string[];
+  bossWoke: number;
+  bossDied: number;
 }
 
 function setup(): { combat: Combat3D; hero: HeroCore; log: Log; scene: THREE.Group } {
   const scene = new THREE.Group();
-  const log: Log = { freezes: [], shakes: [], sparks: [] };
+  const log: Log = { freezes: [], shakes: [], sparks: [], damages: [], killed: [], bossWoke: 0, bossDied: 0 };
   const state = new GameState();
   const start = world.markers.playerStart;
   const hero = new HeroCore(start.x, start.y);
@@ -34,6 +38,10 @@ function setup(): { combat: Combat3D; hero: HeroCore; log: Log; scene: THREE.Gro
     freeze: (ms) => log.freezes.push(ms),
     shake: (a) => log.shakes.push(a),
     spark: (_x, _y, color) => log.sparks.push(color),
+    damage: (_x, _y, amount) => log.damages.push(amount),
+    killed: (kind) => log.killed.push(kind),
+    bossWoke: () => log.bossWoke++,
+    bossDefeated: () => log.bossDied++,
   });
   return { combat, hero, log, scene };
 }

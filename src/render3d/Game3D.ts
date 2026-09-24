@@ -13,9 +13,16 @@ import { PerfMeter } from '../core/perf';
 import { settings } from '../core/settings';
 import { DAY_SECONDS, gradeAt, nightAmount, smooth, timeLabel } from '../core/systems/daynight';
 import { CAVE_X0, FOREST_X0 } from '../core/world/areas';
-import { HeroCore, type HeroEvent, type HeroInput } from '../core/entities/HeroCore';
+import { HeroCore, HERO_STATS, type HeroEvent, type HeroInput } from '../core/entities/HeroCore';
 import { WEAPONS } from '../core/combat/weapons';
 import { GameState } from '../core/state/GameState';
+import { loadGame, saveGame } from '../core/save';
+import { AREAS, areaAtTile } from '../core/world/areas';
+import { Dialogue } from '../ui/Dialogue';
+import { Hud, type Projector } from '../ui/Hud';
+import { Minimap } from '../ui/Minimap';
+import { Puzzle3D } from './Puzzle3D';
+import { Story3D } from './Story3D';
 import { sfx, unlockAudio } from '../core/audio';
 import { Combat3D } from './Combat3D';
 import { Collision } from '../core/world/collision';
@@ -35,6 +42,9 @@ import { u } from './worldPlan';
  * How many of the fixed light pool each preset actually lights up. Small on purpose: the static
  * lights are baked into the ground's light map, so these only add shading on nearby 3D objects.
  */
+/** Cached so the HUD's energy bar does not reach into the stats table every frame. */
+const HERO_SKILL_COOLDOWN = HERO_STATS.skillCooldown;
+
 const LIGHT_BUDGET: Record<string, number> = { vlow: 0, low: 1, medium: 2, high: 3, ultra: 3 };
 
 export class Game3D {
@@ -49,6 +59,11 @@ export class Game3D {
   readonly heroMesh: HeroMesh3D;
   readonly state = new GameState();
   readonly combat: Combat3D;
+  readonly hud: Hud;
+  readonly dialogue: Dialogue;
+  readonly minimap: Minimap;
+  readonly story: Story3D;
+  readonly puzzle: Puzzle3D;
   readonly perf = new PerfMeter();
 
   private adaptive = new AdaptiveQuality(this.perf);
@@ -61,6 +76,10 @@ export class Game3D {
   private clock = 0;
   /** Hit-stop: the simulation holds still while rendering carries on. */
   private freezeLeft = 0;
+  private autosaveT = 30;
+  private deathT = -1;
+  private area: string | null = null;
+  private readonly projected = new THREE.Vector3();
   /** Preset multiplier on the bloom (the cheapest thing to turn down). */
   private bloomScale = 1;
   private gradeLift = new THREE.Color();
@@ -71,7 +90,7 @@ export class Game3D {
   private unsubscribe: () => void;
   private disposed = false;
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, options: { continue?: boolean } = {}) {
     this.pixels = new PixelRenderer(parent);
     // Created before the world: materials compiled afterwards then include the fog chunks.
     this.sky = new Sky(this.pixels.scene);
@@ -83,11 +102,67 @@ export class Game3D {
     this.heroMesh = new HeroMesh3D(this.pixels.scene);
     this.camera.snap(u(start.x), u(start.y));
 
+    // ── the save, before anything reads the state ──
+    const save = options.continue ? loadGame() : null;
+    if (save) {
+      this.state.load(save);
+      this.hero.reset(save.hero.x, save.hero.y, Math.max(1, save.hero.hp));
+      this.dayTime = this.state.dayTime;
+      this.camera.snap(u(this.hero.x), u(this.hero.y));
+    }
+
+    this.hud = new Hud();
+    this.dialogue = new Dialogue();
+    this.minimap = new Minimap(this.world);
+    this.puzzle = new Puzzle3D(this.pixels.scene, this.world.markers, this.collision, this.state.puzzleSolved);
+    this.puzzle.onSolved = () => {
+      this.state.puzzleSolved = true;
+      this.hud.toast('Gerbang batu terbuka!');
+      this.saveNow();
+    };
+
     this.combat = new Combat3D(this.pixels.scene, this.world, this.collision, this.state, {
       freeze: (ms) => this.freeze(ms),
       shake: (amount, seconds) => this.camera.shake(amount, seconds),
       spark: (x, y, color, big) => this.environment.spark(u(x), u(y), color, big),
+      damage: (x, y, amount, color, big) => this.hud.float(u(x), 0.9, u(y), String(amount), color, big),
+      killed: (kind, x, y) => {
+        this.story.questEvent({ type: 'kill', kind });
+        // a third of the time an enemy leaves something behind
+        if (kind !== 'boss' && Math.random() < 0.33) this.story.dropHeal(x, y);
+      },
+      bossWoke: () => {
+        this.puzzle.closeBossDoor();
+        this.hud.banner('Kolosus Kelam terbangun!');
+      },
+      bossDefeated: (x, y) => {
+        this.puzzle.openBossDoor();
+        this.state.bossDefeated = true;
+        this.hud.banner('Kolosus Kelam kalah!');
+        this.environment.spark(u(x), u(y), 0xffd98a, true);
+        this.story.questEvent({ type: 'boss-defeated' });
+        this.saveNow(true);
+      },
     });
+
+    this.story = new Story3D(this.pixels.scene, this.world, this.collision, this.state, {
+      dialogue: (spec) => this.dialogue.show(spec),
+      toast: (text) => this.hud.toast(text),
+      banner: (text) => this.hud.banner(text),
+      hint: (text) => this.hud.setHint(text),
+      float: (x, y, text, color, big) => this.hud.float(u(x), 1.1, u(y), text, color, big),
+      spark: (x, y, color, big) => this.environment.spark(u(x), u(y), color, big),
+      save: (force) => this.saveNow(force),
+      shake: (amount, seconds) => this.camera.shake(amount, seconds),
+    });
+    this.story.onRest = () => {
+      this.hero.heal(this.hero.maxHp);
+      this.environment.spark(u(this.hero.x), u(this.hero.y), 0xffd98a, true);
+    };
+    this.dialogue.onOpenChange = (open) => {
+      if (open) input.reset();
+    };
+
     // Phone sticks are not precise: nudge every attack toward the nearest enemy in front.
     this.hero.aimAssist = (angle) => this.combat.aimAssist(this.hero, angle);
     this.scene3d.onChunkLoad = (cx, cy) => this.combat.spawnForChunk(cx, cy);
@@ -179,6 +254,87 @@ export class Game3D {
     this.raf = 0;
   }
 
+  /** Project a world point to viewport pixels, for the floating combat numbers. */
+  private projector: Projector = (x, y, z) => {
+    this.projected.set(x, y, z).project(this.camera.camera);
+    if (this.projected.z > 1) return null;
+    const plan = this.pixels.plan;
+    return {
+      x: ((this.projected.x + 1) / 2) * plan.cssW,
+      y: ((1 - this.projected.y) / 2) * plan.cssH,
+      visible: Math.abs(this.projected.x) < 1.2 && Math.abs(this.projected.y) < 1.2,
+    };
+  };
+
+  /** HP, energy, quest, boss bar, minimap, area banner, autosave and respawn. */
+  private updateHud(dt: number, simDt: number): void {
+    this.hud.setHp(this.hero.hp, this.hero.maxHp);
+    this.hud.setEnergy(1 - this.hero.skillCd / HERO_SKILL_COOLDOWN);
+    const q = this.story.questText();
+    this.hud.setQuest(q.title, q.lines);
+
+    const boss = this.combat.bossRef;
+    if (boss && boss.awake && !boss.dead) this.hud.setBoss('Kolosus Kelam', Math.max(0, boss.hp / boss.maxHp));
+    else this.hud.setBoss(null);
+
+    this.minimap.update(dt, this.hero.x, this.hero.y, AREAS[areaAtTile(Math.floor(this.hero.x / 16))].name, this.story.mapMarks());
+    this.hud.update(dt, this.projector);
+
+    // area banner
+    const area = areaAtTile(Math.floor(this.hero.x / 16));
+    if (area !== this.area) {
+      if (this.area !== null) this.hud.banner(AREAS[area].name);
+      this.area = area;
+      this.saveNow();
+    }
+
+    if (simDt > 0) {
+      this.autosaveT -= simDt;
+      if (this.autosaveT <= 0) {
+        this.autosaveT = 30;
+        this.saveNow();
+      }
+      this.updateDeath(dt);
+    }
+  }
+
+  /** Death → fade → respawn at the last checkpoint, exactly as the 2D build did it. */
+  private updateDeath(dt: number): void {
+    if (this.hero.alive) {
+      if (this.deathT >= 0) this.deathT = -1;
+      return;
+    }
+    if (this.deathT < 0) {
+      this.deathT = 0;
+      this.hud.banner('Kamu pingsan...');
+      return;
+    }
+    const prev = this.deathT;
+    this.deathT += dt;
+    if (prev < 2 && this.deathT >= 2) this.respawn();
+  }
+
+  respawn(): void {
+    const cps = this.world.markers.checkpoints;
+    const cp = cps.find((c) => c.id === this.state.checkpoint) ?? cps[0];
+    this.hero.reset(cp.x, cp.y + 14);
+    this.deathT = -1;
+    this.camera.snap(u(cp.x), u(cp.y));
+    this.scene3d.preload(u(cp.x), u(cp.y), 1);
+    this.puzzle.openBossDoor();
+    this.puzzle.reset();
+    this.hud.toast(`Bangun di ${cp.name}`);
+  }
+
+  /** Write the save. Never mid-boss-fight unless forced, so death cannot lock you in. */
+  saveNow(force = false): void {
+    const boss = this.combat.bossRef;
+    if (!this.hero.alive) return;
+    if (!force && boss && boss.awake && !boss.dead) return;
+    this.state.dayTime = this.dayTime;
+    saveGame(this.state.toJSON({ x: this.hero.x, y: this.hero.y, hp: this.hero.hp }));
+  }
+
   /** Freeze the simulation for `ms` while rendering keeps going — the punch behind a landed hit. */
   freeze(ms: number): void {
     this.freezeLeft = Math.max(this.freezeLeft, ms / 1000);
@@ -207,6 +363,13 @@ export class Game3D {
     }
     this.heroMesh.update(simDt, dt, this.hero, this.clock);
     this.onWeaponState(WEAPONS[this.hero.loadout[this.hero.slot === 0 ? 1 : 0]].name.toUpperCase(), this.hero.charge);
+
+    // ── story, puzzle, HUD ──
+    const ax = input.axis();
+    this.puzzle.update(simDt, dt, this.hero, ax.x, ax.y);
+    this.story.update(simDt, dt, this.hero, this.camera.yawRadians, this.dialogue.open);
+    this.dialogue.update(dt);
+    this.updateHud(dt, simDt);
     const cave = this.caveWeight();
     this.scene3d.setHeroOcclusion(this.heroMesh.root.position, this.camera.camera, this.hero.alive);
     /*
@@ -433,6 +596,12 @@ export class Game3D {
     this.stop();
     window.removeEventListener('resize', this.onResize);
     this.unsubscribe();
+    this.saveNow();
+    this.story.dispose();
+    this.puzzle.dispose();
+    this.minimap.destroy();
+    this.dialogue.destroy();
+    this.hud.destroy();
     this.combat.dispose();
     this.camera.dispose();
     this.sky.dispose();
