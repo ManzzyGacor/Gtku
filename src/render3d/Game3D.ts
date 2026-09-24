@@ -22,6 +22,7 @@ import { AREAS, areaAtTile } from '../core/world/areas';
 import { Dialogue } from '../ui/Dialogue';
 import { Hud, type Projector } from '../ui/Hud';
 import { Minimap } from '../ui/Minimap';
+import { CharacterPanel } from '../ui/CharacterPanel';
 import { Puzzle3D } from './Puzzle3D';
 import { Story3D } from './Story3D';
 import { sfx, unlockAudio } from '../core/audio';
@@ -66,6 +67,7 @@ export class Game3D {
   readonly hud: Hud;
   readonly dialogue: Dialogue;
   readonly minimap: Minimap;
+  readonly sheet: CharacterPanel;
   readonly story: Story3D;
   readonly puzzle: Puzzle3D;
   readonly perf = new PerfMeter();
@@ -130,6 +132,32 @@ export class Game3D {
     this.hud = new Hud();
     this.dialogue = new Dialogue();
     this.minimap = new Minimap(this.world);
+    this.sheet = new CharacterPanel(this.character, {
+      changed: () => {
+        this.applySheet();
+        this.saveNow(true);
+      },
+      use: (def) => {
+        if (def.heal) {
+          this.hero.heal(def.heal);
+          this.hud.float(u(this.hero.x), 1.1, u(this.hero.y), `+${def.heal}`, '#7cf07c', false);
+        }
+        sfx.pickup();
+        this.saveNow(true);
+      },
+      // no rummaging through the bag while dead — respawn first
+      blocked: () => !this.hero.alive,
+    });
+    // `I` / `Tab` on a keyboard; the bag button on a phone.
+    input.onMenu = () => this.sheet.toggle();
+    // While the sheet is open the hero holds still and the world stops, exactly as during a
+    // dialogue. Reading your stats should not be something enemies can punish.
+    this.sheet.onToggle = (open) => {
+      this.paused = open;
+      input.enabled = !open && !this.dialogue.open;
+      if (open) input.reset();
+      else this.saveNow(true);
+    };
     this.puzzle = new Puzzle3D(this.pixels.scene, this.world.markers, this.collision, this.state.puzzleSolved);
     this.puzzle.onSolved = () => {
       this.state.puzzleSolved = true;
@@ -691,6 +719,7 @@ export class Game3D {
     this.story.dispose();
     this.puzzle.dispose();
     this.minimap.destroy();
+    this.sheet.destroy();
     this.dialogue.destroy();
     this.hud.destroy();
     this.combat.dispose();

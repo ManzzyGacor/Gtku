@@ -10,6 +10,8 @@ export interface FakeEl {
   childNodes: FakeEl[];
   parentNode: FakeEl | null;
   textContent: string;
+  /** Only assignment is supported, and only to `''` — which clears the children, like the real DOM. */
+  innerHTML: string;
   className: string;
   id: string;
   disabled: boolean;
@@ -42,13 +44,42 @@ export function makeElement(tag: string): FakeEl {
     style: {} as Record<string, string>,
     childNodes: [] as FakeEl[],
     parentNode: null as FakeEl | null,
-    textContent: '',
     id: '',
     disabled: false,
     value: '',
     classes: new Set<string>(),
     listeners: new Map<string, ((ev: unknown) => void)[]>(),
   } as FakeEl;
+
+  /*
+   * `textContent` concatenates descendants, like the real DOM: the UI builds rows out of nested
+   * spans, so a mock that only returned a node's own text made a populated row look empty.
+   */
+  let ownText = '';
+  Object.defineProperty(node, 'textContent', {
+    get: () => ownText + node.childNodes.map((c) => c.textContent).join(''),
+    set: (v: string) => {
+      for (const c of node.childNodes) c.parentNode = null;
+      node.childNodes.length = 0;
+      ownText = v === null || v === undefined ? '' : String(v);
+    },
+    enumerable: true,
+  });
+
+  /*
+   * `innerHTML = ''` is how the UI code empties a container before rebuilding it, and a mock where
+   * that silently does nothing leaves both states in the tree at once — which looked like a
+   * filtering bug in the panel when it was a hole in this file.
+   */
+  Object.defineProperty(node, 'innerHTML', {
+    get: () => node.childNodes.map((c) => c.textContent).join(''),
+    set: (v: string) => {
+      if (String(v) !== '') throw new Error('the fake DOM only supports innerHTML = "" (clear)');
+      for (const c of node.childNodes) c.parentNode = null;
+      node.childNodes.length = 0;
+    },
+    enumerable: true,
+  });
 
   // Real elements keep `className` and `classList` in sync; the tests rely on that.
   Object.defineProperty(node, 'className', {

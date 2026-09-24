@@ -45,6 +45,11 @@ export class InputHub {
   /** Last input method that produced input; UI uses it to show/hide touch controls. */
   lastDevice: 'keyboard' | 'touch' = 'keyboard';
   now: () => number = () => performance.now();
+  /**
+   * Keys that open UI rather than driving the hero (`I`/`Tab` for the character sheet). The game
+   * sets this; the hub only routes the key, so `src/core` still knows nothing about the panels.
+   */
+  onMenu: (which: 'sheet') => void = () => undefined;
 
   constructor(target: Window | null = typeof window !== 'undefined' ? window : null) {
     target?.addEventListener('keydown', (e) => this.onKey(e, true));
@@ -60,6 +65,12 @@ export class InputHub {
     }
     if (down) {
       if (e.repeat) return;
+      if (e.code === 'KeyI' || e.code === 'Tab') {
+        e.preventDefault();
+        this.lastDevice = 'keyboard';
+        this.onMenu('sheet');
+        return;
+      }
       this.keys.add(e.code);
       if (act) this.press(act);
     } else {
