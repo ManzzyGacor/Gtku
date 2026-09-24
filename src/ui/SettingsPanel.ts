@@ -8,8 +8,10 @@
  * Rows are data. Anything not wired to real game state is left out entirely rather than shown as a
  * dead control (audio volumes wait for Batch 5).
  */
-import { COMBAT_TUNABLES, isTuned, resetCombatTuning, saveCombatTuning } from '../core/entities/combatTuning';
 import { formatErrors, recentErrors } from '../core/errors';
+
+/** Loaded on demand by `toggleCombat` — see the comment there. */
+let tuning: typeof import('../core/entities/combatTuning') | null = null;
 import { PROFILES, probeDevice, profileOf } from '../core/graphics';
 import { buildReport, copyText } from '../core/report';
 import { DEFAULTS, PRESET_IDS, RANGES, settings, type NumericKey, type PresetId, type Settings } from '../core/settings';
@@ -61,7 +63,7 @@ const ROWS: Row[] = [
     kind: 'action',
     label: 'Setelan Combat',
     button: 'Buka',
-    note: () => (isTuned() ? 'Ada nilai yang sudah kamu ubah' : `${COMBAT_TUNABLES.length} angka: durasi, langkah, jangkauan`),
+    note: () => (tuning?.isTuned() ? 'Ada nilai yang sudah kamu ubah' : 'Durasi, langkah, jangkauan, getaran'),
     run: (p) => p.toggleCombat(),
   },
   {
@@ -305,8 +307,19 @@ export class SettingsPanel {
    * The rows are built the first time they are opened, because there are a few dozen of them.
    */
   toggleCombat(): void {
+    if (!tuning) {
+      // The tuning descriptors reach into HeroCore, i.e. into the game's entity code. Importing
+      // that from the settings menu would drag the whole combat model into the entry chunk and
+      // delay the title screen for a debug panel most sessions never open.
+      void import('../core/entities/combatTuning').then((m) => {
+        tuning = m;
+        this.toggleCombat();
+      });
+      return;
+    }
     if (!this.combatBuilt) {
       this.combatBuilt = true;
+      const { COMBAT_TUNABLES, resetCombatTuning, saveCombatTuning } = tuning;
       const reset = el('div');
       reset.className = 'lm-row';
       const label = el('div');

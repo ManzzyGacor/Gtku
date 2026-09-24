@@ -537,3 +537,36 @@ Bundle total turun **64%** karena chunk `boot2d` 1,4 MB tidak lagi ikut dibangun
 pemain naik 80 kB: HUD, dialog, minimap, quest, dan puzzle yang baru pindah ke 3D ada di dalamnya.
 Entry naik 21 → 35 kB karena `SettingsPanel` mengimpor `combatTuning` → `HeroCore` secara statis;
 itu ditangani di bagian optimasi bundle.
+
+## Bagian 2 — Bug dan optimasi
+
+### Ukuran bundle dan waktu muat pertama
+
+| Yang diunduh | Sebelum | Sesudah |
+| --- | --- | --- |
+| Sebelum ada yang tampil di layar | 1.516 kB (entry 21 + **boot2d 1.461**) | **32 kB** (entry saja) |
+| — dalam gzip | 409 kB | **12,5 kB** |
+| Total untuk mulai bermain | 2.144 kB / 409 kB gzip | 771 kB / 213 kB gzip |
+| Chunk | 2 (entry, boot2d/boot3d) | 4 (entry, boot3d, three, combatTuning) |
+| Yang diunduh ulang saat game di-update | semuanya (770 kB) | **237 kB** (three ter-cache) |
+
+Tiga perubahan:
+
+1. **Layar judul pindah ke entry chunk.** Dulu `main.ts` menunggu seluruh `boot3d` (730 kB, berisi
+   Three.js) selesai diunduh, baru membuat `TitleScreen`. Artinya di HP dengan data seluler:
+   layar hitam dulu, baru judul. Sekarang judul ada di chunk entry (32 kB) dan muncul hampir
+   langsung; unduhan renderer **mulai di saat yang sama** dan hanya di-`await` setelah pemain
+   memilih, jadi biasanya sudah selesai sebelum pemain selesai membaca menu. Kalau belum,
+   judulnya berganti jadi "Menyiapkan dunia…" — bukan layar hitam yang terlihat seperti crash.
+2. **Three.js dipisah ke chunk sendiri** (534 kB). Ini hal terbesar yang kita kirim dan yang paling
+   jarang berubah. Update game berikutnya hanya perlu mengunduh ulang 237 kB kode game, karena nama
+   berkas `three-*.js` tidak berubah dan masih ada di cache browser.
+3. **`combatTuning` (39 angka + `HeroCore`) tidak lagi ikut di entry.** `SettingsPanel` dulu
+   mengimpornya statis, jadi panel debug menyeret seluruh model combat ke chunk yang menghalangi
+   layar judul. Sekarang di-`import()` saat panelnya benar-benar dibuka.
+
+**Yang tidak bisa diperkecil lagi, terus terang:** 534 kB itu sudah Three.js yang di-tree-shake —
+tidak ada loader, tidak ada animation system, tidak ada PMREM/env-map (sudah diperiksa di bundle
+hasil build). Yang tersisa sebagian besar `WebGLRenderer` sendiri, dan itu bercabang ke
+`SkinnedMesh`/`BatchedMesh`/`Sprite`/`Points`/WebXR sehingga tidak bisa dibuang tanpa mem-fork
+Three. Batas bawah realistis untuk aplikasi WebGLRenderer memang ~500 kB minified / ~130 kB gzip.

@@ -32,7 +32,8 @@ Ringkasan desain: `docs/GAME_DESIGN.md`. Status pekerjaan: `docs/PROGRESS.md`
 npm install
 npm run dev        # Vite di 127.0.0.1:5173 (dipakai lewat Cloudflare Tunnel https://game.varesa.mom)
 npm run build      # tsc --noEmit && vite build  → HARUS hijau sebelum commit
-npm test           # Vitest: logika inti (dunia, kombat, AI, quest, save) + smoke test + penjaga lapisan
+npm test           # Vitest: logika inti, playthrough headless, kebocoran GPU, kasus tepi, penjaga lapisan
+npm run lint       # oxlint
 npm run test:watch # Vitest mode tonton
 npm run assets     # ekspor semua sheet seni ke .preview/*.png (untuk dilihat/diedit, tidak di-commit)
 npx tsx scripts/plan-stats.ts        # jumlah chunk/instance/draw group/lampu per area di mode 3D
@@ -42,7 +43,7 @@ npx tsx scripts/ascii-map.ts 3       # cetak dunia sebagai ASCII (periksa tata l
 npx tsx scripts/crop-reference.ts docs/reference/referensi-visual.png 400 0 420 320 2 .preview/x.png
 ```
 
-Flag URL untuk menguji di HP: `?renderer=2d|3d`, `?fps=1`, `?bloom=0`, `?preset=vlow|low|medium|high|ultra`.
+Flag URL untuk menguji di HP: `?fps=1`, `?bloom=0`, `?preset=vlow|low|medium|high|ultra`.
 Semuanya juga ada di menu Pengaturan (gerigi di pojok kanan atas).
 
 - Dev server harus hidup di **sesi tmux bernama `game`**: `tmux new-session -d -s game -c <repo> "npm run dev"`.
@@ -90,27 +91,29 @@ phaser.
 
 ## Konvensi kode
 
-- TypeScript strict; tidak ada `any` kecuali di batas dengan Phaser yang tipenya kurang. `noUnusedLocals/Parameters` aktif.
+- TypeScript strict **plus** `noUnusedLocals/Parameters`, `noImplicitReturns`, `exactOptionalPropertyTypes`,
+  `noFallthroughCasesInSwitch`, `noImplicitOverride`. Tidak ada `any` kecuali di batas dengan tipe pihak ketiga
+  yang kurang. Properti opsional yang boleh diisi `undefined` ditulis eksplisit `?: T | undefined`.
+  (`noUncheckedIndexedAccess` dan `noPropertyAccessFromIndexSignature` **sengaja tidak** dinyalakan: 400 dan 102
+  temuan yang hanya bisa dipuaskan dengan ratusan `!` di loop piksel/grid — itu membuat kode berbohong.)
+- Linter: **oxlint** (`npm run lint`, ikut di `npm run build`). Konfigurasi `.oxlintrc.json`: kategori
+  correctness/suspicious/perf sebagai error. `toReversed`/`toSorted` (ES2023) **dihindari** — WebView Android
+  lama belum punya; salin dulu (`[...a].reverse()`).
 - Kode & komentar dalam **bahasa Inggris**; teks yang tampil di game, dokumen, dan pesan commit boleh **bahasa Indonesia**.
-- Logika permainan (gerak, tabrakan, AI, kombat, quest, save, worldgen) ditulis sebagai **kelas/fungsi murni tanpa import Phaser** bila
-  memungkinkan supaya bisa dites di Node. Kelas Phaser hanya menggambar/menghubungkan input.
-- Waktu simulasi memakai `dt` detik. Hit-stop = simulasi dibekukan sementara (`GameScene.freeze(ms)`), render & UI jalan terus.
+- Logika permainan (gerak, tabrakan, AI, kombat, quest, save, worldgen) ditulis sebagai **kelas/fungsi murni
+  tanpa import renderer** supaya bisa dites di Node. Kelas di `render3d/` hanya menggambar dan menghubungkan
+  input; kalau sebuah aturan permainan hanya ada di sana, itu aturan yang tidak bisa dites.
+- Waktu simulasi memakai `dt` detik. Hit-stop = simulasi dibekukan sementara (`Game3D.freeze(ms)`), render & UI jalan terus.
+- **Alokasi per frame itu bug.** GC pause tidak muncul di rata-rata fps, munculnya sebagai game yang terasa
+  tidak rata. Jangan `map/filter/sort/{}`/`new` di jalur per-frame; pakai buffer yang sudah dialokasikan
+  atau cache dengan kunci (lihat `World3D.pickNearestLights`, `Story3D.mapMarks`, `Minimap.update`).
+  Dijaga `tests/frametime.test.ts`.
+- **Angka yang masuk ke HP/damage harus dijepit** (`Number.isFinite` + `Math.max(0, …)`): satu NaN membuat
+  hero/musuh tidak hidup dan tidak mati, dan tidak pernah pulih. Lihat `tests/edgecases.test.ts`.
 - Semua posisi dunia dalam piksel logis (bukan piksel layar). 1 tile = 16 px. Kamera zoom selalu 1; skala integer dilakukan CSS.
-- Y-sort: `setDepth(footY)` untuk objek dinamis dan statis. Layer khusus: tanah 0, bayangan 1, objek = y (2..3000), lightmap 5000 (partikel 4000 di bawahnya; slash/telegraf/proyektil 5150, teks damage 5200 di atasnya agar terbaca saat gelap).
 - Jangan memakai `Math.random()` untuk hal yang harus konsisten (worldgen, variasi tile): pakai `core/rng.ts` (seeded).
 - Satu fitur per langkah: `npm run build` hijau → commit jelas → `git push origin main` → update `docs/PROGRESS.md`.
 - Pesan commit diakhiri baris `Co-Authored-By` sesuai instruksi harness.
-
-## Catatan API Phaser 4 (beda dari v3)
-
-- `roundPixels` default `false`; game ini memakai `render.pixelArt: true` (mengaktifkannya). Kamera zoom 1.
-- FX `preFX/postFX` dan pipeline dihapus → **Filters**: `camera.filters.external.addVignette(...)`, `Phaser.Actions.AddEffectBloom(...)`.
-  Filter hanya WebGL; selalu bungkus try/catch dan sediakan fallback tanpa filter.
-- `RenderTexture/DynamicTexture` harus memanggil `render()`. Game ini menghindarinya: tekstur dinamis dibuat dengan **CanvasTexture**
-  (`textures.addCanvas` lalu `refresh()`).
-- `Rectangle`/shape: ubah ukuran dengan `setSize()` — mengubah `.width` langsung TIDAK memperbarui geometri.
-- Pencahayaan dipakai **manual** (lightmap kanvas 2D + blend MULTIPLY), bukan `setLighting()` bawaan, agar hasilnya deterministik.
-- `Geom.Point` tak ada (pakai `Vector2`); `Math.TAU` = 2π.
 
 ## Catatan API Three.js (sudah diverifikasi di repo ini)
 

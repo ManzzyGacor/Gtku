@@ -26,5 +26,18 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 2500,
+    rollupOptions: {
+      output: {
+        /*
+         * Three.js gets its own chunk, separate from the game code.
+         *
+         * It is by far the biggest thing we ship and the thing that changes least: splitting it
+         * out means a game update re-downloads ~90 kB of game code instead of ~730 kB, because the
+         * player's browser already has the renderer cached under an unchanged file name. It costs
+         * one extra request on a cold load, which HTTP/2 makes free.
+         */
+        manualChunks: (id) => (id.includes('node_modules/three') ? 'three' : undefined),
+      },
+    },
   },
 });

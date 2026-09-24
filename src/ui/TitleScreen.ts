@@ -101,16 +101,37 @@ export class TitleScreen {
 
     this.root.append(name, sub, menu, foot);
     parent.appendChild(this.root);
+    this.menu = menu;
   }
 
   private confirmed = false;
+  private menu: HTMLDivElement;
+  private status: HTMLDivElement | null = null;
 
   private pick(continueGame: boolean): void {
     // the tap that dismisses the title is also the gesture that lets audio start
     unlockAudio();
-    this.root.remove();
+    // The screen stays up until the world is ready: the renderer is a separate 730 kB chunk, and a
+    // black screen while it arrives reads as a crash.
+    this.menu.style.display = 'none';
     this.resolve?.({ continueGame });
     this.resolve = null;
+  }
+
+  /** Replace the menu with a line of status text (loading the world, or failing to). */
+  setBusy(text: string): void {
+    this.menu.style.display = 'none';
+    if (!this.status) {
+      this.status = el('div');
+      this.status.className = 'lm-title-sub';
+      this.root.appendChild(this.status);
+    }
+    this.status.textContent = text;
+  }
+
+  /** Take the title down, once there is something behind it. */
+  close(): void {
+    this.root.remove();
   }
 
   /** Resolves once the player has chosen. */

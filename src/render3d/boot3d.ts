@@ -8,27 +8,16 @@
  */
 import { Game3D } from './Game3D';
 import { resumeAudio, suspendAudio } from '../core/audio';
+import { loadCombatTuning } from '../core/entities/combatTuning';
 import { Lifecycle } from '../core/lifecycle';
 import { recordError } from '../core/errors';
 import type { DebugUi } from '../ui/DebugUi';
-import { TitleScreen } from '../ui/TitleScreen';
 import { TouchControls } from '../ui/TouchControls';
 
 export interface Booted3D {
   game: Game3D;
   controls: TouchControls;
   dispose(): void;
-}
-
-/**
- * Show the title screen, then build the world once the player has chosen. Deciding *before*
- * construction is what lets a loaded save place the hero and the clock on the very first frame.
- */
-export async function start3d(parent: HTMLElement, debug: DebugUi): Promise<Booted3D> {
-  document.getElementById('boot-msg')?.remove();
-  const title = new TitleScreen();
-  const choice = await title.choice();
-  return startWorld(parent, debug, choice.continueGame);
 }
 
 /** A line of text over the canvas, for the one case the player cannot act on: a lost GPU context. */
@@ -58,7 +47,15 @@ function notice(text: string | null): void {
   if (!existing) document.body.appendChild(el);
 }
 
-function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: boolean): Booted3D {
+/**
+ * Build the world. The choice (continue or start over) is made *before* construction, which is
+ * what lets a loaded save place the hero and the clock on the very first frame.
+ */
+export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: boolean): Booted3D {
+  // Whatever the player tuned in the combat panel on a previous run, applied before anything reads
+  // an attack's numbers. It lives here rather than in the entry so the title screen does not have
+  // to wait for the combat model to download.
+  loadCombatTuning();
   let game = new Game3D(parent, { continue: continueGame });
   const controls = new TouchControls();
 
