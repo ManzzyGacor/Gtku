@@ -22,6 +22,9 @@ import { Combat3D } from '../src/render3d/Combat3D';
 import { Puzzle3D } from '../src/render3d/Puzzle3D';
 import { Story3D } from '../src/render3d/Story3D';
 import { Character } from '../src/core/stats/character';
+import { HERO_BASE } from '../src/core/stats/stats';
+import { rollDrops } from '../src/core/items/drops';
+import type { QuestReward } from '../src/core/systems/quest';
 import type { DialogueSpec } from '../src/ui/Dialogue';
 import { input } from '../src/core/input';
 
@@ -52,6 +55,8 @@ interface Env {
   character: Character;
   /** Loot tables that were rolled (chests, kills). */
   loot: string[];
+  /** Quest stage rewards handed over. */
+  rewards: QuestReward[];
 }
 
 function makeEnv(state = new GameState()): Env {
@@ -72,6 +77,7 @@ function makeEnv(state = new GameState()): Env {
     saves: 0,
     character: new Character(),
     loot: [] as string[],
+    rewards: [] as QuestReward[],
   } as Env;
 
   env.puzzle = new Puzzle3D(scene, world.markers, collision, state.puzzleSolved);
@@ -83,7 +89,12 @@ function makeEnv(state = new GameState()): Env {
     shake: () => undefined,
     spark: () => undefined,
     damage: () => undefined,
-    killed: (kind) => env.story.questEvent({ type: 'kill', kind }),
+    killed: (kind) => {
+      env.story.questEvent({ type: 'kill', kind });
+      // the same thing Game3D does on a kill: roll the loot table into the bag
+      env.loot.push(kind);
+      for (const drop of rollDrops(kind, Math.random, 1)) env.character.inventory.add(drop.id, drop.count, drop.rarity);
+    },
     exp: (amount) => env.character.addExp(amount),
     heal: (amount) => env.hero.heal(amount),
     bossWoke: () => env.puzzle.closeBossDoor(),
@@ -99,6 +110,12 @@ function makeEnv(state = new GameState()): Env {
     dialogue: (spec) => env.dialogues.push(spec),
     exp: (amount) => env.character.addExp(amount),
     loot: (kind) => env.loot.push(kind),
+    // the same thing Game3D does: the reward's items go in the bag and its EXP to the character
+    reward: (reward) => {
+      for (const entry of reward.items ?? []) env.character.inventory.add(entry.id, entry.count ?? 1);
+      if (reward.exp) env.character.addExp(reward.exp);
+      env.rewards.push(reward);
+    },
     toast: (t) => env.toasts.push(t),
     banner: (t) => env.banners.push(t),
     hint: (t) => env.hints.push(t),
@@ -169,6 +186,10 @@ test('the whole quest can be played from start to finish', () => {
   env.dialogues[0].onDone?.();
   assert.equal(env.state.quest.stage, 1, 'the hunt has begun');
   assert.ok(env.toasts.some((t) => t.includes('Quest baru')));
+  // Batch 4: the elder does not send you out empty-handed
+  assert.equal(env.character.inventory.countOf('sword_village'), 1, 'the village sword was handed over');
+  assert.equal(env.character.inventory.countOf('potion_small'), 2);
+  assert.ok(env.character.exp > 0 || env.character.level > 1, 'and the stage paid EXP');
 
   // ── stage 1 → 2: six forest monsters ──
   for (let cy = 0; cy < world.heightTiles / 16; cy++)
@@ -181,6 +202,10 @@ test('the whole quest can be played from start to finish', () => {
   }
   assert.equal(env.state.quest.kills, KILLS_NEEDED);
   assert.equal(env.state.quest.stage, 2, 'the elder wants us in the cave now');
+  // six kills plus a stage reward has to be worth at least one level
+  assert.ok(env.character.level > 1, `killing six monsters should level the hero, still ${env.character.level}`);
+  const atkAfterLevels = env.character.stats.atk;
+  assert.ok(atkAfterLevels > HERO_BASE.atk, 'and the level shows up in ATK');
 
   // ── the puzzle: push the rock east, then south, onto the plate ──
   const p = world.markers.puzzle;
@@ -229,6 +254,24 @@ test('the whole quest can be played from start to finish', () => {
   assert.equal(env.state.quest.stage, 4, 'quest complete');
   assert.equal(env.state.flags.lanternLit, true, 'the Great Lantern burns again');
   assert.ok(env.banners.some((b) => b.includes('Lentera Agung')));
+
+  // ── Batch 4: the run has to have left the hero measurably stronger ──
+  assert.equal(env.rewards.length, 4, 'every stage paid out');
+  assert.ok(env.character.level >= 4, `four stages and a boss should be several levels, got ${env.character.level}`);
+  assert.equal(env.loot.includes('boss'), true, 'the boss dropped its table');
+  assert.equal(env.character.inventory.countOf('core_ember'), 1, 'including the Lantern Core');
+  assert.equal(env.character.inventory.countOf('armor_woven'), 1, "and the elder's vest at the end");
+
+  // and that gear can be worn, which is what "stronger" actually means
+  const before = env.character.stats.atk;
+  const coreCell = env.character.inventory.slots.findIndex((sl) => sl?.id === 'core_ember');
+  assert.ok(coreCell >= 0);
+  assert.equal(env.character.inventory.equip(coreCell), true);
+  env.character.refresh();
+  assert.equal(env.character.coreElement, 'api');
+  assert.equal(env.character.passive, 'emberGuard');
+  assert.ok(env.character.stats.mastery > 0, 'the core adds elemental mastery');
+  assert.ok(env.character.stats.atk >= before, 'and never makes the hero weaker');
 
   env.story.dispose();
   env.puzzle.dispose();

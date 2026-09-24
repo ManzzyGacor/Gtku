@@ -1,5 +1,6 @@
 /** Quest logic (pure). One quest, "Cahaya untuk Desa", driven by `state.quest.stage`. */
 import { KILLS_NEEDED, type GameState } from '../state/GameState';
+import { EXP_REWARDS } from '../progression';
 
 export const QUEST_TITLE = 'Cahaya untuk Desa';
 
@@ -15,6 +16,17 @@ export interface QuestResult {
   message?: string;
   /** The Great Lantern should light up now. */
   lightLantern?: boolean;
+  /**
+   * What the stage pays out (Batch 4). Data rather than code in the renderer, so the rewards are
+   * part of the quest definition and can be checked by a test — the plan wants quests
+   * data-driven with objectives and rewards.
+   */
+  reward?: QuestReward | undefined;
+}
+
+export interface QuestReward {
+  exp?: number | undefined;
+  items?: { id: string; count?: number }[] | undefined;
 }
 
 /** Stage machine: 0 not started → 1 hunt → 2 boss → 3 return → 4 complete. */
@@ -24,7 +36,12 @@ export function advanceQuest(state: GameState, ev: QuestEvent): QuestResult {
     case 'talk-elder':
       if (q.stage === 0) {
         q.stage = 1;
-        return { changed: true, message: `Quest baru: ${QUEST_TITLE}` };
+        // The elder does not send you into the forest empty-handed.
+        return {
+          changed: true,
+          message: `Quest baru: ${QUEST_TITLE}`,
+          reward: { exp: EXP_REWARDS.questStage, items: [{ id: 'sword_village' }, { id: 'potion_small', count: 2 }] },
+        };
       }
       return { changed: false };
     case 'kill':
@@ -32,7 +49,11 @@ export function advanceQuest(state: GameState, ev: QuestEvent): QuestResult {
         q.kills = Math.min(KILLS_NEEDED, q.kills + 1);
         if (q.kills >= KILLS_NEEDED) {
           q.stage = 2;
-          return { changed: true, message: 'Monster hutan sudah cukup. Menujulah ke Gua Kelam!' };
+          return {
+            changed: true,
+            message: 'Monster hutan sudah cukup. Menujulah ke Gua Kelam!',
+            reward: { exp: EXP_REWARDS.questStage, items: [{ id: 'boots_soft' }] },
+          };
         }
         return { changed: true };
       }
@@ -40,14 +61,24 @@ export function advanceQuest(state: GameState, ev: QuestEvent): QuestResult {
     case 'boss-defeated':
       if (q.stage <= 2) {
         q.stage = 3;
-        return { changed: true, message: 'Kristal Fajar didapat! Bawa ke Tetua Wulan.' };
+        return {
+          changed: true,
+          message: 'Kristal Fajar didapat! Bawa ke Tetua Wulan.',
+          reward: { exp: EXP_REWARDS.questStage, items: [{ id: 'shard_dawn', count: 3 }] },
+        };
       }
       return { changed: false };
     case 'return-crystal':
       if (q.stage === 3) {
         q.stage = 4;
         state.flags.lanternLit = true;
-        return { changed: true, message: 'Quest selesai: Lentera Agung menyala!', lightLantern: true };
+        return {
+          changed: true,
+          message: 'Quest selesai: Lentera Agung menyala!',
+          lightLantern: true,
+          // The village's thanks: the elder's own woven vest, and a ring for the road ahead.
+          reward: { exp: EXP_REWARDS.questStage * 2, items: [{ id: 'armor_woven' }, { id: 'ring_thorn' }] },
+        };
       }
       return { changed: false };
   }

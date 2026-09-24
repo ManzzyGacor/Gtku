@@ -41,6 +41,7 @@ import { World3D } from './World3D';
 import { u } from './worldPlan';
 import { Character } from '../core/stats/character';
 import { itemDef, rarityMeta } from '../core/items/items';
+import type { QuestReward } from '../core/systems/quest';
 import { rollDrops } from '../core/items/drops';
 
 /**
@@ -204,6 +205,7 @@ export class Game3D {
       float: (x, y, text, color, big) => this.hud.float(u(x), 1.1, u(y), text, color, big),
       exp: (amount, x, y) => this.gainExp(amount, x, y),
       loot: (kind, x, y) => this.dropLoot(kind, x, y),
+      reward: (reward, x, y) => this.giveReward(reward, x, y),
       spark: (x, y, color, big) => this.environment.spark(u(x), u(y), color, big),
       save: (force) => this.saveNow(force),
       shake: (amount, seconds) => this.camera.shake(amount, seconds),
@@ -415,6 +417,28 @@ export class Game3D {
       this.saveNow();
     }
     if (overflowed) this.hud.toast('Tas penuh! Buang sesuatu dulu.');
+  }
+
+  /**
+   * Hand over a quest stage's reward. The items are named in `core/systems/quest.ts`, so what a
+   * stage pays out is part of the quest definition rather than something the renderer decides.
+   */
+  private giveReward(reward: QuestReward, x: number, y: number): void {
+    let lifted = 1;
+    for (const entry of reward.items ?? []) {
+      const def = itemDef(entry.id);
+      if (!def) continue;
+      const result = this.character.inventory.add(entry.id, entry.count ?? 1);
+      if (result.added > 0) {
+        this.hud.toast(`Hadiah: ${def.name}${result.added > 1 ? ` x${result.added}` : ''}`);
+        this.hud.float(u(x), 1.2 + lifted * 0.35, u(y), def.name, rarityMeta(def.rarity).color, false);
+        lifted++;
+      }
+      if (result.overflow > 0) this.hud.toast(`Tas penuh: ${def.name} tidak terbawa!`);
+    }
+    if (reward.exp) this.gainExp(reward.exp, x, y);
+    this.applySheet();
+    this.saveNow(true);
   }
 
   /** Death → fade → respawn at the last checkpoint, exactly as the 2D build did it. */

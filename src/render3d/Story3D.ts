@@ -13,7 +13,7 @@ import { sfx } from '../core/audio';
 import { input } from '../core/input';
 import { EXP_REWARDS } from '../core/progression';
 import { nearestInteractable, type Interactable } from '../core/systems/interactables';
-import { advanceQuest, dialogueFor, QUEST_TITLE, trackerLines, type NpcId, type QuestEvent } from '../core/systems/quest';
+import { advanceQuest, dialogueFor, QUEST_TITLE, trackerLines, type NpcId, type QuestEvent, type QuestReward } from '../core/systems/quest';
 import type { GameState } from '../core/state/GameState';
 import type { HeroCore } from '../core/entities/HeroCore';
 import type { Collision } from '../core/world/collision';
@@ -46,6 +46,8 @@ export interface StoryHooks {
   exp(amount: number, x: number, y: number): void;
   /** Roll a loot table into the bag. `kind` names the table in `core/items/drops.ts`. */
   loot(kind: string, x: number, y: number): void;
+  /** Hand over a quest stage's reward (EXP and named items). */
+  reward(reward: QuestReward, x: number, y: number): void;
 }
 
 export class Story3D {
@@ -65,6 +67,9 @@ export class Story3D {
   private beaconGlow: THREE.Mesh;
   private beaconMat: THREE.MeshBasicMaterial;
   private clock = 0;
+  /** Where the hero was on the last update, so a quest reward can float above them. */
+  private heroX = 0;
+  private heroY = 0;
 
   constructor(
     private readonly scene: THREE.Object3D,
@@ -176,6 +181,7 @@ export class Story3D {
     const r = advanceQuest(this.state, ev);
     if (!r.changed) return;
     if (r.message) this.hooks.toast(r.message);
+    if (r.reward) this.hooks.reward(r.reward, this.heroX, this.heroY);
     if (r.lightLantern) this.lightLantern();
     this.refreshMarkers();
     if (ev.type !== 'kill' || r.message) this.hooks.save();
@@ -288,6 +294,8 @@ export class Story3D {
   /** @returns the interact prompt to show, if any. */
   update(dt: number, realDt: number, hero: HeroCore, cameraYaw: number, dialogueOpen: boolean): void {
     this.clock += realDt;
+    this.heroX = hero.x;
+    this.heroY = hero.y;
     for (const npc of this.npcs) npc.update(realDt, cameraYaw);
     this.updatePickups(realDt, hero);
 
