@@ -796,3 +796,24 @@ Yang ditambahkan ke jalur per-frame, dan kenapa tidak menurunkan FPS:
 | Scheduler suasana | timer 200 ms; buffer noise di-cache per context (dulu 144k sampel per pergantian bed) |
 
 Tidak ada penambahan draw call, tidak ada material/geometri baru, tidak ada shader baru.
+
+### Interaksi di HP (dari laporan tes, sudah dicek pemain di HP)
+
+**1. Tombol interaksi kontekstual.** Penyebab "tidak bisa bicara/membuka apa pun" di HP: kontrol
+sentuh **tidak punya tombol interaksi sama sekali**. `E` jalan di keyboard, teks prompt muncul di
+atas kepala hero, tapi tidak ada yang bisa menekannya di layar. Sekarang ada tombol di atas tombol
+ganti senjata yang hanya muncul (`display:none`, jadi tidak menelan ketukan saat tersembunyi) bila
+ada sesuatu dalam jangkauan, dengan kata dari dunia: **Bicara / Baca / Buka / Kosong / Berdoa**.
+Kalau tombolnya hilang saat masih ditekan, pelepasannya disintesis supaya aksi tidak tersangkut.
+
+**2. Penanda chevron.** Satu sprite `v` kecil melayang di atas benda terdekat yang bisa
+diinteraksi (tinggi per jenis lewat `Interactable.markerLift`). Satu sprite yang dipindah-pindah,
+bukan satu per benda: tanpa draw call tambahan saat tidak ada target.
+
+**3. Jangkauan & label.** Jangkauan diperlebar supaya bisa dikenai dengan jempol (NPC 34→44,
+papan 26→38, peti 28→38, altar 32→42). Peti kosong bilang "Kosong", bukan diam; checkpoint jadi
+"Berdoa". Bunyi interaksi pakai `sfx.pickup`.
+
+Tes: `tests/interaction.test.ts` (setiap NPC, papan, peti, dan altar di dunia hasil generate
+didatangi dan ditekan), dua tes baru di `touchcontrols.test.ts`, dan `tests/source.test.ts`
+yang menjaga backtick di dalam blok CSS/GLSL (sudah tiga kali memecahkan build).

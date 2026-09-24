@@ -7,6 +7,11 @@ export interface Interactable {
   /** Prompt label, or null when currently unavailable. */
   label: () => string | null;
   interact: () => void;
+  /**
+   * How high above the object the "there is something here" marker floats, in world units.
+   * Villagers are tall, signs and chests are not, and a marker inside a chest reads as nothing.
+   */
+  markerLift?: number | undefined;
 }
 
 export function nearestInteractable(list: Interactable[], x: number, y: number): Interactable | null {

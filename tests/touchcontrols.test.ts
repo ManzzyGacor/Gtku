@@ -35,8 +35,49 @@ test('the control layer builds a stick and the buttons combat actually honours',
   assert.ok(walkEls(doc.body).some((e) => e.classes.has('lm-stick-base')));
   assert.ok(walkEls(doc.body).some((e) => e.classes.has('lm-stick-knob')));
   const actions = controls.actionButtons.map((b) => b.action);
-  assert.deepEqual(actions, ['attack', 'dodge', 'swap', 'skill'], 'attack, dodge, weapon swap and skill');
+  assert.deepEqual(actions, ['attack', 'dodge', 'swap', 'skill', 'interact'], 'attack, dodge, swap, skill and interact');
   assert.ok(walkEls(doc.body).some((e) => e.classes.has('lm-charge')), 'and the bow draw meter');
+});
+
+test('the interact button only exists when the world says there is something there', () => {
+  const interact = controls.actionButtons.find((b) => b.action === 'interact')!;
+  const node = interact.node as unknown as FakeEl;
+
+  assert.equal(node.classes.has('on'), false, 'hidden with nothing in range');
+  // pressing where it *would* be must do nothing while it is hidden
+  const cx = parseFloat(node.style.left ?? '0');
+  const cy = parseFloat(node.style.top ?? '0');
+  pointer('pointerdown', cx, cy, 11);
+  assert.equal(input.isHeld('interact'), false, 'an invisible button must not swallow taps');
+  pointer('pointerup', cx, cy, 11);
+
+  controls.setInteract('Bicara');
+  assert.equal(node.classes.has('on'), true);
+  assert.equal(node.textContent, 'Bicara', 'the world supplies the word');
+
+  pointer('pointerdown', cx, cy, 12);
+  assert.equal(input.isHeld('interact'), true, 'and now it presses the real input hub');
+  pointer('pointerup', cx, cy, 12);
+  assert.equal(input.isHeld('interact'), false);
+
+  controls.setInteract('Baca');
+  assert.equal(node.textContent, 'Baca');
+  controls.setInteract(null);
+  assert.equal(node.classes.has('on'), false, 'and hides again when you walk away');
+});
+
+test('an interact button that vanishes mid-press does not leave the action stuck down', () => {
+  const interact = controls.actionButtons.find((b) => b.action === 'interact')!;
+  const node = interact.node as unknown as FakeEl;
+  controls.setInteract('Buka');
+  const cx = parseFloat(node.style.left ?? '0');
+  const cy = parseFloat(node.style.top ?? '0');
+  pointer('pointerdown', cx, cy, 13);
+  assert.equal(input.isHeld('interact'), true);
+  // walking out of range while still holding the button
+  controls.setInteract(null);
+  assert.equal(input.isHeld('interact'), false, 'the release has to be synthesised');
+  pointer('pointerup', cx, cy, 13);
 });
 
 test('the weapon display shows what the swap will switch to, and the draw meter follows the charge', () => {

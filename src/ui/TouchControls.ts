@@ -57,6 +57,16 @@ const CSS = `
 /* the bow's draw meter: a ring that fills as the string is pulled */
 .lm-charge { position: absolute; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none;
   border: 3px solid rgba(124, 196, 255, 0.9); opacity: 0; }
+/*
+ * The interact button only exists when there is something to interact with. It uses display:none
+ * rather than opacity, so it cannot swallow a tap while invisible.
+ */
+.lm-act.ctx { display: none; border-color: rgba(140, 239, 235, 0.9);
+  background: rgba(20, 44, 58, 0.72); color: #cffaff;
+  animation: lm-ctx-in 160ms ease both; }
+.lm-act.ctx.on { display: flex; }
+@keyframes lm-ctx-in { from { opacity: 0; transform: translate(-50%, -50%) scale(0.82); }
+                       to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 `;
 
 /** The buttons Fase 2 can honestly offer: both drive real `HeroCore` states. */
@@ -78,6 +88,19 @@ const BUTTONS: { action: Action; label: string; r: number; ox: number; oy: numbe
   // quick weapon swap; the label shows what you are swapping *to*
   { action: 'swap', label: 'BUSUR', r: 22, ox: 60, oy: 134 },
   { action: 'skill', label: 'SKILL', r: 22, ox: 140, oy: 110 },
+  /*
+   * Interact, and the reason this file exists in its current form.
+   *
+   * There was **no interact button at all**: `E` worked on a keyboard, the prompt text appeared
+   * over the hero's head on a phone, and nothing on screen could actually trigger it. So the game
+   * told the player "Bicara" and then ignored every tap — which reads as a broken button rather
+   * than a missing one, and is exactly how it was reported.
+   *
+   * It sits above the swap button, further from the thumb's resting arc than the attack button,
+   * because it is pressed deliberately and never in a hurry. It is *contextual*: hidden entirely
+   * unless something is in range, so it costs no space during a fight.
+   */
+  { action: 'interact', label: 'E', r: 26, ox: 66, oy: 202 },
 ];
 
 export class TouchControls {
@@ -102,7 +125,7 @@ export class TouchControls {
     this.root.append(this.base, this.knob);
     for (const b of BUTTONS) {
       const node = el('div', {}, b.label);
-      node.className = 'lm-act';
+      node.className = b.action === 'interact' ? 'lm-act ctx' : 'lm-act';
       this.root.appendChild(node);
       this.buttons.push({ ...b, node, pointerId: -1 });
     }
@@ -207,10 +230,29 @@ export class TouchControls {
     });
   }
 
+  /**
+   * Show or hide the contextual interact button, with the label the world supplied.
+   *
+   * The label is the world's business — "Bicara" for a villager, "Baca" for a sign, "Buka" for a
+   * chest, "Berdoa" at a shrine — so this only draws what it is given, and hides the button when
+   * given nothing.
+   */
+  setInteract(label: string | null): void {
+    const b = this.buttons.find((x) => x.action === 'interact');
+    if (!b) return;
+    const on = !!label;
+    if (b.node.classList.contains('on') !== on) b.node.classList.toggle('on', on);
+    if (label && b.node.textContent !== label) b.node.textContent = label;
+    // a button that vanishes mid-press must not leave the action stuck down
+    if (!on && b.pointerId >= 0) this.pressButton(b, false);
+  }
+
   /** Which action button is under a screen point, if any. */
   private hitButton(px: number, py: number): ActionButton | null {
     const bs = settings.get('buttonScale');
     for (const b of this.buttons) {
+      // an interact button that is not showing cannot be hit
+      if (b.action === 'interact' && !b.node.classList.contains('on')) continue;
       const cx = parseFloat(b.node.style.left);
       const cy = parseFloat(b.node.style.top);
       if (Math.hypot(px - cx, py - cy) <= b.r * bs + 8) return b;

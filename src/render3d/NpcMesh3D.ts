@@ -19,7 +19,8 @@ const flat = (color: number): THREE.MeshLambertMaterial => new THREE.MeshLambert
 /** Shared marker textures: built once, used by every NPC. */
 let markerTextures: Partial<Record<MarkerId, THREE.Texture>> | null = null;
 
-function markerTexture(id: MarkerId): THREE.Texture {
+/** Shared with `Story3D`, which hovers the same badges over signs, chests and shrines. */
+export function markerTexture(id: MarkerId): THREE.Texture {
   if (!markerTextures) {
     markerTextures = {};
     for (const [key, pm] of Object.entries(buildMarkerTextures())) {

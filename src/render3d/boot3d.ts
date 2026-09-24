@@ -62,6 +62,7 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
 
   const wire = (g: Game3D): void => {
     g.onWeaponState = (next, charge, held) => controls.setWeaponState(next, charge, held);
+    g.onInteractPrompt = (label) => controls.setInteract(label);
     // The touch controls get out of the way while a cutscene or the pause menu is up.
     g.onCutsceneChange = (playing) => controls.setVisible(!playing);
     g.pause.onToggle = ((original) => (open: boolean) => {

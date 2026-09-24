@@ -678,6 +678,9 @@ export class Game3D {
     return lines;
   }
 
+  /** Set by the boot code so the touch controls can show the contextual interact button. */
+  onInteractPrompt: (label: string | null) => void = () => undefined;
+
   /** Set by the boot code: open the settings overlay from the pause menu. */
   onOpenSettings: () => void = () => undefined;
   /** Set by the boot code: save is already done, take the player back to the title screen. */
@@ -860,6 +863,8 @@ export class Game3D {
       this.hero.charge,
       { label: this.hero.isRanged ? 'PANAH' : 'TEBAS', ranged: this.hero.isRanged },
     );
+    // The contextual interact button: the world decides the word, the controls draw it.
+    this.onInteractPrompt(this.paused || this.dialogue.open ? null : this.story.interactPrompt);
 
     // ── story, puzzle, HUD ──
     const ax = input.axis();

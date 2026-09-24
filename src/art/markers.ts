@@ -7,11 +7,17 @@ import { glyphRows } from './font';
 import { P } from './palette';
 import { Pixmap } from './pixmap';
 
-export type MarkerId = 'quest' | 'turnin';
+export type MarkerId = 'quest' | 'turnin' | 'interact';
 
 const CHAR: Record<MarkerId, { ch: string; color: number }> = {
   quest: { ch: '!', color: P.y4 },
   turnin: { ch: '?', color: P.k3 },
+  /*
+   * "There is something here." Deliberately not a letter: the quest markers are `!` and `?`, and a
+   * third glyph would compete with them for meaning. A chevron reads as "look down at this" at
+   * eight pixels, which is the size it is actually seen at.
+   */
+  interact: { ch: 'v', color: P.w6 },
 };
 
 /** A glyph blown up to `scale`, on a rounded dark badge with a coloured rim. */
@@ -48,5 +54,7 @@ export function buildMarkerTextures(): Record<MarkerId, Pixmap> {
   return {
     quest: marker(CHAR.quest.ch, CHAR.quest.color),
     turnin: marker(CHAR.turnin.ch, CHAR.turnin.color),
+    // smaller: it hovers over signs and chests, which are small objects themselves
+    interact: marker(CHAR.interact.ch, CHAR.interact.color, 2),
   };
 }

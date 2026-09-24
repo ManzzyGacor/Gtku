@@ -20,7 +20,7 @@ import type { Collision } from '../core/world/collision';
 import type { NpcDef, WorldSource } from '../core/world/source';
 import type { DialogueSpec } from '../ui/Dialogue';
 import type { MapMark } from '../ui/Minimap';
-import { NpcMesh3D } from './NpcMesh3D';
+import { markerTexture, NpcMesh3D } from './NpcMesh3D';
 import { u } from './worldPlan';
 
 /** A heal orb an enemy dropped. */
@@ -72,6 +72,10 @@ export class Story3D {
   /** Where the hero was on the last update, so a quest reward can float above them. */
   private heroX = 0;
   private heroY = 0;
+  /** The label the interact button should show, or null. Read by the game every frame. */
+  private prompt: string | null = null;
+  private marker: THREE.Sprite | null = null;
+  private markerMat: THREE.SpriteMaterial | null = null;
 
   constructor(
     private readonly scene: THREE.Object3D,
@@ -115,9 +119,12 @@ export class Story3D {
             id: n.id,
             x: n.x,
             y: n.y,
-            range: 34,
+            // Generous on purpose: 34px is barely two tiles, and on a phone you are steering with
+            // a thumb. Being *almost* close enough and getting no prompt reads as a broken button.
+            range: 44,
             label: () => 'Bicara',
             interact: () => this.talk(n),
+            markerLift: 2.2,
           });
         }
         for (const p of chunk.props) {
@@ -128,13 +135,14 @@ export class Story3D {
               id,
               x: p.x,
               y: p.y - 4,
-              range: 26,
+              range: 38,
               label: () => 'Baca',
               interact: () => {
                 this.hooks.dialogue({ name: 'Papan', lines: [text] });
                 // reading something for the first time is exploring, and exploring pays (once)
                 this.discover(`read_${id}`, EXP_REWARDS.discovery, p.x, p.y);
               },
+              markerLift: 1.4,
             });
           }
           if (p.type === 'chest') {
@@ -143,21 +151,31 @@ export class Story3D {
               id,
               x: p.x,
               y: p.y - 4,
-              range: 28,
-              label: () => (this.state.flags[id] ? 'Sudah kosong' : 'Buka'),
+              range: 38,
+              // An emptied chest still says so rather than going silent: "nothing happens when I
+              // press this" is the worst possible answer, even when the answer is "it is empty".
+              label: () => (this.state.flags[id] ? 'Kosong' : 'Buka'),
               interact: () => this.openChest(id, p.x, p.y),
+              markerLift: 1.1,
             });
           }
         }
       }
+    /*
+     * The checkpoints are shrines, so the prompt says what you do at a shrine.
+     *
+     * It still saves and heals — the mechanic did not change, the word did. "Berdoa" is what the
+     * player is doing; "Istirahat" described the side effect.
+     */
     for (const cp of this.world.markers.checkpoints) {
       this.interactables.push({
         id: cp.id,
         x: cp.x,
         y: cp.y - 4,
-        range: 32,
-        label: () => 'Istirahat',
+        range: 42,
+        label: () => 'Berdoa',
         interact: () => this.rest(cp.id, cp.name),
+        markerLift: 1.9,
       });
     }
     this.refreshMarkers();
@@ -308,15 +326,50 @@ export class Story3D {
     }
 
     let label: string | null = null;
+    let target: Interactable | null = null;
     if (!dialogueOpen && hero.alive && dt > 0) {
-      const it = nearestInteractable(this.interactables, hero.x, hero.y);
-      label = it ? it.label() : null;
-      if (it && input.consume('interact', 120)) {
-        it.interact();
-        sfx.swap();
+      target = nearestInteractable(this.interactables, hero.x, hero.y);
+      label = target ? target.label() : null;
+      if (target && input.consume('interact', 120)) {
+        target.interact();
+        sfx.pickup();
       }
     }
+    this.prompt = label;
     this.hooks.hint(label);
+    // A single marker, moved to whatever is nearest: cheaper than one mesh per interactable, and
+    // it also answers the question the player is actually asking ("what will the button do?").
+    this.showMarker(target);
+  }
+
+  /** What the interact button should say right now, or null when nothing is in range. */
+  get interactPrompt(): string | null {
+    return this.prompt;
+  }
+
+  /**
+   * Hover a small chevron over whatever is currently interactable.
+   *
+   * One sprite, created on first use and moved around, rather than a marker per object: there are
+   * dozens of signs and chests in the world and only ever one nearest thing. It is a Sprite, so it
+   * always faces the camera without anyone having to rotate it.
+   */
+  private showMarker(target: Interactable | null): void {
+    if (!target) {
+      if (this.marker) this.marker.visible = false;
+      return;
+    }
+    if (!this.marker) {
+      this.markerMat = new THREE.SpriteMaterial({ map: markerTexture('interact'), transparent: true, depthWrite: false });
+      this.marker = new THREE.Sprite(this.markerMat);
+      this.marker.scale.set(0.7, 0.7, 0.7);
+      this.marker.renderOrder = 6;
+      this.scene.add(this.marker);
+    }
+    this.marker.visible = true;
+    // villagers are tall, props are short; lift by the kind of thing it is
+    const lift = target.markerLift ?? 1.5;
+    this.marker.position.set(u(target.x), lift + Math.sin(this.clock * 3.2) * 0.08, u(target.y));
   }
 
   /**
@@ -355,6 +408,10 @@ export class Story3D {
   }
 
   dispose(): void {
+    this.marker?.removeFromParent();
+    this.markerMat?.dispose();
+    this.marker = null;
+    this.markerMat = null;
     for (const npc of this.npcs) npc.dispose();
     this.npcs = [];
     for (const p of this.pickups) p.mesh.removeFromParent();

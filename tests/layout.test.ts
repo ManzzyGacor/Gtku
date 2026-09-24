@@ -136,7 +136,7 @@ test('every action button is fully on screen, inside the safe area, at 1.3x', ()
   controls.layout();
   const root = walkEls(doc.body).find((e) => e.classes.has('lm-touch'))!;
   const found = circles(root);
-  assert.equal(found.length, 4, 'attack, dodge, swap and skill');
+  assert.equal(found.length, 5, 'attack, dodge, swap, skill and the contextual interact button');
 
   for (const c of found) {
     assert.ok(c.r >= 20, `${c.label}: radius ${c.r} is too small for a thumb`);
@@ -217,7 +217,7 @@ test('a large landscape cutout pushes the buttons clear rather than under it', (
   controls.layout();
   const root = walkEls(doc.body).find((e) => e.classes.has('lm-touch'))!;
   const found = circles(root);
-  assert.equal(found.length, 4);
+  assert.equal(found.length, 5);
   for (const c of found) {
     assert.ok(c.cx + c.r <= W - INSET.right + 0.5, `${c.label} is under the cutout (${c.cx + c.r} > ${W - INSET.right})`);
     assert.ok(c.cy + c.r <= H - INSET.bottom + 0.5, `${c.label} is under the gesture bar`);

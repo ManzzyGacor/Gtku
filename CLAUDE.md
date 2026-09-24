@@ -129,8 +129,9 @@ phaser.
   kalau memposisikan dengan JavaScript. Dijaga `tests/layout.test.ts` di 2318x759.
 - **Jangan pakai backtick di dalam komentar yang berada DI DALAM template literal** (blok CSS di
   `src/ui/*`, blok GLSL di `src/render3d/*`). Backtick-nya menutup string itu dan errornya muncul
-  sebagai `TS1005: ',' expected` di baris komentar — bukan di tempat yang bisa ditebak. Sudah dua
-  kali kejadian. Tulis `position:fixed`, bukan backtick-position:fixed-backtick.
+  sebagai `TS1005: ',' expected` di baris komentar — bukan di tempat yang bisa ditebak. Sudah **tiga**
+  kali kejadian, jadi sekarang dijaga `tests/source.test.ts`. Tulis `position:fixed`, bukan
+  backtick-position:fixed-backtick.
 - Jangan memakai `Math.random()` untuk hal yang harus konsisten (worldgen, variasi tile): pakai `core/rng.ts` (seeded).
 - Satu fitur per langkah: `npm run build` hijau → commit jelas → `git push origin main` → update `docs/PROGRESS.md`.
 - Pesan commit diakhiri baris `Co-Authored-By` sesuai instruksi harness.
