@@ -37,6 +37,27 @@ export function unlockAudio(): void {
   }
 }
 
+/**
+ * Put the audio hardware to sleep while the game is in the background.
+ *
+ * Without this, a suspended tab keeps its audio graph alive and the phone keeps the audio path
+ * powered — audible as battery drain rather than as sound. Calling it when audio was never
+ * unlocked is a no-op.
+ */
+export function suspendAudio(): void {
+  if (!ready || !ctx) return;
+  void ctx.suspend?.();
+}
+
+/**
+ * Wake it back up. iOS Safari hands the context back **suspended** every single time the app
+ * returns to the foreground, so this has to run on the way back in, not only on the first tap.
+ */
+export function resumeAudio(): void {
+  if (!ready || !ctx) return;
+  void ctx.resume?.();
+}
+
 export function audioReady(): boolean {
   return ready && ctx?.state === 'running';
 }
