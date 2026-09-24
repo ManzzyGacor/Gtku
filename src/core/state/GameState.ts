@@ -26,6 +26,8 @@ export interface SaveData {
   bossDefeated: boolean;
   /** Level, EXP, bag and equipment. Absent in a v1 save. */
   character?: CharacterJson | undefined;
+  /** Ids of cutscenes already watched, so they never play automatically twice (Batch 5). */
+  cutscenesSeen?: string[] | undefined;
 }
 
 /** What `Character.toJSON()` produces; typed here so the save shape is in one file. */
@@ -54,6 +56,11 @@ export class GameState {
   puzzleSolved = false;
   bossDefeated = false;
   checkpoint = 'cp_village';
+  /**
+   * Cutscenes already watched (or skipped to the end). Kept in the save rather than in settings:
+   * it is progress, not a preference, and a new game has to start with none of them seen.
+   */
+  cutscenesSeen: string[] = [];
 
   /** True while a spawn id is on its respawn timer (or permanently dead for the boss). */
   isDead(id: string): boolean {
@@ -79,6 +86,7 @@ export class GameState {
       puzzle: { solved: this.puzzleSolved },
       bossDefeated: this.bossDefeated,
       character,
+      cutscenesSeen: [...this.cutscenesSeen],
     };
   }
 
@@ -91,5 +99,14 @@ export class GameState {
     this.puzzleSolved = !!d.puzzle?.solved;
     this.bossDefeated = !!d.bossDefeated;
     this.checkpoint = d.checkpoint ?? 'cp_village';
+    this.cutscenesSeen = Array.isArray(d.cutscenesSeen) ? d.cutscenesSeen.filter((x) => typeof x === 'string') : [];
+  }
+
+  hasSeen(id: string): boolean {
+    return this.cutscenesSeen.includes(id);
+  }
+
+  markSeen(id: string): void {
+    if (!this.cutscenesSeen.includes(id)) this.cutscenesSeen.push(id);
   }
 }

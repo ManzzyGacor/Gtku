@@ -123,6 +123,7 @@ export function sanitizeSave(value: unknown, maxHp = Infinity, notes: string[] =
     bossDefeated: boolOf(value.bossDefeated),
     // Left as-is; `Character.load` does its own validation because it owns the item catalogue.
     character: isObj(value.character) ? (value.character as unknown as CharacterJson) : undefined,
+    cutscenesSeen: Array.isArray(value.cutscenesSeen) ? value.cutscenesSeen.filter((x): x is string => typeof x === 'string') : [],
   };
 }
 

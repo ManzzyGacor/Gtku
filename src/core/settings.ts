@@ -28,6 +28,8 @@ export interface Settings {
   buttonScale: number;
   /** Dialogue text scale (1 = small, 3 = large); HUD text follows at one step down. */
   textScale: number;
+  /** Typewriter speed in characters per second, for dialogue and cutscenes. */
+  textSpeed: number;
   /** 3/4 camera tilt above the ground, in degrees. Lower = more side-on, more of the buildings visible. */
   camPitch: number;
   /** 3/4 camera zoom. Higher = closer to the hero. */
@@ -53,6 +55,7 @@ export const DEFAULTS: Settings = {
   stickY: 0.78,
   buttonScale: 1,
   textScale: 2,
+  textSpeed: 42,
   camPitch: 38,
   camZoom: 1,
   renderScale: 1,
@@ -68,6 +71,7 @@ export const RANGES = {
   stickY: { min: 0.4, max: 0.9, step: 0.02 },
   buttonScale: { min: 0.7, max: 1.8, step: 0.1 },
   textScale: { min: 1, max: 3, step: 1 },
+  textSpeed: { min: 14, max: 90, step: 4 },
   camPitch: { min: 22, max: 55, step: 1 },
   camZoom: { min: 0.6, max: 2, step: 0.05 },
   renderScale: { min: 0.5, max: 1, step: 0.05 },
