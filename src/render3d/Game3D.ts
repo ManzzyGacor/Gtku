@@ -26,6 +26,7 @@ import { CharacterPanel } from '../ui/CharacterPanel';
 import { CutsceneOverlay } from '../ui/CutsceneOverlay';
 import { Cutscene3D } from './Cutscene3D';
 import { CUTSCENES, playerName } from '../core/story/cutscenes';
+import { ambientFor, bus, fadeFor, musicFor } from '../core/audio';
 import type { ActorSpec, FxSpec } from '../core/story/cutscene';
 import { Puzzle3D } from './Puzzle3D';
 import { Story3D } from './Story3D';
@@ -112,6 +113,9 @@ export class Game3D {
   private tintOverride: [number, number, number] | null = null;
   /** An actor being walked from A to B by a cutscene. */
   private actorMove: { id: string; fromX: number; fromY: number; toX: number; toY: number; t: number; dur: number } | null = null;
+  /** What the mixer was last told to play, so nothing is re-requested every frame. */
+  private nowMusic = '';
+  private nowAmbient = '';
 
   constructor(parent: HTMLElement, options: { continue?: boolean } = {}) {
     this.pixels = new PixelRenderer(parent);
@@ -368,6 +372,8 @@ export class Game3D {
 
     this.minimap.update(dt, this.hero.x, this.hero.y, AREAS[areaAtTile(Math.floor(this.hero.x / 16))].name, this.story.mapMarks());
     this.hud.update(dt, this.projector);
+
+    this.updateSoundtrack();
 
     // area banner
     const area = areaAtTile(Math.floor(this.hero.x / 16));
@@ -741,6 +747,33 @@ export class Game3D {
     this.pixels.render(this.camera.camera);
   }
 
+  /**
+   * Pick the music and the ambience for where the hero is standing.
+   *
+   * The *rules* live in `core/audio/select.ts` so they can be tested; this only notices when the
+   * answer changes and hands the new name to the mixer. A cutscene sets its own soundtrack, so it
+   * is left alone while one plays — and the next frame after it ends puts the area's music back.
+   */
+  private updateSoundtrack(): void {
+    if (this.cutscene.active) return;
+    const boss = this.combat.bossRef;
+    const situation = {
+      area: areaAtTile(Math.floor(this.hero.x / 16)),
+      night: nightAmount(this.dayTime),
+      boss: !!boss && boss.awake && !boss.dead,
+    };
+    const track = musicFor(situation);
+    if (track !== this.nowMusic) {
+      bus.music(track, fadeFor(this.nowMusic, track));
+      this.nowMusic = track;
+    }
+    const bed = ambientFor(situation);
+    if (bed !== this.nowAmbient) {
+      bus.ambient(bed);
+      this.nowAmbient = bed;
+    }
+  }
+
   /** Bloom, vignette and colour grade for the current time of day, scaled by the preset. */
   private applyGrade(cave: number): void {
     const g = gradeAt(this.dayTime, cave);
@@ -903,6 +936,10 @@ export class Game3D {
       },
       report: () => this.extraReport(),
       startPerfProbe: () => this.startPerfProbe(),
+      cutsceneSeen: (id) => this.state.hasSeen(id),
+      playCutscene: (id) => {
+        this.playCutscene(id);
+      },
       perfProbeStatus: () => ({
         running: this.probe.running,
         label: this.probe.label,

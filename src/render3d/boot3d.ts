@@ -1,6 +1,6 @@
 /**
  * Boots the 3D (Three.js) renderer: the pixel pipeline, the isometric camera, the greybox
- * Desa Lentera, and the DOM touch controls (docs/OVERHAUL.md, Fase 1).
+ * Ravenhollow, and the DOM touch controls (docs/OVERHAUL.md, Fase 1).
  *
  * It also owns the *session*: pausing when the player switches apps, saving before the phone can
  * kill the tab, and rebuilding the whole world if the GPU takes the WebGL context away. See

@@ -1,6 +1,6 @@
 /**
  * Deterministic generator for the Phase 1 world: 128x80 tiles = 8x5 chunks, three seamless areas
- * (Desa Lentera → Hutan Bisik → Gua Kelam). Pure logic, no Phaser.
+ * (Ravenhollow → Hutan Noctis → Gua Lumen). Pure logic, no Phaser.
  */
 import { CHUNK_TILES, TILE, WORLD_TILES_H, WORLD_TILES_W } from '../../config';
 import { clamp, fbm, hashf, makeRng, valueNoise } from '../rng';
@@ -15,9 +15,9 @@ const SEED = 20260920;
  * ─────────────────────────── layout (tiles) ───────────────────────────
  *
  * 256 x 128 tiles, three seamless areas on a west→east journey:
- *   Desa Lentera  x 0..95    village core, outskirt farms, pond, brook
- *   Hutan Bisik   x 96..191  river with two bridges and a ford, lake, clearings, ruins, viewpoint
- *   Gua Kelam     x 192..255 branching tunnels, puzzle hall, boss arena
+ *   Ravenhollow  x 0..95    village core, outskirt farms, pond, brook
+ *   Hutan Noctis   x 96..191  river with two bridges and a ford, lake, clearings, ruins, viewpoint
+ *   Gua Lumen     x 192..255 branching tunnels, puzzle hall, boss arena
  *
  * Batch 2 roughly tripled every area. The numbers are hand-placed rather than derived, because a
  * village has to *read* as a village; the generator's job is the terrain and the clutter around them.
@@ -488,8 +488,8 @@ export class GeneratedWorld implements WorldSource {
     for (const [x, y] of [[28, 88], [40, 88], [50, 66], [20, 62]] as const) g.prop('flowerbed', x, y, { halfX: true });
 
     // signs
-    g.prop('sign', 92, 62).text = 'Jembatan Anak Sungai. Di seberang: Hutan Bisik. Hati-hati, monsternya makin buas!';
-    g.prop('sign', 38, 56).text = 'Desa Lentera. Tempat cahaya bersemi. Bicaralah dengan Tetua Wulan di plaza.';
+    g.prop('sign', 92, 62).text = 'Jembatan Anak Sungai. Di seberang: Hutan Noctis. Hati-hati, monsternya makin buas!';
+    g.prop('sign', 38, 56).text = 'Ravenhollow. Tempat cahaya bersemi. Bicaralah dengan Tetua Wulan di plaza.';
     g.prop('sign', FARM.x + 4, FARM.y + 6).text = 'Ladang Utara. Jangan ganggu jerami Pak Sura, katanya.';
     g.prop('sign', MILL.x - 8, MILL.y).text = 'Kincir Selatan. Kolam desa ada di barat.';
 
@@ -606,7 +606,7 @@ export class GeneratedWorld implements WorldSource {
     // landmarks
     g.prop('shrine', FOREST_SHRINE.x, FOREST_SHRINE.y);
     g.prop('sign', FOREST_SHRINE.x - 3, FOREST_SHRINE.y + 4).text = 'Altar Hutan. Menyentuh apinya menyembuhkan dan menyimpan progresmu.';
-    g.prop('sign', CAVE_X0 - 6, CAVE_MOUTH_Y - 3).text = 'Gua Kelam. Hanya untuk yang berani. Dorong batu ukir ke pelat untuk membuka gerbang!';
+    g.prop('sign', CAVE_X0 - 6, CAVE_MOUTH_Y - 3).text = 'Gua Lumen. Hanya untuk yang berani. Dorong batu ukir ke pelat untuk membuka gerbang!';
     g.prop('sign', RUINS.x - 3, RUINS.y + 4).text = 'Reruntuhan tanpa nama. Batunya lebih tua dari desa.';
 
     // viewpoint: a bench of logs looking out over the forest

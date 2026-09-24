@@ -8,7 +8,9 @@
  * Kredit, Akun and the rest of the menu arrive with Batch 5/7; only what works is shown.
  */
 import { clearSave, hasSave } from '../core/save';
-import { unlockAudio } from '../core/audio';
+// Imported from the engine rather than the barrel on purpose: the barrel pulls in the music and
+// ambience schedulers, and the title screen lives in the entry chunk that has to arrive first.
+import { unlockAudio } from '../core/audio/engine';
 import { NAME_FALLBACK, sanitizeName, settings } from '../core/settings';
 import { el, injectStyle, onTap } from './dom';
 

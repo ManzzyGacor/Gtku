@@ -12,9 +12,22 @@ import { formatErrors, recentErrors } from '../core/errors';
 
 /** Loaded on demand by `toggleCombat` — see the comment there. */
 let tuning: typeof import('../core/entities/combatTuning') | null = null;
+/**
+ * The cutscene library, loaded on demand for the replay list.
+ *
+ * Same reasoning as the combat tuning above: the scripts and the timeline are several kilobytes of
+ * story that the entry chunk — the one holding up the title screen — has no business carrying for
+ * a list most players open once.
+ */
+type StoryModule = {
+  CUTSCENES: (typeof import('../core/story/cutscenes'))['CUTSCENES'];
+  REPLAYABLE: string[];
+  length: (typeof import('../core/story/cutscene'))['cutsceneLength'];
+};
+let story: StoryModule | null = null;
 import { PROFILES, probeDevice, profileOf } from '../core/graphics';
 import { buildReport, copyText } from '../core/report';
-import { DEFAULTS, PRESET_IDS, RANGES, settings, type NumericKey, type PresetId, type Settings } from '../core/settings';
+import { DEFAULTS, NAME_FALLBACK, PRESET_IDS, RANGES, sanitizeName, settings, type NumericKey, type PresetId, type Settings } from '../core/settings';
 import type { DiagnosticsSource } from './diagnostics';
 import { el, injectStyle, onTap } from './dom';
 
@@ -49,6 +62,28 @@ const ROWS: Row[] = [
   { kind: 'number', label: 'Joystick atas-bawah', key: 'stickY', fmt: pct },
   { kind: 'number', label: 'Ukuran tombol', key: 'buttonScale', fmt: mult },
   { kind: 'number', label: 'Ukuran teks', key: 'textScale', fmt: (v) => `${v}x` },
+  { kind: 'number', label: 'Kecepatan teks', key: 'textSpeed', fmt: (v) => `${v}/dtk` },
+  {
+    kind: 'action',
+    label: 'Nama karakter',
+    button: 'Ubah',
+    note: () => settings.get('playerName') || `Belum diatur (${NAME_FALLBACK})`,
+    run: (p) => p.askName(),
+  },
+  { kind: 'header', label: 'Audio' },
+  { kind: 'number', label: 'Musik', key: 'musicVol', fmt: pct },
+  { kind: 'number', label: 'Suasana', key: 'ambientVol', fmt: pct },
+  { kind: 'number', label: 'Tempur', key: 'combatVol', fmt: pct },
+  { kind: 'number', label: 'Efek', key: 'sfxVol', fmt: pct },
+  { kind: 'number', label: 'Antarmuka', key: 'uiVol', fmt: pct },
+  { kind: 'header', label: 'Cerita' },
+  {
+    kind: 'action',
+    label: 'Putar ulang cutscene',
+    button: 'Pilih',
+    note: () => (story ? `${story.REPLAYABLE.length} adegan tersimpan` : 'Adegan cerita yang sudah ditonton'),
+    run: (p) => p.showCutscenes(),
+  },
   { kind: 'header', label: 'Diagnostik' },
   { kind: 'toggle', label: 'Penghitung FPS', key: 'fpsCounter', hint: 'Bisa juga lewat ?fps=1' },
   {
@@ -405,6 +440,59 @@ export class SettingsPanel {
   showErrors(): void {
     const lines = formatErrors();
     this.showDump(lines.length ? [...lines].reverse().join('\n') : 'Belum ada error yang tercatat.');
+  }
+
+  /**
+   * Ask for the character's name.
+   *
+   * A prompt rather than a text field in the row, because the settings list is a column of
+   * +/- buttons and a keyboard opening inside it on a phone pushes everything around. `prompt` is
+   * plain, it is native, and it is the one place in this UI where that is the right trade.
+   */
+  askName(): void {
+    const current = settings.get('playerName');
+    const next = typeof prompt === 'function' ? prompt('Nama karaktermu:', current) : null;
+    if (next === null) return;
+    settings.set('playerName', sanitizeName(next));
+    this.refresh();
+  }
+
+  /**
+   * The cutscene replay list.
+   *
+   * Every scene stays available once it has been watched — a story you cannot revisit is a story
+   * you have to take notes on. Scenes not yet reached are listed as locked rather than hidden, so
+   * the list also says how much there is.
+   */
+  showCutscenes(): void {
+    if (!story) {
+      void Promise.all([import('../core/story/cutscenes'), import('../core/story/cutscene')]).then(([s, engine]) => {
+        story = { CUTSCENES: s.CUTSCENES, REPLAYABLE: s.REPLAYABLE, length: engine.cutsceneLength };
+        this.showCutscenes();
+      });
+      return;
+    }
+    const { CUTSCENES, REPLAYABLE, length: cutsceneLength } = story;
+    const src = this.source();
+    const lines = REPLAYABLE.map((id) => {
+      const def = CUTSCENES[id];
+      if (!def) return '';
+      const seen = src.cutsceneSeen?.(id) ?? false;
+      const mins = Math.floor(cutsceneLength(def) / 60);
+      const secs = cutsceneLength(def) % 60;
+      const len = mins > 0 ? `${mins} mnt ${secs} dtk` : `${secs} dtk`;
+      return `${seen ? '\u25b6' : '\u25cb'} ${def.title} (${len})${seen ? '' : ' \u2014 belum ditonton'}`;
+    }).filter(Boolean);
+
+    this.showDump([...lines, '', 'Ketuk tombol di bawah untuk memutar ulang adegan pertama.'].join('\n'));
+    if (!src.playCutscene) return;
+    const play = el('button', {}, 'PUTAR ULANG');
+    play.className = 'lm-btn wide';
+    onTap(play, () => {
+      src.playCutscene?.(REPLAYABLE[0]);
+      this.setOpen(false);
+    });
+    this.dump?.appendChild(play);
   }
 
   private showDump(text: string): void {

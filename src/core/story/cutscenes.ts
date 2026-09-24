@@ -49,7 +49,7 @@ const INTRO: CutsceneDef = {
   id: 'intro',
   title: 'Malam Terakhir',
   letterbox: true,
-  endMusic: 'village',
+  endMusic: 'night',
   steps: [
     // ── 1. black, rain, a date ──
     { t: 'fade', to: 1, dur: 0, color: 0x05040a },
@@ -131,7 +131,7 @@ const INTRO: CutsceneDef = {
     // ── 10. seven years later: hand the world back ──
     { t: 'caption', text: 'Tujuh tahun kemudian.', dur: 4, hold: 4 },
     { t: 'flag', set: 'intro_done' },
-    { t: 'music', id: 'village', fade: 4 },
+    { t: 'music', id: 'night', fade: 4 },
     { t: 'ambient', id: 'night' },
     { t: 'light', night: 0.82, dur: 3 },
     { t: 'camera', pitch: 38, zoom: 1, dur: 2, hold: 0 },

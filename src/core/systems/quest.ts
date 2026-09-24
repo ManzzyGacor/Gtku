@@ -51,7 +51,7 @@ export function advanceQuest(state: GameState, ev: QuestEvent): QuestResult {
           q.stage = 2;
           return {
             changed: true,
-            message: 'Monster hutan sudah cukup. Menujulah ke Gua Kelam!',
+            message: 'Monster hutan sudah cukup. Menujulah ke Gua Lumen!',
             reward: { exp: EXP_REWARDS.questStage, items: [{ id: 'boots_soft' }] },
           };
         }
@@ -93,7 +93,7 @@ export function trackerLines(state: GameState): string[] {
     case 1:
       return [QUEST_TITLE, `Kalahkan monster hutan ${q.kills}/${KILLS_NEEDED}`];
     case 2:
-      return [QUEST_TITLE, 'Kalahkan Kolosus Kelam', 'di Gua Kelam (timur)'];
+      return [QUEST_TITLE, 'Kalahkan Kolosus Kelam', 'di Gua Lumen (timur)'];
     case 3:
       return [QUEST_TITLE, 'Serahkan Kristal Fajar', 'ke Tetua Wulan'];
     default:
@@ -117,20 +117,20 @@ export function dialogueFor(npc: NpcId, state: GameState): DialogueScript {
       if (q.stage === 0)
         return {
           lines: [
-            'Arka, Lentera Agung padam sejak Kolosus Kelam bangun di dasar Gua Kelam.',
+            'Arka, Lentera Agung padam sejak Kolosus Kelam bangun di dasar Gua Lumen.',
             'Tanpa cahayanya, hewan hutan menjadi buas dan malam terasa makin panjang.',
             'Bawa pedang pemantikmu. Kalahkan 6 monster di hutan untuk mengasah diri.',
-            'Setelah itu, masuki Gua Kelam dan kalahkan Kolosus. Bawa pulang Kristal Fajar.',
+            'Setelah itu, masuki Gua Lumen dan kalahkan Kolosus. Bawa pulang Kristal Fajar.',
             'Ketuk tombol serang berulang untuk kombo tiga pukulan. Berguling untuk menghindar!',
           ],
           onDone: { type: 'talk-elder' },
         };
       if (q.stage === 1)
-        return { lines: [`Kamu sudah mengalahkan ${q.kills} dari ${KILLS_NEEDED} monster hutan.`, 'Teruslah, Arka. Hutan Bisik ada di sebelah timur desa.'] };
+        return { lines: [`Kamu sudah mengalahkan ${q.kills} dari ${KILLS_NEEDED} monster hutan.`, 'Teruslah, Arka. Hutan Noctis ada di sebelah timur desa.'] };
       if (q.stage === 2)
         return {
           lines: [
-            'Gua Kelam ada di ujung timur hutan. Di dalamnya ada batu ukir dan pelat di lantai.',
+            'Gua Lumen ada di ujung timur hutan. Di dalamnya ada batu ukir dan pelat di lantai.',
             'Dorong batu itu ke pelat agar gerbang terbuka.',
             'Kolosus lemah setelah menghantam tanah. Hindari gelombang kejutnya dengan berguling!',
           ],
@@ -145,7 +145,7 @@ export function dialogueFor(npc: NpcId, state: GameState): DialogueScript {
         };
       return {
         lines: [
-          'Lihatlah, desa kembali terang. Kamulah pahlawan Desa Lentera.',
+          'Lihatlah, desa kembali terang. Kamulah pahlawan Ravenhollow.',
           'Jelajahilah hutan dan gua sesukamu. Masih banyak rahasia di sana.',
         ],
       };
@@ -164,7 +164,7 @@ export function dialogueFor(npc: NpcId, state: GameState): DialogueScript {
       if (q.stage >= 3) return { lines: ['Kamu benar-benar mengalahkan raksasa batu itu?! Keren banget!'] };
       return {
         lines: [
-          'Kak, aku pernah mengintip ke Gua Kelam. Ada batu berukir di lantai!',
+          'Kak, aku pernah mengintip ke Gua Lumen. Ada batu berukir di lantai!',
           'Ada pelat bercahaya juga. Mungkin batunya harus didorong ke sana.',
           'Kalau batunya macet, keluar dari ruangan dulu. Batunya akan kembali!',
         ],

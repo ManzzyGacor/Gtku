@@ -39,8 +39,16 @@ export interface Settings {
    * it lowers how many pixels are actually shaded without changing the art's pixel size.
    */
   renderScale: number;
+  /**
+   * The five mixer categories (Batch 5). Separate sliders because they are separate problems: a
+   * player who finds the combat loud does not necessarily want the music quieter, and on a phone
+   * the ambience is usually the first thing you want to turn down.
+   */
   musicVol: number;
+  ambientVol: number;
+  combatVol: number;
   sfxVol: number;
+  uiVol: number;
   /** Set once the intro cutscene has been watched (or skipped) to the end. */
   cutsceneSeen: boolean;
   /**
@@ -70,7 +78,10 @@ export const DEFAULTS: Settings = {
   camZoom: 1,
   renderScale: 1,
   musicVol: 0.6,
+  ambientVol: 0.7,
+  combatVol: 0.9,
   sfxVol: 0.8,
+  uiVol: 0.7,
   cutsceneSeen: false,
 };
 
@@ -87,6 +98,9 @@ export const RANGES = {
   renderScale: { min: 0.5, max: 1, step: 0.05 },
   musicVol: { min: 0, max: 1, step: 0.1 },
   sfxVol: { min: 0, max: 1, step: 0.1 },
+  ambientVol: { min: 0, max: 1, step: 0.1 },
+  combatVol: { min: 0, max: 1, step: 0.1 },
+  uiVol: { min: 0, max: 1, step: 0.1 },
 } as const;
 
 export type NumericKey = keyof typeof RANGES;

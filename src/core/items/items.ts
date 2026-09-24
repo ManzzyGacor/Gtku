@@ -129,7 +129,7 @@ export const ITEMS: Record<string, ItemDef> = {
     name: 'Busur Bisik',
     kind: 'weapon',
     rarity: 'uncommon',
-    note: 'Kayu dari Hutan Bisik; talinya hampir tidak bersuara saat dilepas.',
+    note: 'Kayu dari Hutan Noctis; talinya hampir tidak bersuara saat dilepas.',
     mods: [
       { stat: 'atk', flat: 4, source: 'Busur Bisik' },
       { stat: 'speed', pct: 4, source: 'Busur Bisik' },
@@ -153,7 +153,7 @@ export const ITEMS: Record<string, ItemDef> = {
     name: 'Helm Batu Gua',
     kind: 'helmet',
     rarity: 'rare',
-    note: 'Dipahat dari langit-langit Gua Kelam. Berat, tapi jujur.',
+    note: 'Dipahat dari langit-langit Gua Lumen. Berat, tapi jujur.',
     mods: [
       { stat: 'def', flat: 5, source: 'Helm Batu Gua' },
       { stat: 'maxHp', flat: 3, source: 'Helm Batu Gua' },

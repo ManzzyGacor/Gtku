@@ -19,6 +19,10 @@ export interface DiagnosticsSource {
   /** Start the on-device A/B performance measurement. */
   startPerfProbe?(): void;
   perfProbeStatus?(): { running: boolean; label: string; progress: number; lines: string[] };
+  /** Has this cutscene been watched? (Batch 5; the answer lives in the save.) */
+  cutsceneSeen?(id: string): boolean;
+  /** Replay a cutscene from the settings menu. */
+  playCutscene?(id: string): void;
 }
 
 /** Stand-in used before a renderer has started (title screen, boot). */

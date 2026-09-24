@@ -11,10 +11,15 @@ export interface AreaDef {
   ambient: [number, number, number];
 }
 
+/*
+ * Display names come from docs/STORY.md (Chapter 1). The **ids** deliberately do not: `village`,
+ * `forest` and `cave` are in save files, checkpoint ids and tests, so renaming them would break
+ * saved games for a caption. Only what the player reads changed.
+ */
 export const AREAS: Record<AreaId, AreaDef> = {
-  village: { id: 'village', name: 'Desa Lentera', indoor: false, ambient: [1, 1, 1] },
-  forest: { id: 'forest', name: 'Hutan Bisik', indoor: false, ambient: [1, 1, 1] },
-  cave: { id: 'cave', name: 'Gua Kelam', indoor: true, ambient: [0.22, 0.2, 0.38] },
+  village: { id: 'village', name: 'Ravenhollow', indoor: false, ambient: [1, 1, 1] },
+  forest: { id: 'forest', name: 'Hutan Noctis', indoor: false, ambient: [1, 1, 1] },
+  cave: { id: 'cave', name: 'Gua Lumen', indoor: true, ambient: [0.22, 0.2, 0.38] },
 };
 
 /** Area boundaries in tiles (x only; the journey runs west→east). Areas blend seamlessly, no loading. */
