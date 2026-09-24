@@ -75,7 +75,7 @@ export class Game3D {
     this.adaptive.onChange = (_from, to) => settings.set('preset', to);
     this.unsubscribe = settings.on((key) => {
       if (key === 'presetAuto') this.adaptive.auto = settings.get('presetAuto') && !settings.isLocked('preset');
-      if (key === 'preset') this.applyProfile();
+      if (key === 'preset' || key === 'renderScale') this.applyProfile();
     });
 
     this.applyProfile();
@@ -90,7 +90,13 @@ export class Game3D {
 
   resize(): void {
     const p = profileOf(settings.get('preset'));
-    const plan = this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, p.pixelHeight, p.renderScale);
+    const plan = this.pixels.resize(
+      window.innerWidth,
+      window.innerHeight,
+      window.devicePixelRatio || 1,
+      p.pixelHeight,
+      p.renderScale * settings.get('renderScale'),
+    );
     this.camera.setAspect(plan.pixelW / plan.pixelH);
   }
 
@@ -106,6 +112,7 @@ export class Game3D {
     // the village look lit at night.
     this.scene3d.setLightPools(p.id === 'vlow' ? 1.2 : 1.6);
     this.scene3d.setGroundDetail(p.id === 'vlow' ? 0 : 1);
+    this.scene3d.setRim(p.id === 'vlow' ? 0.4 : 1);
     this.environment.setBudget(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.5 : 1);
     this.scene3d.setShadows(p.shadows);
     this.resize();

@@ -68,6 +68,7 @@ test('the report carries everything a bug report needs', () => {
     'objek aktif: 214',
     'preset: medium (AUTO)',
     'kamera: sudut 38\u00b0, zoom 1.00x',
+    'skala render: 100%',
     '?fps=1',
     'GameScene.setupPost: bloom tidak tersedia',
   ]) {

@@ -55,6 +55,7 @@ export function buildReport(i: ReportInput): string {
     `joystick: ukuran ${n1(s.stickScale)}x, posisi ${Math.round(s.stickX * 100)}%/${Math.round(s.stickY * 100)}%`,
     `tombol: ${n1(s.buttonScale)}x   teks: ${s.textScale}x`,
     `kamera: sudut ${s.camPitch}\u00b0, zoom ${s.camZoom.toFixed(2)}x`,
+    `skala render: ${Math.round(s.renderScale * 100)}%`,
     `volume musik/sfx: ${n1(s.musicVol)}/${n1(s.sfxVol)}`,
     `cutscene sudah ditonton: ${s.cutsceneSeen ? 'ya' : 'belum'}`,
     '',

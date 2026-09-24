@@ -101,6 +101,22 @@ const PULSE_FRAGMENT = /* glsl */ `
 `;
 
 /**
+ * Rim light.
+ *
+ * In the reference art almost every object has a warm sliver along the edge where the lantern
+ * light grazes it. It costs one dot product and it does more for the "not flat" feeling than any
+ * other single thing here. Added as *emissive* radiance rather than to the diffuse colour, so it
+ * survives the night's near-zero ambient instead of being multiplied away.
+ *
+ * `normal` is in view space at this point, so `normal.z` is how squarely the surface faces the
+ * camera — the rim is where that goes to zero, i.e. the silhouette.
+ */
+const RIM_FRAGMENT = /* glsl */ `
+  float lmRim = pow(1.0 - abs(normal.z), 3.0);
+  totalEmissiveRadiance += uRimColor * lmRim * uRimStrength;
+`;
+
+/**
  * Cut a hole in whatever stands between the camera and the hero.
  *
  * A fixed 3/4 camera means roofs, tree crowns and cave walls regularly park themselves in front of
@@ -157,6 +173,9 @@ export interface EnvUniforms {
   uTime: { value: number };
   /** Seconds a newly streamed instance takes to dissolve in. */
   uFadeIn: { value: number };
+  /** Rim-light colour and strength, warmed and strengthened at night. */
+  uRimColor: { value: THREE.Color };
+  uRimStrength: { value: number };
   /** Wind displacement in world units, already including strength and direction. */
   uWind: { value: THREE.Vector2 };
   /** Hero position on the ground (x, z). */
@@ -180,9 +199,10 @@ function patchInstanceMaterial(material: THREE.Material, occlusion: OcclusionUni
         .replace('#include <uv_vertex>', `#include <uv_vertex>\n${UV_SCALE_CHUNK}`)
         .replace('#include <begin_vertex>', `#include <begin_vertex>\n${SWAY_VERTEX}`)
         .replace('#include <project_vertex>', '#include <project_vertex>\n  vOccView = mvPosition.xyz;\n  vFade = clamp((uTime - aFade) / uFadeIn, 0.0, 1.0);');
-    shader.fragmentShader = `${defines}${OCCLUSION_PARS}uniform float uTime;\n${shader.fragmentShader}`
+    shader.fragmentShader = `${defines}${OCCLUSION_PARS}uniform float uTime;\nuniform vec3 uRimColor;\nuniform float uRimStrength;\n${shader.fragmentShader}`
       .replace('void main() {', `void main() {\n${OCCLUSION_FRAGMENT}`)
-      .replace('#include <map_fragment>', `#include <map_fragment>\n${PULSE_FRAGMENT}`);
+      .replace('#include <map_fragment>', `#include <map_fragment>\n${PULSE_FRAGMENT}`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${opts.pulse ? '' : RIM_FRAGMENT}`);
     // Shared uniform objects: updating `.value` once reaches every patched material.
     shader.uniforms.uHeroView = occlusion.uHeroView;
     shader.uniforms.uFadeRadius = occlusion.uFadeRadius;
@@ -193,6 +213,8 @@ function patchInstanceMaterial(material: THREE.Material, occlusion: OcclusionUni
     shader.uniforms.uPushRadius = env.uPushRadius;
     shader.uniforms.uSway = { value: opts.sway };
     shader.uniforms.uFadeIn = env.uFadeIn;
+    shader.uniforms.uRimColor = env.uRimColor;
+    shader.uniforms.uRimStrength = env.uRimStrength;
   };
   // Materials with different injected code must not share a compiled program.
   material.customProgramCacheKey = () => `lm-instance|${opts.sway > 0 ? 's' : ''}${opts.pulse ? 'p' : ''}`;
@@ -245,6 +267,8 @@ export class World3D {
   private readonly env: EnvUniforms = {
     uTime: { value: 0 },
     uFadeIn: { value: 0.5 },
+    uRimColor: { value: new THREE.Color(0xffc98a) },
+    uRimStrength: { value: 0.1 },
     uWind: { value: new THREE.Vector2(0.18, 0.07) },
     uHeroPos: { value: new THREE.Vector2(-1e4, -1e4) },
     uPushRadius: { value: 1.6 },
@@ -253,6 +277,7 @@ export class World3D {
   private windStrength = 1;
   /** How strong the baked light pools get at night. */
   private lightPoolScale = 1.6;
+  private rimScale = 1;
   /** Real seconds, for wind and flicker (keeps running while the simulation is frozen). */
   private clock = 0;
 
@@ -554,6 +579,11 @@ export class World3D {
     this.windStrength = Math.max(0, strength);
   }
 
+  /** Rim-light multiplier; the bottom preset drops it. */
+  setRim(scale: number): void {
+    this.rimScale = Math.max(0, scale);
+  }
+
   /** How bright the baked lamp pools burn at night. */
   setLightPools(scale: number): void {
     this.lightPoolScale = Math.max(0, scale);
@@ -584,6 +614,10 @@ export class World3D {
     const calm = 1 - cave * 0.8; // barely a draught underground
     this.env.uWind.value.set(Math.cos(swing) * 0.2, Math.sin(swing) * 0.2).multiplyScalar(this.windStrength * calm);
     this.waterUniforms.uTime.value = this.clock;
+    // Rim light: a cool sliver by day, a strong warm one at night when lanterns are the only light.
+    const rimNight = Math.max(nightAmount(dayTime), cave);
+    this.env.uRimStrength.value = (0.07 + rimNight * 0.26) * this.rimScale;
+    this.env.uRimColor.value.setRGB(1, 0.78 - rimNight * 0.07, 0.52 - rimNight * 0.12);
 
     const amb = blendAmbient(ambientAt(dayTime), AREAS.cave.ambient, cave);
     // Inside the cave the sun is irrelevant: torches and crystals do the lighting.

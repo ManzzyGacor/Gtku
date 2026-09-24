@@ -30,6 +30,7 @@ const ROWS: Row[] = [
   { kind: 'header', label: 'Grafik' },
   { kind: 'choice', label: 'Preset', key: 'preset', hint: 'AUTO menyesuaikan sendiri dari FPS' },
   { kind: 'toggle', label: 'Bloom', key: 'bloom', hint: 'Cahaya mekar; matikan bila berat' },
+  { kind: 'number', label: 'Skala render', key: 'renderScale', fmt: pct },
   { kind: 'header', label: 'Kamera (mode 3D)' },
   { kind: 'number', label: 'Sudut kamera', key: 'camPitch', fmt: (v) => `${v}\u00b0` },
   { kind: 'number', label: 'Jarak / zoom', key: 'camZoom', fmt: mult },

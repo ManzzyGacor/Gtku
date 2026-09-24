@@ -36,6 +36,11 @@ export interface Settings {
   camPitch: number;
   /** 3/4 camera zoom. Higher = closer to the hero. */
   camZoom: number;
+  /**
+   * Extra multiplier on the preset's render scale, 0.5..1. The one direct performance lever:
+   * it lowers how many pixels are actually shaded without changing the art's pixel size.
+   */
+  renderScale: number;
   musicVol: number;
   sfxVol: number;
   /** Set once the intro cutscene has been watched (or skipped) to the end. */
@@ -57,6 +62,7 @@ export const DEFAULTS: Settings = {
   textScale: 2,
   camPitch: 38,
   camZoom: 1,
+  renderScale: 1,
   musicVol: 0.6,
   sfxVol: 0.8,
   cutsceneSeen: false,
@@ -71,6 +77,7 @@ export const RANGES = {
   textScale: { min: 1, max: 3, step: 1 },
   camPitch: { min: 22, max: 55, step: 1 },
   camZoom: { min: 0.6, max: 2, step: 0.05 },
+  renderScale: { min: 0.5, max: 1, step: 0.05 },
   musicVol: { min: 0, max: 1, step: 0.1 },
   sfxVol: { min: 0, max: 1, step: 0.1 },
 } as const;
