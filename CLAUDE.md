@@ -64,6 +64,11 @@ src/
     entities/        HeroCore (gerak/kombo/senjata/HP), enemies (AI musuh & boss),
                      combatTuning (39 angka combat yang bisa disetel dari HP)
     combat/          elements (15 elemen + 16 status + tabel reaksi), weapons (Pedang/Busur)
+    stats/           stats (pipeline modifier), damage (satu formula untuk SEMUA hit),
+                     character (level + equipment + buff -> satu StatBlock + passive Inti Lentera)
+    items/           items (8 slot, 6 rarity, katalog), inventory (grid 48 sel + equipped),
+                     drops (tabel loot)
+    (akar)           progression (level/EXP), lifecycle (pause/context-lost/orientasi), saveMigrate
     systems/         quest, puzzleLogic, daynight, interactables
     state/           GameState (quest, kill, flag, waktu) + serialisasi save
     (akar)           rng, save, storage, input, display, errors, settings, perf, graphics, anim, audio
@@ -71,7 +76,8 @@ src/
                      generator sprite/tile/fx/ui/font, bake (chunk → pixmap + light mask),
                      greybox (tekstur 3D 32x32), markers (penanda quest)
   ui/                OVERLAY UI NETRAL-RENDERER (DOM): TitleScreen, Hud, Dialogue, Minimap,
-                     TouchControls, SettingsPanel, DebugUi, FpsMeterView — dilarang mengimpor three
+                     TouchControls, CharacterPanel (karakter + tas), SettingsPanel, DebugUi,
+                     FpsMeterView — dilarang mengimpor three
   render3d/          SEMUA KODE THREE.JS: boot3d, Game3D, PixelRenderer (pipeline pixel),
                      IsoCamera, World3D (streaming), Combat3D, Story3D, Puzzle3D, HeroMesh3D,
                      EnemyMesh3D, NpcMesh3D, Environment, Sky, WaterSurface, InstancePool,

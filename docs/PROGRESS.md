@@ -570,3 +570,71 @@ tidak ada loader, tidak ada animation system, tidak ada PMREM/env-map (sudah dip
 hasil build). Yang tersisa sebagian besar `WebGLRenderer` sendiri, dan itu bercabang ke
 `SkinnedMesh`/`BatchedMesh`/`Sprite`/`Points`/WebXR sehingga tidak bisa dibuang tanpa mem-fork
 Three. Batas bawah realistis untuk aplikasi WebGLRenderer memang ~500 kB minified / ~130 kB gzip.
+
+### Bug yang ditemukan dan diperbaiki di bagian ini
+
+Semua ditemukan dengan menyodok logika murni sampai keluar hasil yang absurd, bukan dengan
+memainkan game — dan tiap satu sekarang dijaga tes.
+
+| # | Bug | Akibatnya kalau dibiarkan | Tes penjaga |
+| --- | --- | --- | --- |
+| 1 | `dt` NaN/Infinity membuat kecepatan hero NaN, dan `Collision.move` lalu menghitung jumlah sub-langkah dari NaN → nol iterasi → hero dikembalikan ke posisi semula **setiap frame** | Hero terkunci selamanya, tidak bisa pulih tanpa reload | `edgecases` |
+| 2 | `takeDamage(-50)` **menyembuhkan** hero sampai 62 HP (di atas maks); `heal(-3)` **melukainya** | Modifier pertahanan Batch 4 yang kelebihan akan langsung menabrak ini | `edgecases`, `stats` |
+| 3 | Hal yang sama pada musuh: `hp` NaN = musuh yang tidak pernah mati dan tidak bisa dibunuh | Boss abadi | `edgecases` |
+| 4 | Knockback dari posisi penyerang NaN meracuni kecepatan lewat `atan2` | Musuh/hero terbang ke koordinat NaN | `edgecases` |
+| 5 | Musuh yang terjebak **di dalam** dinding mengembara 1214 px/10 detik menembus terrain | Pintu arena boss dan gerbang puzzle menambah tabrakan saat game jalan; musuh di ambang pintu jadi bisa keliling peta lewat dalam batu | `edgecases` |
+| 6 | `formatErrors().reverse()` **membalik ring buffer error yang asli** setiap kali panel dibuka | Riwayat error jadi acak setelah dibuka dua kali | — (dihapus polanya) |
+| 7 | `errors.ts` memasang `el.onclick` **di dalam** `show()`, yang dipanggil ulang setiap error | Menimpa pendengar lain, menumpuk kerja | — |
+| 8 | `u(c.h) * 0.0` dan `yy + ti * 0` — sisa offset yang dikalikan nol | Kode yang tampak berefek tapi tidak | oxlint `erasing-op` |
+| 9 | `r` (radius stick) ditimpa `r` (radius tombol) di `TouchControls` | Ukuran tombol salah kalau kode di sekitarnya diubah | oxlint `no-shadow` |
+| 10 | `gainExp` dengan level NaN → `Math.max(1, Math.min(30, NaN))` = NaN | Hero level NaN, permanen | `inventory` |
+| 11 | `boot3d` memasang `window resize` listener yang tidak pernah dilepas | Kebocoran pendengar tiap kali dunia dibangun ulang | `lifecycle` |
+| 12 | Tidak ada penanganan `webglcontextlost` | Kanvas hitam selamanya saat GPU reset / tekanan memori | `lifecycle` |
+| 13 | `preload(radius kecil)` + berdiri diam = sisa radius penuh tidak pernah dimuat (regresi dari throttle streaming, ketangkap tes yang sudah ada) | Dunia berhenti memuat setelah teleport | `streaming` |
+| 14 | DOM palsu di tes: `innerHTML = ''` tidak menghapus anak, `textContent` tidak menggabungkan keturunan | Mock berbohong → tes lulus untuk alasan yang salah | `characterpanel` |
+
+## Batch 4 — stats, equipment, Inti Lentera, inventaris, progresi
+
+Semua logikanya di `src/core` tanpa satu pun import renderer, jadi semuanya dites di Node.
+
+| Bagian | Di mana | Yang dijamin tes |
+| --- | --- | --- |
+| Pipeline stats | `core/stats/stats.ts` | flat sebelum persen ((10+6)×1,5 = 24); persen dijumlah bukan dilipat; modifier khusus elemen tidak muncul di lembar tapi kena ke damage; tidak ada gear/buff/save rusak yang bisa membuat stat NaN atau HP maks 0 |
+| Formula damage | `core/stats/damage.ts` | satu fungsi untuk **semua** hit; DEF sebagai rasio `100/(100+def)` (zirah tinggi tidak pernah membuat pukulan jadi nol, dan tidak pernah jadi kebal); penguasaan elemen melandai; kritis diundi pemanggil jadi kedua cabang bisa dites; reaksi elemen dikali paling akhir; hit yang kena minimal 1 |
+| 8 slot equipment | `core/items/items.ts` | tiap slot punya item yang cocok; aksesori masuk dua slot; item bukan-perlengkapan tidak bisa dipakai |
+| Rarity Biasa→Mitos | `core/items/items.ts` | **mengalikan angka item** (×1 … ×2,5), monoton naik, bukan kosmetik |
+| 4 Inti Lentera | `core/items/items.ts` + `core/stats/character.ts` | satu per elemen yang sudah diimplementasikan (Api/Air/Es/Petir), masing-masing bonus elemen + satu passive bernama yang jadi aturan di satu file: Perisai Bara, Pasang Pemulih, Mata Badai, Tameng Beku |
+| Inventaris | `core/items/inventory.ts` | grid tetap 48 sel; stack terisi dulu; tas penuh melaporkan overflow, tidak menelan item; melepas saat tas penuh **ditolak**; **menukar** tetap bisa saat tas penuh; rarity menempel pada salinan; item yang sudah tidak ada di katalog dibuang saat load, bukan menolak seluruh save |
+| Loot | `core/items/drops.ts` | tabel per jenis musuh + peti, undian rarity bertingkat; satu drop per musuh, peti mengundi seluruh tabel |
+| Progresi | `core/progression.ts` | level 1–30, kurva naik, level pertama ≈ 3 kill, EXP boss = beberapa level, mentok di cap tanpa bar lewat penuh, dan angka rusak tidak pernah mengurangi EXP |
+| Lembar karakter | `core/stats/character.ts` | level + equipment + buff → satu `StatBlock`; buff kedaluwarsa sendiri; `sources()` bisa menyebut asal setiap angka |
+| Hadiah quest | `core/systems/quest.ts` | tiap tahap membayar EXP + item bernama, sebagai bagian definisi quest |
+
+**Yang benar-benar berubah saat bermain** (bukan angka di menu):
+
+- Setiap hit — dari hero maupun ke hero — lewat `computeDamage`. `ATTACKS[i].dmg` tetap jadi bentuk
+  kombo (2/2/4/7) dan sekarang dipakai sebagai pengali relatif terhadap tebasan pertama, jadi
+  **panel tuning combat tetap bekerja seperti sebelumnya**.
+- Damage yang masuk dikurangi DEF, tanpa kritis: kritis musuh yang tidak bisa dibaca pemain hanya
+  terasa tidak adil.
+- Angka kritis muncul oranye. Serap hidup dan Pasang Pemulih mengembalikan HP. Tameng Beku
+  memperlambat yang memukul. Mata Badai menambah 20% kritis untuk serangan berat.
+- Level naik → HP maks naik **tanpa menyembuhkan**; `setMaxHp` menjepit, tidak menskala, supaya
+  melepas helm +5 HP tidak bisa membunuh hero yang sedang sekarat.
+- Kecepatan jalan dan **jangkauan lentera** ikut stats. Jangkauan lentera adalah satu-satunya stat
+  yang bisa dilihat langsung: lingkaran cahaya di sekitar hero melebar.
+- **Peti sekarang bisa dibuka** (sebelumnya cuma hiasan): sekali saja, ditandai flag di save.
+  Papan yang dibaca dan altar yang ditemukan pertama kali memberi EXP penemuan.
+- HUD: lencana level di potret + bar EXP tipis di bawah HP/energi.
+
+**UI (`src/ui/CharacterPanel.ts`)** — dua tab, KARAKTER dan TAS. Target sentuh minimal 44 px,
+lembar detail muncul dari bawah tempat jempol berada, chip kategori untuk grid tas, warna rarity
+di bingkai dan nama, kotak Inti Lentera yang menuliskan passive-nya dengan kata-kata. Dibuka lewat
+tombol tas di HUD atau `I`/`Tab`; selama terbuka simulasi berhenti dan input dimatikan seperti saat
+dialog. 12 tes menjalankan panel asli di DOM palsu, dan satu "tap" di situ adalah pemanggilan
+listener nyata pada elemen yang akan disentuh pemain.
+
+**Save v2.** Menyimpan level, EXP, tas, dan slot equipment. Save v1 (termasuk save 2D) tetap
+dimuat sebagai hero level 1 bertas kosong, dan itu dicatat di notes migrasi yang muncul di laporan
+diagnostik. Save dari versi **lebih baru** ditolak, bukan dibaca separuh — membaca separuh lalu
+menimpanya akan menghapus progres.

@@ -134,7 +134,7 @@ chunk streaming, jumlah cahaya dinamis & bayangan dibatasi.
 | **1** | Fase 0 (persiapan), Fase 1 (fondasi 3D), Fase 2 (player 3D) | ✅ selesai |
 | 2 | Lingkungan desa, cahaya & atmosfer, animasi rumput, air, pohon + perbaikan kamera & perluasan dunia | ✅ selesai |
 | 3 | Migrasi combat, dua senjata, sistem elemen (4 elemen) | ✅ selesai |
-| 4 | Stats, equipment, Lantern Core, inventaris, progresi | ⬜ |
+| 4 | Stats, equipment, Lantern Core, inventaris, progresi | ✅ selesai |
 | 5 | Cutscene pembuka + sistem cutscene, audio, UI/HUD, menu | ⬜ |
 | 6 | World streaming, Download Manager, grafik AUTO lengkap | ⬜ |
 | 7 | Akun & backend, world event, optimasi performa, dokumentasi akhir | ⬜ |
@@ -229,7 +229,7 @@ src/
     entities/      HeroCore, enemies (AI)
     systems/       quest, puzzleLogic, daynight, interactables
     state/         GameState + serialisasi save
-    stats/         (Batch 4) pipeline modifier, elemen, status effect
+    stats/         pipeline modifier + damage + lembar karakter (Batch 4 ✅)
     ...            rng, save, input, settings, perf, graphics, display, errors
   art/             pipeline seni murni-kode (Pixmap) — dipakai 2D dan 3D
   render2d/        semua kode Phaser (scenes, views, systems lama)  ← bertahan sampai 3D setara
@@ -266,7 +266,7 @@ src/
 | Hal | Batch |
 | --- | --- |
 | ~~Musuh, kombat, damage, dua senjata, elemen~~ | ~~3~~ ✅ |
-| Stats, equipment, Lantern Core, inventaris | 4 |
+| Stats, equipment, Lantern Core, inventaris | 4 ✅ |
 | NPC, dialog, quest, cutscene, audio, menu utama & pause, HUD lengkap | 5 |
 | **Save/load** (mode 3D belum menyimpan posisi; save 2D lama tidak disentuh), world streaming | 6 |
 | Akun, world event | 7 |
