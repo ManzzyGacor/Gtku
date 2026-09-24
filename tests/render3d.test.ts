@@ -14,7 +14,7 @@ import { T } from '../src/core/world/tiles';
 import { GeneratedWorld } from '../src/core/world/worldgen';
 import { IsoCamera, ISO_YAW_DEG, PITCH_MAX, PITCH_MIN, VIEW_TILES_H, ZOOM_MAX, ZOOM_MIN } from '../src/render3d/IsoCamera';
 import { DEFAULTS, settings } from '../src/core/settings';
-import { buildGreyboxTextures } from '../src/art/greybox';
+import { buildGreyboxTextures, SIZE } from '../src/art/greybox';
 import { countKinds, groupShapes, planArea, u, UNITS_PER_PX, WALL_HEIGHT } from '../src/render3d/worldPlan';
 import { pixmapTexture } from '../src/render3d/textures';
 import { Pixmap } from '../src/art/pixmap';
@@ -76,16 +76,32 @@ test('prop lights carry over from the 2D lightmap with converted units', () => {
   for (const l of plan.lights) assert.ok(l.radius > 0 && Number.isFinite(l.y));
 });
 
-test('the greybox textures are all 16x16 and fully opaque', () => {
+test('the textures are square, opaque, and use their full shading range', () => {
   const tex = buildGreyboxTextures();
   const names = Object.keys(tex);
-  assert.ok(names.length >= 8, `expected the full set, got ${names.join(', ')}`);
+  assert.ok(names.length >= 12, `expected the full set, got ${names.join(', ')}`);
+  assert.equal(SIZE, 32, 'twice the density of the first pass, as asked for in the Batch 2 report');
+
   for (const [name, pm] of Object.entries(tex)) {
-    assert.equal(pm.w, 16, `${name} width`);
-    assert.equal(pm.h, 16, `${name} height`);
+    assert.equal(pm.w, SIZE, `${name} width`);
+    assert.equal(pm.h, SIZE, `${name} height`);
     for (let i = 3; i < pm.data.length; i += 4) {
-      if (pm.data[i] !== 255) throw new Error(`${name} has a transparent pixel; greybox surfaces must be solid`);
+      if (pm.data[i] !== 255) throw new Error(`${name} has a transparent pixel; these surfaces must be solid`);
     }
+
+    // Baked AO and edge highlights mean every texture must span a real range of brightness;
+    // a flat fill would sail through the checks above but look like greybox.
+    let min = 255;
+    let max = 0;
+    const shades = new Set<number>();
+    for (let i = 0; i < pm.data.length; i += 4) {
+      const luma = pm.data[i] * 0.299 + pm.data[i + 1] * 0.587 + pm.data[i + 2] * 0.114;
+      min = Math.min(min, luma);
+      max = Math.max(max, luma);
+      shades.add(Math.round(luma / 8));
+    }
+    assert.ok(max - min > 40, `${name} is too flat (luma ${min.toFixed(0)}..${max.toFixed(0)})`);
+    assert.ok(shades.size >= 6, `${name} only has ${shades.size} shading levels; needs dark/mid/light/highlight`);
   }
 });
 
