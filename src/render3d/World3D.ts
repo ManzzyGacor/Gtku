@@ -95,6 +95,7 @@ const PULSE_FRAGMENT = /* glsl */ `
  */
 const OCCLUSION_PARS = /* glsl */ `
 varying vec3 vOccView;
+varying float vFade;
 uniform vec3 uHeroView;
 uniform vec2 uFadeRadius;
 uniform float uFadeOn;
@@ -114,10 +115,13 @@ float lmDither(vec2 p) {
 `;
 
 const OCCLUSION_FRAGMENT = /* glsl */ `
+  float lmNoise = lmDither(floor(gl_FragCoord.xy));
+  // A chunk that has just streamed in dissolves up instead of popping into existence.
+  if (vFade < 0.999 && (1.0 - vFade) > lmNoise) discard;
   if (uFadeOn > 0.5 && vOccView.z > uHeroView.z + 0.2) {
     vec2 delta = (vOccView.xy - uHeroView.xy) / uFadeRadius;
     float cover = 1.0 - clamp(dot(delta, delta), 0.0, 1.0);
-    if (cover > 0.01 && cover > lmDither(floor(gl_FragCoord.xy))) discard;
+    if (cover > 0.01 && cover > lmNoise) discard;
   }
 `;
 
@@ -130,6 +134,8 @@ export interface OcclusionUniforms {
 /** Shared by every instanced material: one place to advance time and the wind. */
 export interface EnvUniforms {
   uTime: { value: number };
+  /** Seconds a newly streamed instance takes to dissolve in. */
+  uFadeIn: { value: number };
   /** Wind displacement in world units, already including strength and direction. */
   uWind: { value: THREE.Vector2 };
   /** Hero position on the ground (x, z). */
@@ -147,10 +153,12 @@ interface PatchOpts {
 function patchInstanceMaterial(material: THREE.Material, occlusion: OcclusionUniforms, env: EnvUniforms, opts: PatchOpts): void {
   const defines = `${opts.sway > 0 ? '#define LM_SWAY\n' : ''}${opts.pulse ? '#define LM_PULSE\n' : ''}`;
   material.onBeforeCompile = (shader) => {
-    shader.vertexShader = `${defines}attribute vec3 aSize;\nvarying vec3 vOccView;\nuniform float uTime;\nuniform vec2 uWind;\nuniform vec2 uHeroPos;\nuniform float uPushRadius;\nuniform float uSway;\n${shader.vertexShader}`
-      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${UV_SCALE_CHUNK}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${SWAY_VERTEX}`)
-      .replace('#include <project_vertex>', '#include <project_vertex>\n  vOccView = mvPosition.xyz;');
+    shader.vertexShader =
+      `${defines}attribute vec3 aSize;\nattribute float aFade;\nvarying vec3 vOccView;\nvarying float vFade;\n` +
+      `uniform float uTime;\nuniform vec2 uWind;\nuniform vec2 uHeroPos;\nuniform float uPushRadius;\nuniform float uSway;\nuniform float uFadeIn;\n${shader.vertexShader}`
+        .replace('#include <uv_vertex>', `#include <uv_vertex>\n${UV_SCALE_CHUNK}`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>\n${SWAY_VERTEX}`)
+        .replace('#include <project_vertex>', '#include <project_vertex>\n  vOccView = mvPosition.xyz;\n  vFade = clamp((uTime - aFade) / uFadeIn, 0.0, 1.0);');
     shader.fragmentShader = `${defines}${OCCLUSION_PARS}uniform float uTime;\n${shader.fragmentShader}`
       .replace('void main() {', `void main() {\n${OCCLUSION_FRAGMENT}`)
       .replace('#include <map_fragment>', `#include <map_fragment>\n${PULSE_FRAGMENT}`);
@@ -163,6 +171,7 @@ function patchInstanceMaterial(material: THREE.Material, occlusion: OcclusionUni
     shader.uniforms.uHeroPos = env.uHeroPos;
     shader.uniforms.uPushRadius = env.uPushRadius;
     shader.uniforms.uSway = { value: opts.sway };
+    shader.uniforms.uFadeIn = env.uFadeIn;
   };
   // Materials with different injected code must not share a compiled program.
   material.customProgramCacheKey = () => `lm-instance|${opts.sway > 0 ? 's' : ''}${opts.pulse ? 'p' : ''}`;
@@ -197,6 +206,8 @@ export class World3D {
   private waterEnabled = true;
 
   private loaded = new Map<number, LoadedChunk3D>();
+  /** When each loaded chunk's ground appeared, for its fade-in. */
+  private groundFade = new Map<number, number>();
   private planCache = new Map<number, ChunkPlan>();
   private queue: { cx: number; cy: number; pri: number }[] = [];
   private activeLights: PointLightPlan[] = [];
@@ -210,6 +221,7 @@ export class World3D {
 
   private readonly env: EnvUniforms = {
     uTime: { value: 0 },
+    uFadeIn: { value: 0.5 },
     uWind: { value: new THREE.Vector2(0.18, 0.07) },
     uHeroPos: { value: new THREE.Vector2(-1e4, -1e4) },
     uPushRadius: { value: 1.6 },
@@ -411,7 +423,9 @@ export class World3D {
     }
 
     const key = keyOf(cx, cy);
-    for (const [groupKey, shapes] of this.byGroup(plan)) this.poolFor(groupKey, shapes[0]).addChunk(key, shapes);
+    for (const [groupKey, shapes] of this.byGroup(plan)) this.poolFor(groupKey, shapes[0]).addChunk(key, shapes, this.clock);
+    // The ground fades up out of the haze over the same window.
+    this.groundFade.set(key, this.clock);
     this.loaded.set(key, { cx, cy, ground, texture, material, lightMap, water, lights: plan.lights });
     this.rebuildLightList();
   }
@@ -465,6 +479,7 @@ export class World3D {
     c.lightMap?.dispose();
     c.water?.dispose();
     this.loaded.delete(key);
+    this.groundFade.delete(key);
   }
 
   private rebuildLightList(): void {
@@ -510,6 +525,8 @@ export class World3D {
   update(dayTime: number, focus: THREE.Vector3, cave = 0, loadBudget = 1, realDt = 0): void {
     this.stream(focus.x, focus.z);
     this.step(loadBudget);
+    // how much a just-arrived chunk is tinted toward the haze before it resolves
+    const fogTint: [number, number, number] = [0.35, 0.35, 0.4];
 
     // Wind: a slow swing in direction on top of a steady breeze, so gusts never feel mechanical.
     this.clock += realDt;
@@ -544,6 +561,23 @@ export class World3D {
     for (const c of this.loaded.values()) if (c.lightMap) c.material.lightMapIntensity = poolStrength;
     // Lamplight reflected on the water follows the same curve, a little weaker.
     this.waterUniforms.uLightStrength.value = poolStrength * 0.5;
+
+    // Ground fade-in: a fresh chunk starts tinted toward the haze and resolves out of it.
+    for (const [key, at] of this.groundFade) {
+      const t = (this.clock - at) / this.env.uFadeIn.value;
+      const c = this.loaded.get(key);
+      if (!c) {
+        this.groundFade.delete(key);
+        continue;
+      }
+      if (t >= 1) {
+        c.material.color.setRGB(1, 1, 1);
+        this.groundFade.delete(key);
+      } else {
+        const k = Math.max(0, t);
+        c.material.color.setRGB(fogTint[0] + (1 - fogTint[0]) * k, fogTint[1] + (1 - fogTint[1]) * k, fogTint[2] + (1 - fogTint[2]) * k);
+      }
+    }
 
     if (!this.pool.length) return;
     const active = this.activeLights

@@ -213,3 +213,30 @@ test('the loaded chunk count stays within a sane budget at every radius', () => 
   }
   w3d.dispose();
 });
+
+test('each instance remembers when it appeared, so a streamed chunk dissolves in', () => {
+  const parent = new THREE.Object3D();
+  const pool = new InstancePool(parent, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial(), 8, false);
+  pool.addChunk(1, shapes(3, 0), 10);
+  pool.addChunk(2, shapes(3, 100), 25);
+
+  const fades = (): number[] => {
+    const a = pool.mesh.geometry.getAttribute('aFade');
+    return Array.from({ length: pool.liveCount }, (_, i) => a.getX(i));
+  };
+  assert.deepEqual(fades(), [10, 10, 10, 25, 25, 25], 'spawn times are per instance');
+
+  // the swap-remove must carry the timestamps along with the matrices, or surviving chunks
+  // would suddenly dissolve again when a neighbour unloads
+  pool.removeChunk(1);
+  assert.deepEqual(fades(), [25, 25, 25], 'the survivors keep their own spawn time');
+  assert.deepEqual(livePositions(pool), [100, 101, 102]);
+
+  // and through a capacity growth
+  pool.addChunk(3, shapes(20, 500), 40);
+  const after = fades();
+  assert.equal(after.length, 23);
+  assert.deepEqual(after.slice(0, 3), [25, 25, 25], 'growth preserves timestamps');
+  assert.ok(after.slice(3).every((v) => v === 40));
+  pool.dispose();
+});

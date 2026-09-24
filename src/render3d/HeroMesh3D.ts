@@ -10,6 +10,8 @@
  */
 import * as THREE from 'three';
 import { HERO_LOOK } from '../art/characters';
+import { P, shade } from '../art/palette';
+import { mix } from '../art/pixmap';
 import { HeroCore, HERO_STATS } from '../core/entities/HeroCore';
 import { u } from './worldPlan';
 
@@ -38,6 +40,9 @@ export class HeroMesh3D {
   private legL!: Joint;
   private legR!: Joint;
   private lanternBox!: THREE.Mesh;
+  private slash!: THREE.Mesh;
+  private slashMaterial!: THREE.MeshBasicMaterial;
+  private slashGeometry!: THREE.PlaneGeometry;
   private materials: THREE.Material[] = [];
   private geometries: THREE.BufferGeometry[] = [];
 
@@ -87,45 +92,116 @@ export class HeroMesh3D {
 
   private build(): void {
     const L = HERO_LOOK;
-    const legLen = 0.5;
-    const torsoH = 0.56;
+    /*
+     * Chibi proportions, measured off the reference art: the head is about 37% of the whole
+     * figure. The first version was a realistic 19% and read as a tiny stiff adult at this camera
+     * distance — a big head is what makes a 14-pixel-tall character legible at all.
+     */
+    const legLen = 0.34;
+    const torsoH = 0.44;
+    const headS = 0.5;
     const hipY = legLen;
-    const shoulderY = hipY + torsoH * 0.82;
+    const shoulderY = hipY + torsoH * 0.86;
 
-    // legs and boots
-    this.legL = this.joint(0.17, legLen, 0.2, L.pants, new THREE.Vector3(-0.12, hipY, 0));
-    this.legR = this.joint(0.17, legLen, 0.2, L.pants, new THREE.Vector3(0.12, hipY, 0));
-    for (const leg of [this.legL, this.legR]) this.box(0.19, 0.14, 0.26, L.boots, leg.pivot, -legLen + 0.07, 0.02);
+    // legs: short and chunky, with heavy boots
+    this.legL = this.joint(0.19, legLen, 0.22, L.pants, new THREE.Vector3(-0.13, hipY, 0));
+    this.legR = this.joint(0.19, legLen, 0.22, L.pants, new THREE.Vector3(0.13, hipY, 0));
+    for (const leg of [this.legL, this.legR]) {
+      this.box(0.22, 0.17, 0.3, L.boots, leg.pivot, -legLen + 0.085, 0.03);
+      this.box(0.23, 0.05, 0.31, shade(L.boots, 0.35), leg.pivot, -legLen + 0.17, 0.03);
+    }
 
-    // torso + belt
-    this.torso = this.box(0.44, torsoH, 0.28, L.tunic[1], this.body, hipY + torsoH / 2);
-    this.box(0.46, 0.07, 0.3, L.trim, this.body, hipY + 0.06);
+    // torso: a wide coat with a belt and a lit collar
+    this.torso = this.box(0.48, torsoH, 0.3, L.tunic[1], this.body, hipY + torsoH / 2);
+    this.box(0.5, 0.09, 0.32, L.trim, this.body, hipY + 0.1);
+    this.box(0.5, 0.05, 0.32, shade(L.tunic[2], 0.2), this.body, hipY + torsoH * 0.72);
+    // strap across the chest, the way the reference slings its sword
+    this.box(0.52, 0.07, 0.33, shade(L.boots, 0.1), this.body, hipY + torsoH * 0.5, 0.005);
     // scarf
-    this.box(0.4, 0.1, 0.3, L.scarf![1], this.body, shoulderY + 0.05);
+    this.box(0.44, 0.12, 0.34, L.scarf![1], this.body, shoulderY + 0.02);
+    this.box(0.44, 0.05, 0.34, shade(L.scarf![1], 0.3), this.body, shoulderY + 0.07);
 
-    // head: skin block, hair cap on top, one dark visor band that reads as eyes at 16 px/unit
+    /*
+     * Head: a big cube with a face on the front. At this camera distance the head is about 14
+     * screen pixels tall, which is just enough for two eyes, a pair of blush marks and a mouth —
+     * and those few pixels are what give the character an expression at all.
+     */
     this.head = new THREE.Group();
-    this.head.position.y = shoulderY + 0.08;
+    this.head.position.y = shoulderY + 0.06;
     this.body.add(this.head);
-    this.box(0.3, 0.3, 0.3, L.skin[1], this.head, 0.15);
-    this.box(0.32, 0.1, 0.32, L.hair[1], this.head, 0.3);
-    this.box(0.31, 0.06, 0.02, 0x140f26, this.head, 0.16, 0.15);
+    const headY = headS / 2;
+    this.box(headS, headS, headS * 0.92, L.skin[1], this.head, headY);
+    // hair: a cap plus spikes, which is the reference's silhouette
+    this.box(headS * 1.06, headS * 0.42, headS * 0.98, L.hair[1], this.head, headY + headS * 0.32);
+    this.box(headS * 1.04, headS * 0.3, headS * 0.5, L.hair[0], this.head, headY + headS * 0.1, -headS * 0.28);
+    const spikes: [number, number, number, number][] = [
+      [-0.17, 0.3, -0.04, 0.13],
+      [0.0, 0.34, -0.02, 0.15],
+      [0.17, 0.31, -0.05, 0.12],
+      [-0.1, 0.26, 0.16, 0.1],
+      [0.12, 0.27, 0.15, 0.1],
+      [-0.26, 0.2, 0.02, 0.1],
+      [0.26, 0.21, 0.0, 0.1],
+    ];
+    for (const [dx, dy, dz, size] of spikes) {
+      const spike = this.box(size, size * 1.5, size, L.hair[1], this.head, headY + headS * dy + size * 0.5, dz);
+      spike.position.x = dx * headS * 2;
+      spike.rotation.z = dx * 1.1;
+      spike.rotation.x = -dz * 1.4;
+    }
+    // face, on the +Z side (the model faces +Z)
+    const faceZ = headS * 0.47;
+    for (const ex of [-0.12, 0.12]) {
+      const eye = this.box(0.09, 0.13, 0.03, 0x140f26, this.head, headY + 0.01, faceZ);
+      eye.position.x = ex;
+      const glint = this.box(0.04, 0.05, 0.02, P.white, this.head, headY + 0.05, faceZ + 0.01);
+      glint.position.x = ex - 0.015;
+    }
+    for (const bx of [-0.19, 0.19]) {
+      const blush = this.box(0.07, 0.04, 0.02, mix(L.skin[2], P.p2, 0.55), this.head, headY - 0.07, faceZ);
+      blush.position.x = bx;
+    }
+    this.box(0.05, 0.03, 0.02, shade(L.skin[0], -0.3), this.head, headY - 0.1, faceZ);
 
     // cloak hangs from the shoulders and sways
-    this.cloak = this.joint(0.48, 0.78, 0.07, L.tunic[0], new THREE.Vector3(0, shoulderY, -0.16));
+    this.cloak = this.joint(0.52, 0.72, 0.08, L.tunic[0], new THREE.Vector3(0, shoulderY, -0.17));
 
-    // arms
-    this.armL = this.joint(0.13, 0.42, 0.13, L.tunic[1], new THREE.Vector3(-0.28, shoulderY, 0));
-    this.armR = this.joint(0.13, 0.42, 0.13, L.tunic[1], new THREE.Vector3(0.28, shoulderY, 0));
+    // arms: short and thick, chibi mittens rather than hands
+    this.armL = this.joint(0.15, 0.34, 0.15, L.tunic[1], new THREE.Vector3(-0.3, shoulderY, 0));
+    this.armR = this.joint(0.15, 0.34, 0.15, L.tunic[1], new THREE.Vector3(0.3, shoulderY, 0));
+    for (const arm of [this.armL, this.armR]) this.box(0.17, 0.14, 0.17, shade(L.boots, 0.15), arm.pivot, -0.34);
 
-    // sword in the right hand, pointing down when idle
-    this.box(0.05, 0.72, 0.1, 0x9199b9, this.armR.pivot, -0.42 - 0.3);
-    this.box(0.16, 0.05, 0.12, L.trim, this.armR.pivot, -0.42 - 0.02);
+    // sword in the right hand: a long steel blade with a wrapped grip and a gold guard
+    this.box(0.07, 0.86, 0.13, 0xbcc4dc, this.armR.pivot, -0.34 - 0.48);
+    this.box(0.03, 0.86, 0.05, P.white, this.armR.pivot, -0.34 - 0.48, 0.05);
+    this.box(0.2, 0.07, 0.16, P.y3, this.armR.pivot, -0.34 - 0.06);
+    this.box(0.08, 0.16, 0.1, P.o0, this.armR.pivot, -0.34 + 0.04);
 
     // lantern on a short bar in the left hand
-    const bar = this.box(0.03, 0.26, 0.03, 0x4a4e6f, this.armL.pivot, -0.42 - 0.13);
+    const bar = this.box(0.04, 0.22, 0.04, 0x4a4e6f, this.armL.pivot, -0.34 - 0.11);
     bar.castShadow = false;
-    this.lanternBox = this.box(0.2, 0.22, 0.2, 0xffe066, this.armL.pivot, -0.42 - 0.34, 0, true);
+    this.lanternBox = this.box(0.22, 0.24, 0.22, 0xffe066, this.armL.pivot, -0.34 - 0.3, 0, true);
+    this.box(0.26, 0.06, 0.26, 0x4a4e6f, this.armL.pivot, -0.34 - 0.44);
+
+    /*
+     * The glowing blue slash trail from the reference's skill art. One additive quad, hidden
+     * except during the active frames of a swing — the full combat effects arrive with Batch 3.
+     */
+    this.slashGeometry = new THREE.PlaneGeometry(1.5, 0.95);
+    this.slashMaterial = new THREE.MeshBasicMaterial({
+      color: 0x7cc4ff,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    this.slash = new THREE.Mesh(this.slashGeometry, this.slashMaterial);
+    this.slash.position.set(0, shoulderY - 0.1, 0.5);
+    this.slash.rotation.x = -Math.PI / 2.6;
+    this.slash.visible = false;
+    this.slash.renderOrder = 9;
+    this.body.add(this.slash);
   }
 
   // ───────────────────────── animation ─────────────────────────
@@ -177,6 +253,8 @@ export class HeroMesh3D {
   }
 
   private resetPose(): void {
+    this.slash.visible = false;
+    this.slashMaterial.opacity = 0;
     this.body.position.set(0, 0, 0);
     this.body.rotation.set(0, 0, 0);
     this.torso.scale.set(1, 1, 1);
@@ -210,6 +288,12 @@ export class HeroMesh3D {
   }
 
   private poseAttack(core: HeroCore): void {
+    // the trail only exists during the active frames, and sweeps with the swing
+    this.slash.visible = core.attackPhase === 1;
+    this.slashMaterial.opacity = core.attackPhase === 1 ? 0.85 : 0;
+    this.slash.rotation.z = (core.combo === 1 ? -1 : 1) * (0.5 - Math.min(1, core.stateT * 7) * 1.0);
+    this.slash.scale.setScalar(core.combo === 2 ? 1.25 : 1);
+
     // phase 0 winds up behind the shoulder, 1 slashes through, 2 recovers
     const swing = [-1.9, 0.9, 0.35][core.attackPhase] ?? 0;
     const lunge = [0, 0.08, 0.03][core.attackPhase] ?? 0;
@@ -257,6 +341,8 @@ export class HeroMesh3D {
 
   dispose(): void {
     this.root.removeFromParent();
+    this.slashGeometry.dispose();
+    this.slashMaterial.dispose();
     for (const g of this.geometries) g.dispose();
     for (const m of this.materials) m.dispose();
     this.lantern.dispose();

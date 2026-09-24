@@ -24,6 +24,8 @@ export class InstancePool {
   private readonly tmpScale = new THREE.Vector3();
   private readonly tmpColor = new THREE.Color();
   private sizes: THREE.InstancedBufferAttribute;
+  /** When each instance appeared, so the shader can dissolve it in without any CPU work. */
+  private fades: THREE.InstancedBufferAttribute;
 
   constructor(
     private readonly parent: THREE.Object3D,
@@ -35,6 +37,7 @@ export class InstancePool {
     this.capacity = Math.max(16, capacity);
     this.mesh = this.makeMesh(this.capacity);
     this.sizes = this.mesh.geometry.getAttribute('aSize') as THREE.InstancedBufferAttribute;
+    this.fades = this.mesh.geometry.getAttribute('aFade') as THREE.InstancedBufferAttribute;
   }
 
   private makeMesh(capacity: number): THREE.InstancedMesh {
@@ -47,6 +50,9 @@ export class InstancePool {
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     if (!mesh.geometry.getAttribute('aSize')) {
       mesh.geometry.setAttribute('aSize', new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3));
+    }
+    if (!mesh.geometry.getAttribute('aFade')) {
+      mesh.geometry.setAttribute('aFade', new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1));
     }
     // Force `instanceColor` to exist so the shader always takes the USE_INSTANCING_COLOR path.
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3).fill(1), 3);
@@ -69,6 +75,7 @@ export class InstancePool {
     // A fresh geometry clone so the new, larger aSize attribute has somewhere to live.
     const geo = this.geometry.clone();
     geo.setAttribute('aSize', new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3));
+    geo.setAttribute('aFade', new THREE.InstancedBufferAttribute(new Float32Array(cap), 1));
     const mesh = new THREE.InstancedMesh(geo, this.material, cap);
     mesh.count = this.used;
     mesh.frustumCulled = false;
@@ -81,18 +88,21 @@ export class InstancePool {
     mesh.instanceMatrix.array.set(old.instanceMatrix.array.subarray(0, this.used * 16));
     if (old.instanceColor) mesh.instanceColor.array.set(old.instanceColor.array.subarray(0, this.used * 3));
     (mesh.geometry.getAttribute('aSize') as THREE.InstancedBufferAttribute).array.set(oldSizes.array.subarray(0, this.used * 3));
+    (mesh.geometry.getAttribute('aFade') as THREE.InstancedBufferAttribute).array.set(this.fades.array.subarray(0, this.used));
 
     this.parent.add(mesh);
     old.dispose();
     if (old.geometry !== this.geometry) old.geometry.dispose();
     this.mesh = mesh;
     this.sizes = mesh.geometry.getAttribute('aSize') as THREE.InstancedBufferAttribute;
+    this.fades = mesh.geometry.getAttribute('aFade') as THREE.InstancedBufferAttribute;
     this.capacity = cap;
     this.markDirty();
   }
 
   /** Write one shape into a slot. */
-  private write(slot: number, s: ShapeInstance): void {
+  private write(slot: number, s: ShapeInstance, spawnTime: number): void {
+    (this.fades.array as Float32Array)[slot] = spawnTime;
     this.tmpPos.set(s.x, s.y, s.z);
     this.tmpQuat.setFromAxisAngle(AXIS_Y, s.rotY ?? 0);
     this.tmpScale.set(s.sx, s.sy, s.sz);
@@ -113,6 +123,7 @@ export class InstancePool {
     }
     const a = this.sizes.array as Float32Array;
     a.copyWithin(to * 3, from * 3, from * 3 + 3);
+    (this.fades.array as Float32Array)[to] = (this.fades.array as Float32Array)[from];
     this.owners[to] = this.owners[from];
   }
 
@@ -121,14 +132,19 @@ export class InstancePool {
     this.mesh.instanceMatrix.needsUpdate = true;
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
     this.sizes.needsUpdate = true;
+    this.fades.needsUpdate = true;
   }
 
-  /** Add every shape of one chunk. */
-  addChunk(chunkKey: number, shapes: readonly ShapeInstance[]): void {
+  /**
+   * Add every shape of one chunk. `spawnTime` is written into each instance so the shader can
+   * dissolve it in — a chunk arriving should fade up rather than pop, and doing it from a
+   * per-instance timestamp costs nothing per frame.
+   */
+  addChunk(chunkKey: number, shapes: readonly ShapeInstance[], spawnTime = 0): void {
     if (!shapes.length) return;
     if (this.used + shapes.length > this.capacity) this.grow(this.used + shapes.length);
     for (const s of shapes) {
-      this.write(this.used, s);
+      this.write(this.used, s, spawnTime);
       this.owners[this.used] = chunkKey;
       this.used++;
     }
