@@ -190,10 +190,17 @@ export class Puzzle3D {
   update(dt: number, realDt: number, hero: { x: number; y: number }, mx: number, my: number): void {
     if (dt > 0 && !this.logic.solved) {
       const intent = this.inRoom(hero.x, hero.y) ? pushIntent(hero, mx, my, this.logic.rock) : null;
+      /*
+       * `RockPuzzle.update` moves the rock itself and returns the direction as a *notification*.
+       * The first version treated that as "now push it", which moved the rock two tiles per shove
+       * and left a phantom blocker on the tile it started from — the hero was then walled in
+       * behind an invisible rock and the puzzle became unsolvable. Remember where it was, and
+       * move the collision to follow it.
+       */
+      const from = { tx: this.logic.rock.tx, ty: this.logic.rock.ty };
       const move = this.logic.update(dt, intent);
       if (move) {
-        this.unblockRock();
-        this.logic.push(move.dx, move.dy);
+        this.collision.removeBlocker(from.tx, from.ty);
         this.blockRock();
         if (this.logic.solved) {
           this.gate.setOpen(true);

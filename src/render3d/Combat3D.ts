@@ -281,6 +281,7 @@ export class Combat3D {
   update(dt: number, realDt: number, hero: HeroCore): void {
     this.clock += realDt;
     if (dt > 0) {
+      this.checkBossWake(hero);
       this.world.update(dt, hero, this.collision);
       this.updateArrows(dt);
       this.tickStatuses(dt);
@@ -310,6 +311,21 @@ export class Combat3D {
       if (this.world.projectiles.includes(p as never)) continue;
       mesh.removeFromParent();
       this.projMeshes.delete(p);
+    }
+  }
+
+  /**
+   * The boss sleeps until the hero is well inside the arena, past the door — otherwise it would
+   * wake from the corridor and the door would slam with the player still outside it.
+   */
+  private checkBossWake(hero: HeroCore): void {
+    const b = this.boss;
+    if (!b || b.awake || b.dead) return;
+    const arena = this.world3dSource.markers.boss.arena;
+    const tx = Math.floor(hero.x / TILE);
+    const ty = Math.floor(hero.y / TILE);
+    if (tx >= arena.x0 + 3 && tx <= arena.x1 && ty >= arena.y0 && ty <= arena.y1) {
+      b.wake({ emit: (e) => this.world.events.push(e) });
     }
   }
 
