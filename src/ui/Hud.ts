@@ -20,9 +20,15 @@ const CSS = `
 
 /* character + vitals, top left */
 .lm-vitals { position: absolute; left: 6px; top: 6px; display: flex; gap: 6px; padding: 5px 7px 6px; align-items: center; }
-.lm-face { width: 26px; height: 26px; border-radius: 4px; flex: 0 0 auto;
+.lm-face { position: relative; width: 26px; height: 26px; border-radius: 4px; flex: 0 0 auto;
   background: linear-gradient(160deg, #3e5dc1, #1c2354); border: 1px solid rgba(255,248,230,0.5);
   display: flex; align-items: center; justify-content: center; font-size: 15px; }
+/* the level sits on the portrait, like every RPG the plan is aiming at */
+.lm-lvl { position: absolute; right: -4px; bottom: -5px; min-width: 14px; padding: 0 2px;
+  background: #1a1430; border: 1px solid #ffd98a; border-radius: 3px; color: #ffd98a;
+  font-size: 9px; line-height: 11px; text-align: center; }
+.lm-bar.exp { height: 4px; }
+.lm-fill.exp { background: linear-gradient(180deg, #c9b3ff, #7a5cd8); }
 .lm-bars { display: flex; flex-direction: column; gap: 3px; }
 .lm-bar { position: relative; width: 104px; height: 9px; background: #140f26;
   border: 1px solid rgba(154,140,214,0.5); border-radius: 2px; overflow: hidden; }
@@ -85,6 +91,8 @@ export class Hud {
   private hpTrail: HTMLDivElement;
   private hpText: HTMLSpanElement;
   private enFill: HTMLDivElement;
+  private expFill: HTMLDivElement;
+  private levelBadge: HTMLDivElement;
   private quest: HTMLDivElement;
   private bossBox: HTMLDivElement;
   private bossName: HTMLDivElement;
@@ -131,7 +139,17 @@ export class Hud {
     this.enFill.className = 'lm-fill en';
     enBar.append(this.enFill);
 
-    bars.append(hpBar, enBar);
+    const expBar = el('div');
+    expBar.className = 'lm-bar exp';
+    this.expFill = el('div');
+    this.expFill.className = 'lm-fill exp';
+    expBar.append(this.expFill);
+
+    this.levelBadge = el('div', {}, '1');
+    this.levelBadge.className = 'lm-lvl';
+    face.appendChild(this.levelBadge);
+
+    bars.append(hpBar, enBar, expBar);
     vitals.append(face, bars);
 
     this.quest = el('div');
@@ -184,6 +202,18 @@ export class Hud {
   setHp(hp: number, maxHp: number): void {
     this.hp = hp;
     this.maxHp = Math.max(1, maxHp);
+  }
+
+  /**
+   * Level and EXP (Batch 4). The badge sits on the portrait and the bar under the vitals, so the
+   * player sees progress without opening anything. Diffed, because this is called every frame.
+   */
+  setLevel(level: number, exp: number, needed: number): void {
+    const text = String(level);
+    if (this.levelBadge.textContent !== text) this.levelBadge.textContent = text;
+    const ratio = needed > 0 ? Math.max(0, Math.min(1, exp / needed)) : 1;
+    const width = `${(ratio * 100).toFixed(1)}%`;
+    if (this.expFill.style.width !== width) this.expFill.style.width = width;
   }
 
   /** 0..1 — the skill's readiness, shown as the blue bar. */

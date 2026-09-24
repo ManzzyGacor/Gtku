@@ -12,11 +12,13 @@
  */
 import * as THREE from 'three';
 import { TILE } from '../config';
-import { applyElement, ELEMENTS, REACTIONS, StatusBag, type ElementId } from '../core/combat/elements';
+import { applyElement, ELEMENTS, REACTIONS, STATUSES, StatusBag, type ElementId } from '../core/combat/elements';
 import { Archer, Boss, EnemyCore, EnemyWorld, inArc, Slime, type WorldEvent } from '../core/entities/enemies';
 import type { HeroCore, ShootEvent, SwingEvent } from '../core/entities/HeroCore';
-import { HERO_STATS } from '../core/entities/HeroCore';
+import { ATTACKS, HERO_STATS } from '../core/entities/HeroCore';
 import { sfx } from '../core/audio';
+import { computeDamage } from '../core/stats/damage';
+import type { Character } from '../core/stats/character';
 import { makeRng } from '../core/rng';
 import type { GameState } from '../core/state/GameState';
 import type { Collision } from '../core/world/collision';
@@ -51,6 +53,10 @@ export interface CombatHooks {
   /** The boss woke up / was defeated, so the arena doors can react. */
   bossWoke(): void;
   bossDefeated(x: number, y: number): void;
+  /** EXP earned; the HUD decides how to celebrate a level. */
+  exp(amount: number, x: number, y: number): void;
+  /** HP the hero gets back (lifesteal, the `tideMend` core passive). */
+  heal(amount: number): void;
 }
 
 export class Combat3D {
@@ -152,6 +158,37 @@ export class Combat3D {
    * A sword swing. Everything inside the arc takes the hit; the first connection pays for the
    * hit-stop and the shake, so a swing that touches five slimes does not freeze the game five times.
    */
+  /**
+   * The hero's character sheet (Batch 4). Set by `Game3D`; combat reads ATK, crit, mastery,
+   * element bonuses and the Lantern Core passives from it, so every hit in the game goes through
+   * `stats/damage.ts` rather than using the raw numbers from `ATTACKS`.
+   */
+  character: Character | null = null;
+
+  /**
+   * Turn an attack's own damage number into a hit through the stat pipeline.
+   *
+   * `ATTACKS[i].dmg` stays what it always was — the *shape* of the combo, 2/2/4/7 — and is used
+   * here as the attack multiplier relative to the first light swing (`ATTACKS[0].dmg`). That way the combat tuning panel keeps
+   * working exactly as before while equipment and levels decide how much a swing is actually worth.
+   */
+  private hit(target: EnemyCore, rawDmg: number, element: ElementId | undefined, reactionMult: number, heavy = false): { amount: number; crit: boolean } {
+    const c = this.character;
+    if (!c) {
+      // no sheet (tests, or a renderer built before Batch 4): behave exactly as before
+      return { amount: Math.max(1, Math.round(rawDmg * reactionMult)), crit: false };
+    }
+    const bonus = heavy ? c.heavyCritBonus() : 0;
+    const stats = bonus ? { ...c.stats, crit: Math.min(100, c.stats.crit + bonus) } : c.stats;
+    const result = computeDamage(
+      { stats, mods: c.mods },
+      { def: target.def, resist: target.resist },
+      { attackMult: rawDmg / ATTACKS[0].dmg, element, reactionMult, roll: Math.random() },
+    );
+    if (result.lifesteal > 0) this.hooks.heal(result.lifesteal);
+    return { amount: result.amount, crit: result.crit };
+  }
+
   applySwing(hero: HeroCore, ev: SwingEvent): void {
     let hits = 0;
     let reacted = false;
@@ -160,12 +197,14 @@ export class Combat3D {
       const bag = this.statusOf(e);
       const el = hero.element;
       const res = el ? applyElement(bag, el) : { damageMult: 1, reaction: null };
-      const dmg = Math.round(ev.dmg * res.damageMult);
+      const rolled = this.hit(e, ev.dmg, el, res.damageMult, hero.isHeavy);
+      const dmg = rolled.amount;
       const stun = ev.index === 2 || hero.isHeavy ? 0.32 : 0.18;
       if (!e.hurt(dmg, hero.x, hero.y - 6, ev.knock, stun, { emit: (x) => this.world.events.push(x) })) continue;
       hits++;
       this.meshes.get(e)?.flash();
-      this.hooks.damage(e.x, e.y - e.h - 2, dmg, res.reaction ? `#${res.reaction.color.toString(16).padStart(6, '0')}` : hero.isHeavy ? '#ffd15a' : '#ffffff', hero.isHeavy || !!res.reaction);
+      const colour = res.reaction ? `#${res.reaction.color.toString(16).padStart(6, '0')}` : rolled.crit ? '#ff9f43' : hero.isHeavy ? '#ffd15a' : '#ffffff';
+      this.hooks.damage(e.x, e.y - e.h - 2, dmg, colour, hero.isHeavy || rolled.crit || !!res.reaction);
       this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : el ? ELEMENTS[el].color : 0xffe9a8, hero.isHeavy);
       if (res.reaction) {
         reacted = true;
@@ -202,7 +241,7 @@ export class Combat3D {
       if (Math.hypot(e.x - x, e.cy - y) > radius + e.radius) continue;
       const bag = this.statusOf(e);
       const res = hero.element ? applyElement(bag, hero.element) : { damageMult: 1, reaction: null };
-      const blastDmg = Math.round(dmg * res.damageMult);
+      const blastDmg = this.hit(e, dmg, hero.element, res.damageMult).amount;
       if (!e.hurt(blastDmg, x, y, knock, stun, { emit: (ev) => this.world.events.push(ev) })) continue;
       hits++;
       this.meshes.get(e)?.flash();
@@ -332,6 +371,26 @@ export class Combat3D {
     }
   }
 
+  /**
+   * `frostWard`: slow whatever is closest to the hit's origin.
+   *
+   * The event only carries where the hit came from, not which enemy threw it (an arrow's origin is
+   * the archer, a slam's is the boss), so the nearest live enemy to that point is the culprit.
+   */
+  private slowNearest(x: number, y: number, seconds: number): void {
+    let best: EnemyCore | null = null;
+    let bestD = Infinity;
+    for (const e of this.world.enemies) {
+      if (e.dead) continue;
+      const d = Math.hypot(e.x - x, e.cy - y);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    if (best && bestD < 90) this.statusOf(best).apply('slow', seconds / STATUSES.slow.duration);
+  }
+
   /** Damage over time from burn, shock and the rest. */
   private tickStatuses(dt: number): void {
     for (const [e, bag] of this.statuses) {
@@ -354,10 +413,29 @@ export class Combat3D {
           break;
         }
         case 'hit-hero': {
-          if (hero.takeDamage(ev.dmg, ev.fromX, ev.fromY, ev.knock)) {
+          /*
+           * Incoming damage runs through the same formula, with the hero as the defender: DEF from
+           * the sheet mitigates it, and the `emberGuard` core passive cuts it further while the
+           * hero is badly hurt. `noCrit` because enemies do not crit — a phone player cannot read
+           * a crit they did not cause, and an unexplained triple-damage hit just feels unfair.
+           */
+          const c = this.character;
+          let dmg = ev.dmg;
+          if (c) {
+            dmg = computeDamage(
+              { stats: { ...c.stats, atk: ev.dmg, crit: 0 } },
+              { def: c.stats.def },
+              { attackMult: 1, noCrit: true },
+            ).amount;
+            dmg = Math.max(1, Math.round(dmg * c.incomingMultiplier(hero.hp, hero.maxHp)));
+          }
+          if (hero.takeDamage(dmg, ev.fromX, ev.fromY, ev.knock)) {
             this.hooks.freeze(70);
             this.hooks.shake(4, 0.22);
             sfx.hurt();
+            // `frostWard`: whoever landed the hit is slowed for a moment
+            const slow = c?.retaliationSlow() ?? 0;
+            if (slow > 0) this.slowNearest(ev.fromX, ev.fromY, slow);
           }
           break;
         }
@@ -366,6 +444,10 @@ export class Combat3D {
           this.hooks.shake(2, 0.12);
           sfx.die();
           this.state.markKilled(ev.enemy.spawnId || `${ev.enemy.kind}`);
+          this.hooks.exp(ev.enemy.expValue, ev.enemy.x, ev.enemy.y - ev.enemy.h);
+          // `tideMend`: the Lantern Core of the tide gives a little back for every enemy felled
+          const mend = this.character?.healPerKill() ?? 0;
+          if (mend > 0) this.hooks.heal(mend);
           this.hooks.killed(ev.enemy.kind, ev.enemy.x, ev.enemy.y);
           if (ev.enemy.kind === 'boss') this.hooks.bossDefeated(ev.enemy.x, ev.enemy.cy);
           break;

@@ -77,6 +77,8 @@ export class HeroMesh3D {
   readonly root = new THREE.Group();
   /** The hero's lantern light; the brightest thing in the world at night. */
   readonly lantern = new THREE.PointLight(0xffd9a0, 0, u(58), 1.5);
+  /** Base reach in world units, before the character sheet's `lanternRange` scales it. */
+  private readonly lanternBase = u(58);
 
   private body = new THREE.Group();
   private torso!: THREE.Mesh;
@@ -472,6 +474,17 @@ export class HeroMesh3D {
     p.bodyY = -t * 0.3;
     p.cloakX = -0.2;
     this.smoothRate = 8;
+  }
+
+  /**
+   * Scale the lantern's reach (Batch 4: `lanternRange` from the character sheet).
+   *
+   * The lantern is the story's object, so gear that extends it is the one stat the player can
+   * literally see: the circle of light around them gets wider.
+   */
+  setLanternRange(scale: number): void {
+    const s = Number.isFinite(scale) ? Math.max(0.2, Math.min(3, scale)) : 1;
+    this.lantern.distance = this.lanternBase * s;
   }
 
   dispose(): void {

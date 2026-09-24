@@ -21,6 +21,7 @@ import { GeneratedWorld } from '../src/core/world/worldgen';
 import { Combat3D } from '../src/render3d/Combat3D';
 import { Puzzle3D } from '../src/render3d/Puzzle3D';
 import { Story3D } from '../src/render3d/Story3D';
+import { Character } from '../src/core/stats/character';
 import type { DialogueSpec } from '../src/ui/Dialogue';
 import { input } from '../src/core/input';
 
@@ -47,6 +48,10 @@ interface Env {
   banners: string[];
   hints: (string | null)[];
   saves: number;
+  /** Batch 4: the character sheet the combat reads its numbers from. */
+  character: Character;
+  /** Loot tables that were rolled (chests, kills). */
+  loot: string[];
 }
 
 function makeEnv(state = new GameState()): Env {
@@ -65,6 +70,8 @@ function makeEnv(state = new GameState()): Env {
     banners: [] as string[],
     hints: [] as (string | null)[],
     saves: 0,
+    character: new Character(),
+    loot: [] as string[],
   } as Env;
 
   env.puzzle = new Puzzle3D(scene, world.markers, collision, state.puzzleSolved);
@@ -77,6 +84,8 @@ function makeEnv(state = new GameState()): Env {
     spark: () => undefined,
     damage: () => undefined,
     killed: (kind) => env.story.questEvent({ type: 'kill', kind }),
+    exp: (amount) => env.character.addExp(amount),
+    heal: (amount) => env.hero.heal(amount),
     bossWoke: () => env.puzzle.closeBossDoor(),
     bossDefeated: () => {
       env.puzzle.openBossDoor();
@@ -84,8 +93,12 @@ function makeEnv(state = new GameState()): Env {
       env.story.questEvent({ type: 'boss-defeated' });
     },
   });
+  // the same wiring Game3D does: every hit goes through the stat pipeline
+  env.combat.character = env.character;
   env.story = new Story3D(scene, world, collision, state, {
     dialogue: (spec) => env.dialogues.push(spec),
+    exp: (amount) => env.character.addExp(amount),
+    loot: (kind) => env.loot.push(kind),
     toast: (t) => env.toasts.push(t),
     banner: (t) => env.banners.push(t),
     hint: (t) => env.hints.push(t),

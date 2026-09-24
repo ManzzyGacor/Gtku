@@ -171,7 +171,7 @@ test('a hero saved outside the world is pulled back in', () => {
 
 test('round-trip: what the 3D build writes, the 3D build reads back identically', () => {
   const state = new GameState();
-  state.load(SAVE_2D_DONE);
+  state.load(SAVE_2D_DONE as unknown as Parameters<GameState['load']>[0]);
   state.worldTime = 99;
   assert.ok(saveGame(state.toJSON({ x: 1234, y: 567, hp: 7 })));
   const back = loadGame();
@@ -186,8 +186,12 @@ test('round-trip: what the 3D build writes, the 3D build reads back identically'
 
 test('a corrupt save is refused rather than crashing the boot', () => {
   const bad = [
-    '', 'null', '{', '[]', '"a string"', '{"v":2,"hero":{"x":1,"y":1}}', '{"v":1}', '{"v":1,"hero":null}',
-    '{"v":1,"hero":{"x":"20","y":40}}', '{"v":1,"hero":{"x":null,"y":null,"hp":5}}',
+    '', 'null', '{', '[]', '"a string"',
+    // a file from a *newer* build: refused rather than half-read, because loading fields we do not
+    // understand would silently drop them and then save over the original
+    '{"v":3,"hero":{"x":1,"y":1,"hp":5}}',
+    '{"v":1}', '{"v":1,"hero":null}', '{"v":2,"hero":null}',
+    '{"v":1,"hero":{"x":"20","y":40}}', '{"v":2,"hero":{"x":null,"y":null,"hp":5}}',
   ];
   for (const raw of bad) {
     store[SAVE_KEY] = raw;

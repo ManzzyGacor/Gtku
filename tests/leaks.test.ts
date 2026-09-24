@@ -167,6 +167,8 @@ test('killed enemies give their meshes back instead of piling up', () => {
     killed: () => undefined,
     bossWoke: () => undefined,
     bossDefeated: () => undefined,
+    exp: () => undefined,
+    heal: () => undefined,
   });
 
   // chunks that actually hold spawn points (the forest band)

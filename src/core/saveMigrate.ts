@@ -4,11 +4,13 @@
  * Two jobs, both real:
  *
  *  1. **Old saves must keep working.** A 2D-era save lives under `lentera-kelam/save/v1`
- *     (`storage.ts` adopts that key) and its payload is the same `v: 1` shape, so the fields load
- *     as they are. What is *not* the same is the world: Batch 2 grew it from 128x80 to 256x128
- *     tiles and moved every area, so a position that was a village square in 2D can be the inside
- *     of a tree now. A save that drops the hero inside a wall is a save that soft-locks the game,
- *     so the position is checked against the collision grid and moved to the nearest free tile.
+ *     (`storage.ts` adopts that key) and its payload is a `v: 1` file: the same fields as today
+ *     minus the character (level, EXP, bag, equipment), which Batch 4 added as `v: 2`. A v1 save
+ *     therefore loads as a level 1 hero with an empty bag, which is exactly what it was.
+ *     What is *not* the same is the world: Batch 2 grew it from 128x80 to 256x128 tiles and moved
+ *     every area, so a position that was a village square in 2D can be the inside of a tree now.
+ *     A save that drops the hero inside a wall is a save that soft-locks the game, so the position
+ *     is checked against the collision grid and moved to the nearest free tile.
  *
  *  2. **A corrupt save must not take the game down with it.** localStorage is editable by anyone
  *     with a devtools window, and a half-finished write (phone killed mid-save) leaves truncated
@@ -21,7 +23,7 @@
  */
 import { TILE } from '../config';
 import { clamp } from './rng';
-import type { QuestState, SaveData } from './state/GameState';
+import type { CharacterJson, QuestState, SaveData } from './state/GameState';
 
 /** The little bit of world a migration needs: bounds, collision, and where it can put the hero. */
 export interface SaveWorld {
@@ -77,7 +79,10 @@ function boolMap(v: unknown): Record<string, boolean> {
  */
 export function sanitizeSave(value: unknown, maxHp = Infinity, notes: string[] = []): SaveData | null {
   if (!isObj(value)) return null;
-  if (value.v !== 1) return null;
+  // Known versions only. A file from a *newer* build is refused rather than half-read: loading
+  // fields we do not understand would quietly drop them and then save over the original.
+  const version = value.v;
+  if (version !== 1 && version !== 2) return null;
   if (!isObj(value.hero)) return null;
 
   const hero = value.hero;
@@ -103,8 +108,10 @@ export function sanitizeSave(value: unknown, maxHp = Infinity, notes: string[] =
 
   const checkpoint = typeof value.checkpoint === 'string' && value.checkpoint ? value.checkpoint : 'cp_village';
 
+  if (version === 1) notes.push('save versi 1 (sebelum Batch 4): level 1, tas kosong');
+
   return {
-    v: 1,
+    v: 2,
     hero: { x: hx, y: hy, hp },
     checkpoint,
     worldTime: Math.max(0, num(value.worldTime, 0)),
@@ -114,6 +121,8 @@ export function sanitizeSave(value: unknown, maxHp = Infinity, notes: string[] =
     flags: boolMap(value.flags),
     puzzle: { solved: isObj(value.puzzle) ? boolOf(value.puzzle.solved) : false },
     bossDefeated: boolOf(value.bossDefeated),
+    // Left as-is; `Character.load` does its own validation because it owns the item catalogue.
+    character: isObj(value.character) ? (value.character as unknown as CharacterJson) : undefined,
   };
 }
 

@@ -6,8 +6,15 @@ export interface QuestState {
   kills: number;
 }
 
+/**
+ * The save file.
+ *
+ * `v: 2` adds the character: level, EXP, the bag and the equipped slots (Batch 4). A `v: 1` save
+ * has none of those fields and loads as a level 1 hero with an empty bag — see
+ * `saveMigrate.ts`, which is also where the position is re-checked against the current world.
+ */
 export interface SaveData {
-  v: 1;
+  v: 2;
   hero: { x: number; y: number; hp: number };
   checkpoint: string;
   worldTime: number;
@@ -17,7 +24,22 @@ export interface SaveData {
   flags: Record<string, boolean>;
   puzzle: { solved: boolean };
   bossDefeated: boolean;
+  /** Level, EXP, bag and equipment. Absent in a v1 save. */
+  character?: CharacterJson | undefined;
 }
+
+/** What `Character.toJSON()` produces; typed here so the save shape is in one file. */
+export interface CharacterJson {
+  level: number;
+  exp: number;
+  inventory: {
+    slots: ({ id: string; count: number; rarity: string } | null)[];
+    equipped: Record<string, { id: string; count: number; rarity: string } | undefined>;
+  };
+}
+
+/** The newest save version this build writes. */
+export const SAVE_VERSION = 2;
 
 export const RESPAWN_SECONDS = 300;
 export const KILLS_NEEDED = 6;
@@ -44,9 +66,9 @@ export class GameState {
     this.killed[id] = this.worldTime;
   }
 
-  toJSON(hero: { x: number; y: number; hp: number }): SaveData {
+  toJSON(hero: { x: number; y: number; hp: number }, character?: CharacterJson): SaveData {
     return {
-      v: 1,
+      v: 2,
       hero: { x: Math.round(hero.x), y: Math.round(hero.y), hp: hero.hp },
       checkpoint: this.checkpoint,
       worldTime: this.worldTime,
@@ -56,6 +78,7 @@ export class GameState {
       flags: { ...this.flags },
       puzzle: { solved: this.puzzleSolved },
       bossDefeated: this.bossDefeated,
+      character,
     };
   }
 

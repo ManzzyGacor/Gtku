@@ -131,6 +131,17 @@ export class HeroCore {
   vy = 0;
   hp = HERO_STATS.maxHp;
   maxHp = HERO_STATS.maxHp;
+  /**
+   * Multiplier on walking speed from the character sheet (Batch 4): `stats.speed` is a percentage,
+   * so boots that say +10% arrive here as 1.1. Kept as a plain number rather than a reference to
+   * the sheet so `HeroCore` stays free of everything above it.
+   */
+  speedScale = 1;
+  /**
+   * Extra crit chance the equipment grants the heavy finisher (the `stormEdge` passive). Applied by
+   * the combat code, which owns the damage roll.
+   */
+  heavyCritBonus = 0;
   state: HeroState = 'free';
   stateT = 0;
   /** Movement/attack direction in radians (screen coords: 0 = right, +y down). */
@@ -246,6 +257,18 @@ export class HeroCore {
     this.holdT = 0;
     this.charge = 0;
     this.shot = null;
+  }
+
+  /**
+   * Raise or lower the HP ceiling (a level-up, or swapping armour).
+   *
+   * Current HP is kept, not scaled: a level-up should not heal, and taking off a +5 HP helmet
+   * should not kill a hero who is below that. It is only clamped down to the new ceiling.
+   */
+  setMaxHp(value: number): void {
+    const next = Number.isFinite(value) ? Math.max(1, Math.round(value)) : this.maxHp;
+    this.maxHp = next;
+    this.hp = Math.min(this.hp, next);
   }
 
   heal(n: number): void {
@@ -377,7 +400,7 @@ export class HeroCore {
       case 'free': {
         const mag = clamp(Math.hypot(inp.mx, inp.my), 0, 1);
         if (mag > 0.05) {
-          const s = HERO_STATS.speed * moveMult * (mag < 0.35 ? 0.55 : 1);
+          const s = HERO_STATS.speed * this.speedScale * moveMult * (mag < 0.35 ? 0.55 : 1);
           targetVx = (inp.mx / mag) * s * Math.min(1, mag * 1.15);
           targetVy = (inp.my / mag) * s * Math.min(1, mag * 1.15);
           this.aim = Math.atan2(inp.my, inp.mx);
@@ -447,7 +470,7 @@ export class HeroCore {
           targetVx = Math.cos(this.aim) * a.lunge * k;
           targetVy = Math.sin(this.aim) * a.lunge * k;
           if (inWindup && mag > 0.15) {
-            const steer = HERO_STATS.speed * HERO_STATS.attackSteer;
+            const steer = HERO_STATS.speed * this.speedScale * HERO_STATS.attackSteer;
             targetVx += (inp.mx / mag) * steer;
             targetVy += (inp.my / mag) * steer;
           }
@@ -535,7 +558,7 @@ export class HeroCore {
         const mag = clamp(Math.hypot(inp.mx, inp.my), 0, 1);
         // swapping never roots you: you keep walking at half speed through it
         if (mag > 0.05) {
-          const sp = HERO_STATS.speed * moveMult * 0.5;
+          const sp = HERO_STATS.speed * this.speedScale * moveMult * 0.5;
           targetVx = (inp.mx / mag) * sp;
           targetVy = (inp.my / mag) * sp;
           this.aim = Math.atan2(inp.my, inp.mx);

@@ -80,6 +80,8 @@ test('quest text and map markers are not rebuilt every frame', () => {
     spark: () => undefined,
     save: () => undefined,
     shake: () => undefined,
+    exp: () => undefined,
+    loot: () => undefined,
   });
 
   const marks = story.mapMarks();
@@ -180,6 +182,8 @@ test('enemyCount does not build an array for the HUD each frame', () => {
     killed: () => undefined,
     bossWoke: () => undefined,
     bossDefeated: () => undefined,
+    exp: () => undefined,
+    heal: () => undefined,
   });
   combat.spawnForChunk(4, 1);
   const n = combat.enemyCount;

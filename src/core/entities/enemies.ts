@@ -4,9 +4,26 @@
  */
 import { TILE } from '../../config';
 import { clamp } from '../rng';
+import type { ElementId } from '../combat/elements';
+import { EXP_REWARDS } from '../progression';
 import type { Collision } from '../world/collision';
 
 export type EnemyKind = 'slime' | 'archer' | 'bat' | 'boss';
+
+/**
+ * The defensive half of the stat pipeline, per enemy kind (Batch 4).
+ *
+ * Deliberately data rather than fields on the classes: the damage formula in `stats/damage.ts`
+ * takes a `Defender`, and this is the table that fills it in. Resistances are where the four
+ * implemented elements get their identity — a cave bat is a poor conductor, the boss shrugs off
+ * fire because it lives beside crystal fire.
+ */
+export const ENEMY_STATS: Record<EnemyKind, { def: number; resist: Partial<Record<ElementId, number>>; exp: number }> = {
+  slime: { def: 6, resist: { air: 0.4, api: -0.25 }, exp: EXP_REWARDS.slime },
+  archer: { def: 14, resist: { petir: -0.2 }, exp: EXP_REWARDS.archer },
+  bat: { def: 4, resist: { petir: 0.35, es: -0.3 }, exp: EXP_REWARDS.bat },
+  boss: { def: 45, resist: { api: 0.35, es: 0.2, air: -0.15 }, exp: EXP_REWARDS.boss },
+};
 
 export interface HeroRef {
   x: number;
@@ -79,6 +96,21 @@ export abstract class EnemyCore {
     this.y = y;
     this.hp = maxHp;
     this.home = { x, y };
+  }
+
+  /** DEF for the damage formula. */
+  get def(): number {
+    return ENEMY_STATS[this.kind].def;
+  }
+
+  /** Per-element resistance, 0..1 (negative = extra vulnerable). */
+  get resist(): Partial<Record<ElementId, number>> {
+    return ENEMY_STATS[this.kind].resist;
+  }
+
+  /** EXP the hero gets for killing this. */
+  get expValue(): number {
+    return ENEMY_STATS[this.kind].exp;
   }
 
   /** Body centre used for hit tests. */

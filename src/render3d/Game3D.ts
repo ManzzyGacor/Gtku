@@ -38,6 +38,9 @@ import { PixelRenderer } from './PixelRenderer';
 import { Sky } from './Sky';
 import { World3D } from './World3D';
 import { u } from './worldPlan';
+import { Character } from '../core/stats/character';
+import { itemDef, rarityMeta } from '../core/items/items';
+import { rollDrops } from '../core/items/drops';
 
 /**
  * How many of the fixed light pool each preset actually lights up. Small on purpose: the static
@@ -66,6 +69,8 @@ export class Game3D {
   readonly story: Story3D;
   readonly puzzle: Puzzle3D;
   readonly perf = new PerfMeter();
+  /** Level, EXP, bag, equipment and the resolved stats every hit is calculated from (Batch 4). */
+  readonly character = new Character();
 
   private adaptive = new AdaptiveQuality(this.perf);
   private tileSheet = buildTileSheet();
@@ -113,9 +118,13 @@ export class Game3D {
     if (migrated) {
       this.saveNotes = migrated.notes;
       this.state.load(migrated.save);
-      this.hero.reset(migrated.save.hero.x, migrated.save.hero.y, migrated.save.hero.hp);
+      this.character.load(migrated.save.character);
+      this.applySheet();
+      this.hero.reset(migrated.save.hero.x, migrated.save.hero.y, Math.min(migrated.save.hero.hp, this.hero.maxHp));
       this.dayTime = this.state.dayTime;
       this.camera.snap(u(this.hero.x), u(this.hero.y));
+    } else {
+      this.applySheet();
     }
 
     this.hud = new Hud();
@@ -137,6 +146,13 @@ export class Game3D {
         this.story.questEvent({ type: 'kill', kind });
         // a third of the time an enemy leaves something behind
         if (kind !== 'boss' && Math.random() < 0.33) this.story.dropHeal(x, y);
+        this.dropLoot(kind, x, y);
+      },
+      exp: (amount, x, y) => this.gainExp(amount, x, y),
+      heal: (amount) => {
+        if (amount <= 0 || this.hero.hp >= this.hero.maxHp) return;
+        this.hero.heal(amount);
+        this.hud.float(u(this.hero.x), 1.1, u(this.hero.y), `+${amount}`, '#7cf07c', false);
       },
       bossWoke: () => {
         this.puzzle.closeBossDoor();
@@ -158,6 +174,8 @@ export class Game3D {
       banner: (text) => this.hud.banner(text),
       hint: (text) => this.hud.setHint(text),
       float: (x, y, text, color, big) => this.hud.float(u(x), 1.1, u(y), text, color, big),
+      exp: (amount, x, y) => this.gainExp(amount, x, y),
+      loot: (kind, x, y) => this.dropLoot(kind, x, y),
       spark: (x, y, color, big) => this.environment.spark(u(x), u(y), color, big),
       save: (force) => this.saveNow(force),
       shake: (amount, seconds) => this.camera.shake(amount, seconds),
@@ -305,6 +323,72 @@ export class Game3D {
     }
   }
 
+  /**
+   * Push the character sheet into the parts of the game that cache its numbers.
+   *
+   * Called after anything that can change the sheet: load, level-up, equipping. The hero keeps its
+   * current HP (`setMaxHp` clamps rather than scales), so taking off a +HP helmet cannot kill you
+   * and a level-up does not heal you.
+   */
+  applySheet(): void {
+    this.character.refresh();
+    const stats = this.character.stats;
+    this.hero.setMaxHp(stats.maxHp);
+    this.hero.speedScale = stats.speed / 100;
+    this.hero.heavyCritBonus = this.character.heavyCritBonus();
+    this.combat.character = this.character;
+    this.heroMesh.setLanternRange(stats.lanternRange / 100);
+    this.hud.setLevel(this.character.level, this.character.exp, this.character.expNeeded);
+  }
+
+  /**
+   * EXP from a kill, a discovery or a quest stage. Levels are announced, because a number quietly
+   * going up in a menu nobody has open is not a reward.
+   */
+  gainExp(amount: number, x?: number, y?: number): void {
+    if (amount <= 0) return;
+    const levels = this.character.addExp(amount);
+    if (x !== undefined && y !== undefined) this.hud.float(u(x), 1.5, u(y), `+${amount} EXP`, '#a795ff', false);
+    if (levels.length) {
+      this.applySheet();
+      this.hud.toast(`Level ${this.character.level}!`);
+      this.hud.banner(`LEVEL ${this.character.level}`, 1.8);
+      this.environment.spark(u(this.hero.x), u(this.hero.y), 0xffd98a, true);
+      sfx.levelUp();
+      this.saveNow(true);
+    } else {
+      this.hud.setLevel(this.character.level, this.character.exp, this.character.expNeeded);
+    }
+  }
+
+  /**
+   * Loot. A fallen enemy sometimes leaves something, and what it leaves depends on what it was —
+   * the table lives in `core/items/drops.ts` so it can be tested without a renderer.
+   */
+  private dropLoot(kind: string, x: number, y: number): void {
+    // A kill gives at most one thing — a stream of pickups turns a fight into paperwork — while a
+    // chest is the reward for exploring and rolls its whole table.
+    const drops = rollDrops(kind, Math.random, kind === 'chest' ? Infinity : 1);
+    let overflowed = false;
+    let lifted = 0;
+    for (const drop of drops) {
+      const def = itemDef(drop.id);
+      if (!def) continue;
+      const result = this.character.inventory.add(drop.id, drop.count, drop.rarity);
+      if (result.added > 0) {
+        this.hud.toast(`${def.name}${result.added > 1 ? ` x${result.added}` : ''}`);
+        this.hud.float(u(x), 1.2 + lifted * 0.35, u(y), def.name, rarityMeta(drop.rarity).color, false);
+        lifted++;
+      }
+      if (result.overflow > 0) overflowed = true;
+    }
+    if (lifted > 0) {
+      sfx.pickup();
+      this.saveNow();
+    }
+    if (overflowed) this.hud.toast('Tas penuh! Buang sesuatu dulu.');
+  }
+
   /** Death → fade → respawn at the last checkpoint, exactly as the 2D build did it. */
   private updateDeath(dt: number): void {
     if (this.hero.alive) {
@@ -339,7 +423,7 @@ export class Game3D {
     if (!this.hero.alive) return;
     if (!force && boss && boss.awake && !boss.dead) return;
     this.state.dayTime = this.dayTime;
-    saveGame(this.state.toJSON({ x: this.hero.x, y: this.hero.y, hp: this.hero.hp }));
+    saveGame(this.state.toJSON({ x: this.hero.x, y: this.hero.y, hp: this.hero.hp }, this.character.toJSON()));
   }
 
   /** Freeze the simulation for `ms` while rendering keeps going — the punch behind a landed hit. */

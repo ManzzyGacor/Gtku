@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { TILE, WORLD_CHUNKS_H, WORLD_CHUNKS_W } from '../config';
 import { sfx } from '../core/audio';
 import { input } from '../core/input';
+import { EXP_REWARDS } from '../core/progression';
 import { nearestInteractable, type Interactable } from '../core/systems/interactables';
 import { advanceQuest, dialogueFor, QUEST_TITLE, trackerLines, type NpcId, type QuestEvent } from '../core/systems/quest';
 import type { GameState } from '../core/state/GameState';
@@ -41,6 +42,10 @@ export interface StoryHooks {
   spark(x: number, y: number, color: number, big: boolean): void;
   save(force?: boolean): void;
   shake(amount: number, seconds: number): void;
+  /** EXP for a discovery: a sign read, a shrine rested at, a chest opened (Batch 4). */
+  exp(amount: number, x: number, y: number): void;
+  /** Roll a loot table into the bag. `kind` names the table in `core/items/drops.ts`. */
+  loot(kind: string, x: number, y: number): void;
 }
 
 export class Story3D {
@@ -109,16 +114,33 @@ export class Story3D {
           });
         }
         for (const p of chunk.props) {
-          if (p.type !== 'sign' || !p.text) continue;
-          const text = p.text;
-          this.interactables.push({
-            id: `sign_${p.x}_${p.y}`,
-            x: p.x,
-            y: p.y - 4,
-            range: 26,
-            label: () => 'Baca',
-            interact: () => this.hooks.dialogue({ name: 'Papan', lines: [text] }),
-          });
+          if (p.type === 'sign' && p.text) {
+            const text = p.text;
+            const id = `sign_${p.x}_${p.y}`;
+            this.interactables.push({
+              id,
+              x: p.x,
+              y: p.y - 4,
+              range: 26,
+              label: () => 'Baca',
+              interact: () => {
+                this.hooks.dialogue({ name: 'Papan', lines: [text] });
+                // reading something for the first time is exploring, and exploring pays (once)
+                this.discover(`read_${id}`, EXP_REWARDS.discovery, p.x, p.y);
+              },
+            });
+          }
+          if (p.type === 'chest') {
+            const id = `chest_${p.x}_${p.y}`;
+            this.interactables.push({
+              id,
+              x: p.x,
+              y: p.y - 4,
+              range: 28,
+              label: () => (this.state.flags[id] ? 'Sudah kosong' : 'Buka'),
+              interact: () => this.openChest(id, p.x, p.y),
+            });
+          }
         }
       }
     for (const cp of this.world.markers.checkpoints) {
@@ -188,9 +210,37 @@ export class Story3D {
   }
 
   /** Shrine / lantern: heal fully, remember the checkpoint, save. */
+  /**
+   * A chest. Opened once, and the flag lives in the save, so a chest you emptied stays empty
+   * across sessions — finding one has to mean something.
+   */
+  private openChest(id: string, x: number, y: number): void {
+    if (this.state.flags[id]) {
+      this.hooks.hint(null);
+      this.hooks.dialogue({ name: 'Peti', lines: ['Sudah kosong. Kamu yang mengambilnya.'] });
+      return;
+    }
+    this.state.flags[id] = true;
+    this.hooks.loot('chest', x, y);
+    this.hooks.exp(EXP_REWARDS.chest, x, y - 8);
+    this.hooks.spark(x, y - 8, 0xffd98a, true);
+    this.hooks.save(true);
+    this.refreshMarkers();
+  }
+
+  /** One-off exploration EXP, guarded by a save flag. */
+  private discover(flag: string, amount: number, x: number, y: number): void {
+    if (this.state.flags[flag]) return;
+    this.state.flags[flag] = true;
+    this.hooks.exp(amount, x, y - 8);
+  }
+
   private rest(id: string, name: string): void {
     this.state.checkpoint = id;
     this.hooks.toast(`${name}: HP pulih, progres tersimpan`);
+    // the first time you find a shrine is a discovery; after that it is just a bed
+    const cp = this.world.markers.checkpoints.find((c) => c.id === id);
+    if (cp) this.discover(`found_${id}`, EXP_REWARDS.discovery, cp.x, cp.y);
     this.hooks.save(true);
     this.onRest();
   }

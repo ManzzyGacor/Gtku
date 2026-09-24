@@ -24,7 +24,7 @@ test('toJSON rounds the hero position and deep-copies the mutable bags', () => {
   s.flags.lanternLit = true;
   s.markKilled('slime_3');
   const d = s.toJSON(HERO);
-  assert.equal(d.v, 1);
+  assert.equal(d.v, 2, 'Batch 4 raised the save version');
   assert.deepEqual(d.hero, { x: 124, y: 456, hp: 8 });
   // mutating the state afterwards must not reach into the snapshot
   s.flags.lanternLit = false;
@@ -60,7 +60,7 @@ test('save → load is a round trip', () => {
 
 test('load tolerates a save that is missing fields (older or hand-edited file)', () => {
   const s = new GameState();
-  s.load({ v: 1, hero: { x: 0, y: 0, hp: 1 } } as SaveData);
+  s.load({ v: 1, hero: { x: 0, y: 0, hp: 1 } } as unknown as SaveData);
   assert.equal(s.worldTime, 0);
   assert.equal(s.dayTime, 0.33);
   assert.deepEqual(s.quest, { stage: 0, kills: 0 });

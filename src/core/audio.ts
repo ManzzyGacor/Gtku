@@ -154,4 +154,16 @@ export const sfx = {
     tone({ from: 420, to: 60, dur: 0.4, type: 'square', gain: 0.14 });
     noise(0.3, 0.12, 300, 0.5);
   },
+
+  /** Level up: a small rising arpeggio, the one unambiguously happy sound in the game so far. */
+  levelUp(): void {
+    tone({ from: 523, to: 523, dur: 0.1, type: 'triangle', gain: 0.1 });
+    tone({ from: 659, to: 659, dur: 0.1, type: 'triangle', gain: 0.1, delay: 0.08 });
+    tone({ from: 784, to: 988, dur: 0.26, type: 'triangle', gain: 0.12, delay: 0.16 });
+  },
+
+  /** Picking something up. */
+  pickup(): void {
+    tone({ from: 700, to: 1050, dur: 0.1, type: 'square', gain: 0.07 });
+  },
 };
