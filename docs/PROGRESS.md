@@ -817,3 +817,35 @@ papan 26→38, peti 28→38, altar 32→42). Peti kosong bilang "Kosong", bukan 
 Tes: `tests/interaction.test.ts` (setiap NPC, papan, peti, dan altar di dunia hasil generate
 didatangi dan ditekan), dua tes baru di `touchcontrols.test.ts`, dan `tests/source.test.ts`
 yang menjaga backtick di dalam blok CSS/GLSL (sudah tiga kali memecahkan build).
+
+## Perbaikan sebelum Batch 6
+
+### Bagian 1 — tombol interaksi tidak berfungsi di HP
+
+**Penyebab:** tombol interaksi **tidak ada sama sekali** di kontrol sentuh. Tombol `E` bekerja di
+keyboard, dan teks "Bicara"/"Baca" muncul di atas hero — tapi di HP tidak ada satu pun elemen di
+layar yang bisa memicu aksi `interact`. Jadi game bilang "Bicara" lalu mengabaikan setiap ketukan,
+yang terbaca seperti tombol rusak padahal tombolnya memang tidak pernah dibuat. Logika interaksinya
+sendiri (`nearestInteractable`, dialog, quest) selalu benar; tes lama menekan `input.press('interact')`
+langsung, jadi tidak pernah menyentuh jalur sentuh.
+
+**Perbaikan:**
+- Tombol interaksi **kontekstual** di `TouchControls`: tersembunyi total (`display:none`, jadi tidak
+  bisa menelan ketukan) sampai ada sesuatu dalam jangkauan, lalu muncul dengan label dari dunia.
+  Kalau hilang saat masih ditekan, rilisnya disintesis supaya aksi tidak macet tertekan.
+- Label per jenis: **Bicara** (warga), **Baca** (papan), **Buka** / **Kosong** (peti), **Berdoa**
+  (shrine — mekanismenya tetap simpan + pulihkan HP, kata yang tadinya "Istirahat").
+- Satu penanda chevron melayang di atas objek terdekat (satu sprite yang dipindah, bukan satu per
+  objek), tingginya menyesuaikan jenis objek.
+- Jangkauan dilonggarkan: 34→44 px warga, 26→38 papan, 28→38 peti, 32→42 shrine. Nyaris-cukup-dekat
+  tanpa prompt terasa seperti tombol rusak saat menyetir dengan jempol.
+- Keyboard tetap `E`/`Enter`.
+
+**Tes:** `tests/interaction.test.ts` (10) mendatangi **setiap** warga (4), papan (8), peti (6), dan
+shrine (3) di dunia yang digenerate, lalu menekan interaksi; peti yang dikosongkan tetap kosong
+setelah save/reload; prompt hilang saat menjauh, saat dialog terbuka, dan saat hero mati; jangkauan
+2–2,5 petak berhasil. `touchcontrols.test.ts` +2: tombol tersembunyi tidak menelan ketukan, dan
+menghilang di tengah tekanan tidak meninggalkan aksi macet. `layout.test.ts`: 5 tombol tidak
+bertumpuk dan tetap di safe area pada teks 2x/tombol 1.3x dan 1.8x.
+
+Plus `tests/source.test.ts`: tidak ada backtick di dalam blok CSS/GLSL (sudah tiga kali kejadian).
