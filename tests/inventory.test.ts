@@ -27,8 +27,8 @@ test('the catalogue is coherent: every slot fillable, every core an implemented 
     if (def.mods.length === 0) assert.ok(!isEquipment(def), `${def.id} is gear with no stats`);
   }
   // a Lantern Core for each of the four implemented elements
-  const coreElements = Object.values(ITEMS).filter((i) => i.kind === 'lantern').map((i) => i.element);
-  for (const el of ['api', 'air', 'es', 'petir']) assert.ok(coreElements.includes(el as never), `no core for ${el}`);
+  const coreElements = new Set(Object.values(ITEMS).filter((i) => i.kind === 'lantern').map((i) => i.element));
+  for (const el of ['api', 'air', 'es', 'petir']) assert.ok(coreElements.has(el as never), `no core for ${el}`);
 });
 
 test('accessories fit both accessory slots and nothing else', () => {
@@ -169,7 +169,7 @@ test('a save round-trips, and survives an item that no longer exists', () => {
 test('the bag is a real grid, and loading a bigger one does not overflow it', () => {
   const inv = new Inventory();
   assert.equal(inv.size, BAG_SLOTS);
-  inv.load({ slots: new Array(200).fill({ id: 'shard_dawn', count: 1, rarity: 'common' }), equipped: {} });
+  inv.load({ slots: Array.from({ length: 200 }, () => ({ id: 'shard_dawn', count: 1, rarity: 'common' as const })), equipped: {} });
   assert.equal(inv.slots.length, BAG_SLOTS, 'the grid stays the size it is');
   assert.equal(inv.used, BAG_SLOTS);
 });

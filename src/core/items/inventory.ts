@@ -43,7 +43,7 @@ export class Inventory {
   readonly equipped: Equipped = {};
 
   constructor(size = BAG_SLOTS) {
-    this.slots = new Array<ItemStack | null>(Math.max(1, size)).fill(null);
+    this.slots = Array.from({ length: Math.max(1, size) }, () => null as ItemStack | null);
   }
 
   get size(): number {
