@@ -383,6 +383,58 @@ Laporan: "Serangan terasa SANGAT KAKU."
 
 ---
 
+---
+
+## Inventaris fitur 2D → 3D (sebelum renderer 2D dihapus)
+
+Tag pengaman: **`v0.2-2d-final`** (sudah di-push). Kalau ada fitur yang ternyata terlewat:
+`git checkout v0.2-2d-final`.
+
+Daftar ini dibuat dengan menyisir `src/render2d/scenes/GameScene.ts` (529 baris) dan
+`UIScene.ts` (559 baris) baris demi baris. Kolom terakhir diisi saat fitur itu benar-benar
+jalan di 3D.
+
+| Fitur 2D | Logikanya | Status di 3D |
+| --- | --- | --- |
+| Gerak 8 arah + tabrakan | `core/world/collision` | ✅ sejak Fase 2 |
+| Streaming chunk | — | ✅ Batch 2 (persegi pandang kamera) |
+| Siklus siang-malam | `core/systems/daynight` | ✅ Batch 2 |
+| Pencahayaan + vignette + bloom | — | ✅ Batch 2 (light map dipanggang + grading) |
+| Air & rumput beranimasi, partikel, parallax | — | ✅ Batch 2 (shader angin, riak, kunang, kabut) |
+| Kombat: kombo, dodge, skill, hit-stop, getaran | `core/entities/HeroCore` | ✅ Batch 3 (+ 4 fase, tahan = berat) |
+| Musuh: lendir, pemanah, kelelawar, boss | `core/entities/enemies` | ✅ Batch 3 (`Combat3D`) |
+| Bidik otomatis | `HeroCore.aimAssist` | ✅ Batch 3 |
+| Angka damage | — | ⬜ **dipindah di bagian ini** |
+| Pickup penyembuh dari musuh | — | ⬜ **dipindah di bagian ini** |
+| HUD: bar HP + trail, teks quest, hint, banner area, toast | — | ⬜ **dipindah di bagian ini** |
+| Bar HP boss | — | ⬜ **dipindah di bagian ini** |
+| NPC (4) + penanda `!`/`?` | `core/world/source` (NpcDef) | ⬜ **dipindah di bagian ini** |
+| Dialog dengan efek ketik + potret | — | ⬜ **dipindah di bagian ini** |
+| Interactable: bicara, baca papan, istirahat di altar | `core/systems/interactables` | ⬜ **dipindah di bagian ini** |
+| Quest "Cahaya untuk Desa" (4 tahap) | `core/systems/quest` | ⬜ **dipindah di bagian ini** |
+| Puzzle dorong batu → gerbang terbuka | `core/systems/puzzleLogic` | ⬜ **dipindah di bagian ini** |
+| Pintu arena boss menutup saat boss bangun | `PuzzleSystem` (view) | ⬜ **dipindah di bagian ini** |
+| Lentera Agung menyala di akhir quest | — | ⬜ **dipindah di bagian ini** |
+| Minimap jendela 48x32 tile | — | ⬜ **dipindah di bagian ini** |
+| Save/load + autosave 30 dtk + saat event | `core/save`, `core/state/GameState` | ⬜ **dipindah di bagian ini** |
+| Checkpoint + respawn saat mati | — | ⬜ **dipindah di bagian ini** |
+| Layar judul: Lanjutkan / Main Baru | — | ⬜ **dipindah di bagian ini** |
+| Tombol fullscreen + lock landscape | — | ⬜ **dipindah di bagian ini** |
+| Kontrol sentuh (joystick + tombol) | `core/input` | ✅ `ui/TouchControls` (DOM) |
+| Menu Pengaturan, penghitung FPS, panel error | — | ✅ Fase 0 (DOM, netral renderer) |
+
+**Yang sengaja tidak dipindah:** semuanya yang khas Phaser — `Fx` (partikel Phaser), `Lighting`
+(lightmap kanvas 2D), `Parallax`, `chunks` (bake tekstur chunk Phaser), `cameraRig`,
+`pixeltext`, `register`, dan keempat `Scene`. Penggantinya di 3D sudah ada dan lebih murah.
+
+**Aset:** pipeline seni `src/art/*` **tetap dipakai** — tanah 3D dipanggang dengan `bakeChunk`
+yang sama, dan palet yang sama dipakai tekstur greybox. Yang jadi khusus-2D hanyalah sheet
+sprite (`characters`, `enemies`, `props`, `fx`, `ui`, `font`); itu tetap dipertahankan karena
+masih dipakai untuk minimap, potret dialog, dan ekspor pratinjau — dan karena rencananya
+`docs/OVERHAUL.md` §"Yang tidak tercapai" mengusulkan memakainya sebagai billboard sprite.
+
+---
+
 ### Yang belum ada di mode 3D
 
 Musuh & kombat (Batch 3), stats & inventaris (Batch 4), NPC/quest/cutscene/audio/menu (Batch 5),
