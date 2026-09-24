@@ -638,3 +638,132 @@ listener nyata pada elemen yang akan disentuh pemain.
 dimuat sebagai hero level 1 bertas kosong, dan itu dicatat di notes migrasi yang muncul di laporan
 diagnostik. Save dari versi **lebih baru** ditolak, bukan dibaca separuh — membaca separuh lalu
 menimpanya akan menghapus progres.
+
+## Batch 5 — cutscene, audio, UI/HUD, menu
+
+### Bagian 1 — sistem cutscene
+
+Cutscene adalah **data**: daftar langkah di sebuah timeline (`src/core/story/cutscene.ts`).
+Menambah cutscene baru = menambah satu entri di `cutscenes.ts`, **tanpa mengubah kode engine**.
+
+| Langkah | Isi |
+| --- | --- |
+| `wait` | jeda; keheningan itu alat bercerita |
+| `say` | dialog, muncul huruf per huruf. Dengan `dur` lanjut sendiri, tanpa `dur` menunggu ketukan |
+| `caption` | narasi di tengah layar (nama tempat, lompatan waktu) |
+| `fade` | fade ke warna, dengan durasi |
+| `camera` | pan + sudut + zoom, dengan easing |
+| `light` | seberapa gelap (`night` 0..1) + tint ambient |
+| `actor` | pindahkan/pose aktor; hero berjalan dengan animasi jalan yang benar |
+| `sfx` / `music` / `ambient` | cue bernama; tabelnya milik renderer, bukan skrip |
+| `fx` | partikel bernama |
+| `shake` | getaran kamera |
+| `flag` | menulis flag di save, jadi dunia bisa bereaksi |
+
+**Cara timeline bekerja.** Tiap langkah dimulai, lalu timeline menunggu `hold` detik sebelum
+langkah berikutnya. `hold` default = durasi langkah itu sendiri (jadi daftar biasa terbaca
+berurutan); `hold: 0` memulai langkah lalu langsung lanjut — itu cara pan kamera 4 detik berjalan
+**di bawah** tiga baris dialog. Satu angka, tanpa blok paralel bersarang.
+
+**Skip** tidak boleh meninggalkan dunia setengah jadi: `skip()` menerapkan semua langkah sisa
+dengan durasi nol, jadi kamera, cahaya, pose aktor, dan flag berakhir tepat di tempat cutscene
+seharusnya meninggalkannya. Dialog, jeda, dan suara dibuang. Ada tesnya.
+
+Kecepatan teks dari setelan (dibaca lewat fungsi, jadi slider berlaku di tengah cutscene). Ketukan
+pertama menyelesaikan baris, ketukan kedua lanjut. Tombol **LEWATI** selalu terlihat, di dalam
+safe area. Status tertonton ada di **save** (bukan settings — itu progres, bukan preferensi), dan
+bisa diputar ulang dari Pengaturan → Cerita.
+
+### Bagian 2 — cutscene pembuka "Malam Terakhir"
+
+Naskah lengkap Chapter 1 ada di `docs/STORY.md`. Prolognya (66 langkah, ±95 detik) dipentaskan di
+tempat **nyata** di dunia yang akan dimasuki pemain: rumah di tepi barat Ravenhollow, jalan desa,
+dan plaza. Suasana malam badai, kabut, cahaya lentera, musik dua nada.
+
+Ringkasan adegan: hujan tidak berhenti → lentera ayah yang biasanya menyala malam itu **padam** →
+suara gelas pecah → pintu depan terbuka → lentera hitam kecil berukiran aneh, **hangat tanpa api**
+→ suara ibu dari luar → berlari keluar, **tidak ada siapa-siapa** → "jangan cari kami…" → suara
+ayah: "kalau lentera itu menyala… berarti mereka sudah menemukanmu" → lentera menyala sendiri, api
+**biru pucat** → seluruh lampu desa padam → "Tujuh tahun kemudian" → diserahkan ke gameplay.
+
+Orang tuanya hanya **terdengar**, tidak pernah terlihat. Itu bukan penghematan — itu memang
+adegannya: anak itu berlari keluar dan tidak ada siapa-siapa.
+
+**Nama tokoh utama** ditanyakan sekali, di layar judul, saat menekan MAIN BARU. Naskah memanggilnya
+Arka, tapi setiap baris ditulis dengan placeholder `{nama}` dan diisi saat diputar. Boleh dilewati
+("Pengembara"). Dibatasi 14 karakter karena nama itu muncul di HUD, kotak dialog, dan di atas kepala
+hero.
+
+Nama area diselaraskan: **Ravenhollow**, **Hutan Noctis**, **Gua Lumen**. ID-nya
+(`village`/`forest`/`cave`) sengaja tidak diubah — ada di save, id checkpoint, dan tes.
+
+> **Belum selaras:** rangkaian quest-nya masih cerita lama (Tetua Wulan, "Cahaya untuk Desa",
+> Lentera Agung). Menulis ulangnya menjadi Chapter 1 (Nara, buku ayah, Menara Lumen, tujuh lentera)
+> adalah pekerjaan konten tersendiri, bukan bagian dari keempat bagian Batch 5 — dicatat di sini,
+> bukan dikerjakan setengah jalan.
+
+### Bagian 3 — audio
+
+Lima kategori dengan volume masing-masing: **Musik, Suasana, Tempur, Efek, Antarmuka**. Bukan satu
+slider master, karena itu lima masalah berbeda.
+
+Enam track prosedural: Ravenhollow (siang), Ravenhollow Malam, Hutan Noctis, Gua Lumen, Kolosus
+Kelam, Malam Terakhir. **Semuanya satu nada dasar (A minor)** — crossfade antar dua lagu beda nada
+terdengar seperti kesalahan, dan pemain melewati batas area terus-terusan. Yang berbeda antar area
+adalah register, tempo, dan seberapa banyak ruang kosongnya.
+
+Enam bed suasana: angin (dengan embusan), malam (jangkrik + angin tipis), gua (drone + tetesan air
++ gemuruh), api (kerak-kerik), badai, badai jauh.
+
+| Aturan | Kenapa |
+| --- | --- |
+| Boss menimpa semuanya | musik harus datang bersama pertarungannya |
+| Gua mengabaikan waktu | di dalam gua tidak ada langit |
+| Desa punya track malam sendiri | |
+| Crossfade 1,2 s masuk boss | pendek, supaya tiba bersamaan |
+| Crossfade 4,5 s di batas area | batas di dunia ini tidak kelihatan; fade pendek akan mengumumkan garis yang tidak bisa dilihat pemain |
+
+Musik dijadwalkan **di depan waktu**, satu bar sekaligus, dari timer yang cuma memutuskan "sudah
+dekat belum". WebAudio memutar pada `currentTime` yang tepat, jadi timer-nya boleh di-throttle
+browser tanpa musiknya melayang. Clock context berhenti saat tab disembunyikan, jadi scheduler ikut
+berhenti — kalau tidak, semua yang sudah dijadwalkan meletus sekaligus saat kembali.
+
+Folder `public/assets/audio/` + README menjelaskan cara mengganti dengan file buatan manusia.
+**Jujur:** pemuat berkasnya belum ada; yang sudah ada seam-nya (semua pemanggil memakai nama, bukan
+berkas), jadi pemuatnya bisa dipasang di satu tempat. Masuk Batch 7.
+
+### Bagian 4 — UI, HUD, menu
+
+**Safe area.** `viewport-fit=cover` + `--lm-sa*` custom property untuk CSS + `safeInsets()` untuk
+yang memposisikan dengan JavaScript. Yang sekarang menghindar dari notch dan lengkungan: vitals,
+minimap, objektif quest, tombol gear/tas/jeda/fullscreen, dialog, overlay cutscene, panel karakter,
+panel pengaturan, joystick, dan 4 tombol aksi.
+
+**Menu utama:** Lanjutkan, Main Baru, Pengaturan, Akun, Kredit. Akun jujur soal dirinya (Batch 7,
+dan progres sekarang hanya di HP ini lewat penyimpanan browser).
+
+**Menu pause:** Lanjut, Inventaris, Karakter, Senjata, Skill, Quest, Peta, Pengaturan, Simpan &
+Keluar — semuanya menampilkan state nyata (senjata dibaca dari `ATTACKS`/`BOW_SHOTS` jadi ikut
+berubah kalau panel tuning diubah; skill menampilkan satu skill yang memang ada, bukan slot palsu;
+peta menggambar atlas dunia yang sudah dibuat minimap). Tata letak satu kolom di kiri + isi di
+sebelahnya, supaya layar 2318x759 dipakai bukan diberi bantalan.
+
+**Notifikasi bertumpuk** untuk loot, langkah quest, level up, dan elemen terbuka. Maksimal 4,
+animasi hanya transform + opacity (properti compositor, tidak memicu layout pass).
+
+**Blur** hanya di preset Tinggi ke atas.
+
+### Performa
+
+Yang ditambahkan ke jalur per-frame, dan kenapa tidak menurunkan FPS:
+
+| Tambahan | Biaya per frame |
+| --- | --- |
+| `tickCutscene` | langsung `return` kalau tidak ada cutscene |
+| `updateSoundtrack` | 3 perbandingan + `nightAmount` (yang sudah dihitung di frame yang sama); bus hanya dipanggil saat jawabannya BERUBAH |
+| `updatePopups` | loop paling banyak 4 elemen |
+| Notifikasi | node DOM dibuat hanya saat ada kejadian, dianimasikan compositor |
+| Scheduler musik | timer 250 ms di luar frame; ~21 node/detik di track tercepat |
+| Scheduler suasana | timer 200 ms; buffer noise di-cache per context (dulu 144k sampel per pergantian bed) |
+
+Tidak ada penambahan draw call, tidak ada material/geometri baru, tidak ada shader baru.

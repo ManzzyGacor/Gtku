@@ -64,6 +64,10 @@ src/
     entities/        HeroCore (gerak/kombo/senjata/HP), enemies (AI musuh & boss),
                      combatTuning (39 angka combat yang bisa disetel dari HP)
     combat/          elements (15 elemen + 16 status + tabel reaksi), weapons (Pedang/Busur)
+    story/           cutscene (mesin timeline, bebas renderer), cutscenes (SKRIP sebagai data)
+    audio/           engine (context + 5 bus kategori), sfx, tracks (musik sebagai data),
+                     music (scheduler + crossfade), beds (suasana sebagai data), ambient,
+                     select (aturan track/bed per situasi), lifecycle
     stats/           stats (pipeline modifier), damage (satu formula untuk SEMUA hit),
                      character (level + equipment + buff -> satu StatBlock + passive Inti Lentera)
     items/           items (8 slot, 6 rarity, katalog), inventory (grid 48 sel + equipped),
@@ -76,8 +80,8 @@ src/
                      generator sprite/tile/fx/ui/font, bake (chunk → pixmap + light mask),
                      greybox (tekstur 3D 32x32), markers (penanda quest)
   ui/                OVERLAY UI NETRAL-RENDERER (DOM): TitleScreen, Hud, Dialogue, Minimap,
-                     TouchControls, CharacterPanel (karakter + tas), SettingsPanel, DebugUi,
-                     FpsMeterView — dilarang mengimpor three
+                     TouchControls, CharacterPanel (karakter + tas), PauseMenu, CutsceneOverlay,
+                     SettingsPanel, DebugUi, FpsMeterView, safearea, fx — dilarang mengimpor three
   render3d/          SEMUA KODE THREE.JS: boot3d, Game3D, PixelRenderer (pipeline pixel),
                      IsoCamera, World3D (streaming), Combat3D, Story3D, Puzzle3D, HeroMesh3D,
                      EnemyMesh3D, NpcMesh3D, Environment, Sky, WaterSurface, InstancePool,
@@ -117,6 +121,12 @@ phaser.
 - **Angka yang masuk ke HP/damage harus dijepit** (`Number.isFinite` + `Math.max(0, …)`): satu NaN membuat
   hero/musuh tidak hidup dan tidak mati, dan tidak pernah pulih. Lihat `tests/edgecases.test.ts`.
 - Semua posisi dunia dalam piksel logis (bukan piksel layar). 1 tile = 16 px. Kamera zoom selalu 1; skala integer dilakukan CSS.
+- **Nama tokoh utama datang dari setelan pemain** (`settings.playerName`, fallback `Pengembara`).
+  Naskah di `docs/STORY.md` memanggilnya Arka, tapi setiap baris yang dibaca pemain ditulis dengan
+  placeholder `{nama}`. Jangan pernah menulis "Arka" di teks yang tampil di game.
+- **Efek layar penuh (blur) hanya di preset Tinggi ke atas** (`ui/fx.ts` `blurAllowed()`).
+- **Semua panel UI wajib menghormati safe area** lewat `var(--lm-sa*)` di CSS, atau `safeInsets()`
+  kalau memposisikan dengan JavaScript. Dijaga `tests/layout.test.ts` di 2318x759.
 - **Jangan pakai backtick di dalam komentar yang berada DI DALAM template literal** (blok CSS di
   `src/ui/*`, blok GLSL di `src/render3d/*`). Backtick-nya menutup string itu dan errornya muncul
   sebagai `TS1005: ',' expected` di baris komentar — bukan di tempat yang bisa ditebak. Sudah dua

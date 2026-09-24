@@ -135,7 +135,7 @@ chunk streaming, jumlah cahaya dinamis & bayangan dibatasi.
 | 2 | Lingkungan desa, cahaya & atmosfer, animasi rumput, air, pohon + perbaikan kamera & perluasan dunia | ✅ selesai |
 | 3 | Migrasi combat, dua senjata, sistem elemen (4 elemen) | ✅ selesai |
 | 4 | Stats, equipment, Lantern Core, inventaris, progresi | ✅ selesai |
-| 5 | Cutscene pembuka + sistem cutscene, audio, UI/HUD, menu | ⬜ |
+| 5 | Cutscene pembuka + sistem cutscene, audio, UI/HUD, menu | ✅ selesai |
 | 6 | World streaming, Download Manager, grafik AUTO lengkap | ⬜ |
 | 7 | Akun & backend, world event, optimasi performa, dokumentasi akhir | ⬜ |
 
@@ -267,7 +267,7 @@ src/
 | --- | --- |
 | ~~Musuh, kombat, damage, dua senjata, elemen~~ | ~~3~~ ✅ |
 | Stats, equipment, Lantern Core, inventaris | 4 ✅ |
-| NPC, dialog, quest, cutscene, audio, menu utama & pause, HUD lengkap | 5 |
+| NPC, dialog, quest, cutscene, audio, menu utama & pause, HUD lengkap | 5 ✅ |
 | **Save/load** (mode 3D belum menyimpan posisi; save 2D lama tidak disentuh), world streaming | 6 |
 | Akun, world event | 7 |
 

@@ -30,7 +30,7 @@ import { ELEMENTS } from '../core/combat/elements';
 import { KILLS_NEEDED } from '../core/state/GameState';
 import { Cutscene3D } from './Cutscene3D';
 import { CUTSCENES, playerName } from '../core/story/cutscenes';
-import { ambientFor, bus, fadeFor, musicFor } from '../core/audio';
+import { ambient as ambientPlayer, ambientFor, audioReady, bus, fadeFor, music, musicFor } from '../core/audio';
 import type { ActorSpec, FxSpec } from '../core/story/cutscene';
 import { Puzzle3D } from './Puzzle3D';
 import { Story3D } from './Story3D';
@@ -1113,6 +1113,10 @@ export class Game3D {
       `atmosfer: jam ${timeLabel(this.dayTime)}   malam ${(nightAmount(this.dayTime) * 100).toFixed(0)}%   ` +
         `hutan ${(this.forestWeight() * 100).toFixed(0)}%   jendela menyala ${s.windows}`,
       `outline tersedia: ${this.pixels.canOutline ? 'ya' : 'tidak'}`,
+      `audio: musik ${music.nowPlaying || '-'}   suasana ${ambientPlayer.playing || '-'}   ` +
+        `unlocked ${audioReady() ? 'ya' : 'belum'}`,
+      `cutscene: ${this.cutscene.active ? `${this.cutscene.id} jalan` : 'tidak'}   ` +
+        `sudah ditonton: ${this.state.cutscenesSeen.join(', ') || '-'}`,
       `hero: (${Math.round(this.hero.x)}, ${Math.round(this.hero.y)}) hp ${this.hero.hp}/${this.hero.maxHp} state ${this.hero.state}`,
       `senjata: ${this.hero.weapon}${this.hero.isRanged ? ` (charge ${(this.hero.charge * 100).toFixed(0)}%)` : ` (combo ${this.hero.combo})`}`,
       `musuh hidup: ${this.combat.enemyCount}   status aktif: ${this.combat.statusSummary()}   reaksi terdaftar: ${this.combat.reactionCount}`,
