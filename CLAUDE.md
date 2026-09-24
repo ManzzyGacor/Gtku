@@ -117,6 +117,10 @@ phaser.
 - **Angka yang masuk ke HP/damage harus dijepit** (`Number.isFinite` + `Math.max(0, …)`): satu NaN membuat
   hero/musuh tidak hidup dan tidak mati, dan tidak pernah pulih. Lihat `tests/edgecases.test.ts`.
 - Semua posisi dunia dalam piksel logis (bukan piksel layar). 1 tile = 16 px. Kamera zoom selalu 1; skala integer dilakukan CSS.
+- **Jangan pakai backtick di dalam komentar yang berada DI DALAM template literal** (blok CSS di
+  `src/ui/*`, blok GLSL di `src/render3d/*`). Backtick-nya menutup string itu dan errornya muncul
+  sebagai `TS1005: ',' expected` di baris komentar — bukan di tempat yang bisa ditebak. Sudah dua
+  kali kejadian. Tulis `position:fixed`, bukan backtick-position:fixed-backtick.
 - Jangan memakai `Math.random()` untuk hal yang harus konsisten (worldgen, variasi tile): pakai `core/rng.ts` (seeded).
 - Satu fitur per langkah: `npm run build` hijau → commit jelas → `git push origin main` → update `docs/PROGRESS.md`.
 - Pesan commit diakhiri baris `Co-Authored-By` sesuai instruksi harness.

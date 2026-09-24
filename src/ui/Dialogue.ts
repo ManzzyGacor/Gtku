@@ -24,8 +24,8 @@ export interface DialogueSpec {
 }
 
 const CSS = `
-.lm-dlg { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 72;
-  width: min(560px, calc(100vw - 20px)); display: none; padding: 9px 11px 11px;
+.lm-dlg { position: fixed; left: 50%; bottom: calc(10px + var(--lm-sab, 0px)); transform: translateX(-50%); z-index: 72;
+  width: min(560px, calc(100vw - 20px - var(--lm-sal, 0px) - var(--lm-sar, 0px))); display: none; padding: 9px 11px 11px;
   background: linear-gradient(180deg, rgba(26,20,48,0.95), rgba(15,11,28,0.96));
   border: 1px solid rgba(255,217,138,0.5); border-radius: 6px;
   font: 13px/1.5 ui-monospace, monospace; color: #f2e2c2; pointer-events: auto; touch-action: manipulation; }

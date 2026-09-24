@@ -18,8 +18,9 @@ const CSS = `
 .lm-panel { background: linear-gradient(180deg, rgba(26,20,48,0.86), rgba(15,11,28,0.86));
   border: 1px solid rgba(154,140,214,0.45); border-radius: 5px; box-shadow: 0 2px 0 rgba(9,7,18,0.5); }
 
-/* character + vitals, top left */
-.lm-vitals { position: absolute; left: 6px; top: 6px; display: flex; gap: 6px; padding: 5px 7px 6px; align-items: center; }
+/* character + vitals, top left, clear of the notch */
+.lm-vitals { position: absolute; left: calc(6px + var(--lm-sal, 0px)); top: calc(6px + var(--lm-sat, 0px));
+  display: flex; gap: 6px; padding: 5px 7px 6px; align-items: center; }
 .lm-face { position: relative; width: 26px; height: 26px; border-radius: 4px; flex: 0 0 auto;
   background: linear-gradient(160deg, #3e5dc1, #1c2354); border: 1px solid rgba(255,248,230,0.5);
   display: flex; align-items: center; justify-content: center; font-size: 15px; }
@@ -38,9 +39,15 @@ const CSS = `
 .lm-fill.en { background: linear-gradient(180deg, #8befeb, #2673ac); }
 .lm-bar > span { position: absolute; inset: 0; text-align: center; font-size: 9px; line-height: 9px; }
 
-/* quest objective, top centre */
-.lm-quest { position: absolute; left: 50%; top: 6px; transform: translateX(-50%); max-width: 46vw;
-  padding: 4px 9px; white-space: pre-line; }
+/*
+ * Quest objective, top centre.
+ *
+ * The width limit is in ch rather than vw: on a 2318px-wide phone 46vw is over a thousand pixels of
+ * single-line text, which nobody can read while playing. The clamp also keeps it from colliding
+ * with the vitals on the left and the minimap on the right when the text size is turned up.
+ */
+.lm-quest { position: absolute; left: 50%; top: calc(6px + var(--lm-sat, 0px)); transform: translateX(-50%);
+  max-width: min(42ch, 40vw); padding: 4px 9px; white-space: pre-line; text-align: center; }
 .lm-quest b { color: #ffd98a; font-weight: normal; }
 
 /* boss bar, just under the objective */
@@ -55,11 +62,24 @@ const CSS = `
   font-size: 22px; letter-spacing: 2px; color: #ffd98a; opacity: 0; transition: opacity 320ms linear; }
 .lm-toast { position: absolute; left: 50%; bottom: 86px; transform: translateX(-50%);
   padding: 4px 10px; opacity: 0; transition: opacity 220ms linear; max-width: 70vw; text-align: center; }
-.lm-hint { position: absolute; left: 50%; bottom: 58px; transform: translateX(-50%);
+.lm-hint { position: absolute; left: 50%; bottom: calc(58px + var(--lm-sab, 0px)); transform: translateX(-50%);
   padding: 3px 9px; opacity: 0; transition: opacity 140ms linear; color: #ffe9a8; }
 
+/*
+ * The two buttons in the top-right strip, next to the gear and the bag.
+ *
+ * They are position:fixed and outside the pointer-events:none HUD layer, because everything
+ * else in the HUD must let taps fall through to the game underneath.
+ */
+.lm-pausebtn { position: fixed; right: calc(120px + var(--lm-sar, 0px)); top: calc(4px + var(--lm-sat, 0px));
+  z-index: 80; pointer-events: auto; width: 34px; height: 34px; padding: 0;
+  border: 1px solid #6a7094; border-radius: 17px; background: rgba(20,16,38,0.8); color: #e7e0ff;
+  font: 14px/1 ui-monospace, monospace; cursor: pointer; touch-action: manipulation; }
+.lm-pausebtn:active { background: #ffb82e; color: #1a1430; }
+
 /* fullscreen, the only thing here you can tap */
-.lm-full { position: fixed; right: 44px; top: 4px; z-index: 80; pointer-events: auto;
+.lm-full { position: fixed; right: calc(44px + var(--lm-sar, 0px)); top: calc(4px + var(--lm-sat, 0px));
+  z-index: 80; pointer-events: auto;
   width: 34px; height: 34px; padding: 0; border: 1px solid #6a7094; border-radius: 17px;
   background: rgba(20,16,38,0.8); color: #ffd98a; font: 15px/1 ui-monospace, monospace;
   cursor: pointer; touch-action: manipulation; }
@@ -101,6 +121,9 @@ export class Hud {
   private toastEl: HTMLDivElement;
   private hintEl: HTMLDivElement;
   private fullBtn: HTMLButtonElement;
+  private pauseBtn: HTMLButtonElement;
+  /** Tapped the pause button. Wired by the game to open the pause menu. */
+  onPause: () => void = () => undefined;
   private floaters: Floater[] = [];
   private floaterNext = 0;
 
@@ -187,7 +210,11 @@ export class Hud {
     this.fullBtn.setAttribute('aria-label', 'Layar penuh');
     onTap(this.fullBtn, () => void this.toggleFullscreen());
 
-    parent.append(this.root, this.fullBtn);
+    this.pauseBtn = el('button', {}, '\u2630');
+    this.pauseBtn.className = 'lm-pausebtn';
+    this.pauseBtn.title = 'Jeda (Esc)';
+    onTap(this.pauseBtn, () => this.onPause());
+    parent.append(this.root, this.fullBtn, this.pauseBtn);
     this.applyTextScale();
   }
 
@@ -200,6 +227,7 @@ export class Hud {
   setVisible(on: boolean): void {
     this.root.style.visibility = on ? 'visible' : 'hidden';
     this.fullBtn.style.display = on ? 'block' : 'none';
+    this.pauseBtn.style.display = on ? 'block' : 'none';
   }
 
   /** The text-size setting applies to the HUD too. */
@@ -360,5 +388,6 @@ export class Hud {
   destroy(): void {
     this.root.remove();
     this.fullBtn.remove();
+    this.pauseBtn.remove();
   }
 }

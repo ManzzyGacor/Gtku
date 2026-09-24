@@ -10,6 +10,7 @@ import { Game3D } from './Game3D';
 import { resumeAudio, suspendAudio } from '../core/audio';
 import { loadCombatTuning } from '../core/entities/combatTuning';
 import { Lifecycle } from '../core/lifecycle';
+import { invalidateInsets } from '../ui/safearea';
 import { recordError } from '../core/errors';
 import type { DebugUi } from '../ui/DebugUi';
 import { TouchControls } from '../ui/TouchControls';
@@ -61,8 +62,22 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
 
   const wire = (g: Game3D): void => {
     g.onWeaponState = (next, charge) => controls.setWeaponState(next, charge);
-    // The touch controls get out of the way while a cutscene plays, and come back after.
+    // The touch controls get out of the way while a cutscene or the pause menu is up.
     g.onCutsceneChange = (playing) => controls.setVisible(!playing);
+    g.pause.onToggle = ((original) => (open: boolean) => {
+      original(open);
+      controls.setVisible(!open);
+    })(g.pause.onToggle);
+    g.onOpenSettings = () => debug.openSettings();
+    /*
+     * Leaving to the title screen.
+     *
+     * A reload rather than tearing the world down and building a new one: the save is already
+     * written by the time this runs, and a reload is the one teardown that cannot leave a stray
+     * listener, a running scheduler or a leaked GPU buffer behind. It is also what the player
+     * expects "keluar" to do.
+     */
+    g.onQuit = () => location.reload();
     debug.attach(g.diagnostics());
     g.start();
   };
@@ -110,6 +125,8 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
       },
       save: () => game.saveNow(true),
       resize: () => {
+        // the insets change with rotation, so the cache has to go before anything lays out
+        invalidateInsets();
         game.resize();
         controls.layout();
       },

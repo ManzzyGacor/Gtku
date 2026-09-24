@@ -27,7 +27,8 @@ const CSS = `
 .lm-sheet.on { display: flex; }
 
 /* header: tabs on the left, close on the right */
-.lm-sh-top { display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+.lm-sh-top { display: flex; align-items: center; gap: 6px;
+  padding: calc(6px + var(--lm-sat, 0px)) calc(8px + var(--lm-sar, 0px)) 6px calc(8px + var(--lm-sal, 0px));
   border-bottom: 1px solid rgba(154,140,214,0.35); flex: 0 0 auto; }
 .lm-tab { min-width: 92px; min-height: 36px; padding: 0 12px; border-radius: 4px; cursor: pointer;
   font: inherit; letter-spacing: 2px; color: #b9b0d8; touch-action: manipulation;
@@ -46,7 +47,7 @@ const CSS = `
 
 /* body scrolls; the two panes sit side by side when there is room */
 .lm-sh-body { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  padding: 8px; display: flex; gap: 10px; align-items: flex-start; }
+  padding: 8px calc(8px + var(--lm-sar, 0px)) 8px calc(8px + var(--lm-sal, 0px)); display: flex; gap: 10px; align-items: flex-start; }
 .lm-sh-body.one { display: block; }
 .lm-col { flex: 1 1 0; min-width: 0; }
 .lm-h { color: #ffd98a; letter-spacing: 2px; margin: 0 0 5px; font-size: 11px; }
@@ -93,7 +94,8 @@ const CSS = `
 .lm-empty { color: #6a7094; padding: 10px 4px; }
 
 /* detail sheet, pinned to the bottom where the thumb is */
-.lm-detail { flex: 0 0 auto; border-top: 1px solid rgba(154,140,214,0.4); padding: 7px 9px 9px;
+.lm-detail { flex: 0 0 auto; border-top: 1px solid rgba(154,140,214,0.4);
+  padding: 7px calc(9px + var(--lm-sar, 0px)) calc(9px + var(--lm-sab, 0px)) calc(9px + var(--lm-sal, 0px));
   background: linear-gradient(180deg, rgba(30,24,56,0.97), rgba(14,11,28,0.98)); display: none; }
 .lm-detail.on { display: block; }
 .lm-d-name { font-size: 13px; }
@@ -110,7 +112,7 @@ const CSS = `
 .lm-btn2.danger { color: #ffc0c0; border-color: rgba(255,120,140,0.5); }
 
 /* the bag button on the HUD */
-.lm-bag-btn { position: fixed; right: 82px; top: 4px; z-index: 80; pointer-events: auto;
+.lm-bag-btn { position: fixed; right: calc(82px + var(--lm-sar, 0px)); top: calc(4px + var(--lm-sat, 0px)); z-index: 80; pointer-events: auto;
   width: 34px; height: 34px; padding: 0; border-radius: 17px; cursor: pointer;
   background: rgba(20,16,38,0.8); border: 1px solid #6a7094; color: #ffd98a;
   font: 15px/1 ui-monospace, monospace; touch-action: manipulation; }
@@ -232,6 +234,13 @@ export class CharacterPanel {
   toggle(): void {
     if (this.open) this.hide();
     else this.showPanel();
+  }
+
+  /** Open straight onto a tab — the pause menu's Inventaris and Karakter entries. */
+  openTab(tab: 'char' | 'bag'): void {
+    this.tab = tab;
+    this.selection = null;
+    this.showPanel();
   }
 
   showPanel(): void {

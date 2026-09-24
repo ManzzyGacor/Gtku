@@ -13,7 +13,7 @@ import { PerfMeter } from '../core/perf';
 import { settings } from '../core/settings';
 import { DAY_SECONDS, gradeAt, nightAmount, smooth, timeLabel } from '../core/systems/daynight';
 import { CAVE_X0, FOREST_X0 } from '../core/world/areas';
-import { HeroCore, HERO_STATS, type HeroEvent, type HeroInput } from '../core/entities/HeroCore';
+import { ATTACKS, HeroCore, HERO_STATS, type HeroEvent, type HeroInput } from '../core/entities/HeroCore';
 import { WEAPONS } from '../core/combat/weapons';
 import { GameState } from '../core/state/GameState';
 import { loadGame, saveGame } from '../core/save';
@@ -24,6 +24,10 @@ import { Hud, type Projector } from '../ui/Hud';
 import { Minimap } from '../ui/Minimap';
 import { CharacterPanel } from '../ui/CharacterPanel';
 import { CutsceneOverlay } from '../ui/CutsceneOverlay';
+import { PauseMenu, type InfoLine } from '../ui/PauseMenu';
+import { BOW_SHOTS } from '../core/combat/weapons';
+import { ELEMENTS } from '../core/combat/elements';
+import { KILLS_NEEDED } from '../core/state/GameState';
 import { Cutscene3D } from './Cutscene3D';
 import { CUTSCENES, playerName } from '../core/story/cutscenes';
 import { ambientFor, bus, fadeFor, musicFor } from '../core/audio';
@@ -76,6 +80,7 @@ export class Game3D {
   readonly sheet: CharacterPanel;
   /** The cutscene director (Batch 5). Null-safe: the game runs identically with no scene playing. */
   readonly cutscene: Cutscene3D;
+  readonly pause: PauseMenu;
   private readonly csOverlay: CutsceneOverlay;
   readonly story: Story3D;
   readonly puzzle: Puzzle3D;
@@ -184,8 +189,38 @@ export class Game3D {
     this.csOverlay.onAdvance = () => this.cutscene.advance();
     this.csOverlay.onSkip = () => this.cutscene.skip();
 
-    // `I` / `Tab` on a keyboard; the bag button on a phone.
-    input.onMenu = () => this.sheet.toggle();
+    this.pause = new PauseMenu({
+      resume: () => undefined,
+      openSheet: (tab) => this.sheet.openTab(tab),
+      openSettings: () => this.onOpenSettings(),
+      saveAndQuit: () => {
+        this.saveNow(true);
+        this.onQuit();
+      },
+      weapons: () => this.weaponLines(),
+      skills: () => this.skillLines(),
+      quest: () => this.questLines(),
+      map: () => ({
+        atlas: this.minimap.worldAtlas,
+        heroTx: this.hero.x / 16,
+        heroTy: this.hero.y / 16,
+        marks: this.story.mapMarks().map((m) => ({ tx: m.x / 16, ty: m.y / 16, color: m.color })),
+      }),
+    });
+    this.hud.onPause = () => this.pause.toggle();
+    this.pause.onToggle = (open) => {
+      this.paused = open || this.sheet.isOpen;
+      input.enabled = !this.paused && !this.dialogue.open;
+      if (open) input.reset();
+      this.hud.setVisible(!open);
+      if (!open) this.saveNow();
+    };
+
+    // `I` / `Tab` for the sheet, `Escape` / `P` for the pause menu; buttons on a phone.
+    input.onMenu = (which) => {
+      if (which === 'pause') this.pause.toggle();
+      else this.sheet.toggle();
+    };
     // While the sheet is open the hero holds still and the world stops, exactly as during a
     // dialogue. Reading your stats should not be something enemies can punish.
     this.sheet.onToggle = (open) => {
@@ -538,6 +573,69 @@ export class Game3D {
     this.camera.tick(dt);
     if (!this.cutscene.update(dt)) this.endCutscene();
   }
+
+  // ───────────────────────── pause menu content ─────────────────────────
+
+  /**
+   * Senjata: the two slots the hero carries, what the sword's combo is worth, and what each draw
+   * of the bow does — read from the live `ATTACKS`/`BOW_SHOTS` tables, so a number changed in the
+   * combat tuning panel shows up here too.
+   */
+  private weaponLines(): InfoLine[] {
+    const held = this.hero.weapon;
+    const lines: InfoLine[] = [];
+    for (const slot of [0, 1] as const) {
+      const id = this.hero.loadout[slot];
+      const def = WEAPONS[id];
+      lines.push({ label: `Slot ${slot + 1}: ${def.name}`, value: id === held ? 'DIPEGANG' : 'siap' });
+    }
+    const swordDamage = ATTACKS.map((a: { dmg: number }) => a.dmg).join(' / ');
+    lines.push({ label: 'Kombo pedang', value: swordDamage, note: 'Tiga tebasan ringan; tahan tombol untuk serangan berat (angka terakhir).' });
+    for (const shot of BOW_SHOTS) {
+      lines.push({ label: shot.name, value: `${shot.dmg} dmg, tembus ${shot.pierce}`, note: shot.needsCharge > 0 ? `Butuh tarikan ${(shot.needsCharge * 100).toFixed(0)}%` : 'Tanpa tarikan' });
+    }
+    const element = this.character.coreElement;
+    lines.push({ label: 'Elemen serangan', value: element ? ELEMENTS[element].name : 'tidak ada', note: element ? undefined : 'Pasang Inti Lentera di Karakter untuk memberi elemen pada seranganmu.' });
+    const locked = (Object.keys(WEAPONS) as (keyof typeof WEAPONS)[]).filter((id) => !WEAPONS[id].implemented);
+    for (const id of locked) lines.push({ label: WEAPONS[id].name, value: 'belum ada', dim: true });
+    return lines;
+  }
+
+  /**
+   * Skill: what the hero can actually do, with the numbers the combat code uses.
+   *
+   * There is one skill, so this lists one skill. Filling the page with locked slots would look
+   * like content; saying there is one and it costs seven seconds is the truth.
+   */
+  private skillLines(): InfoLine[] {
+    const ready = this.hero.skillReady;
+    return [
+      { label: 'Ledakan Lentera', value: ready ? 'siap' : `${this.hero.skillCd.toFixed(1)} dtk` },
+      { label: 'Damage', value: `${HERO_STATS.skillDmg}` },
+      { label: 'Jangkauan', value: `${HERO_STATS.skillRadius} px` },
+      { label: 'Jeda', value: `${HERO_STATS.skillCooldown} dtk` },
+      { label: 'Gerak berguling', value: `${HERO_STATS.rollInvuln.toFixed(2)} dtk kebal`, note: 'Berguling membatalkan seranganmu dan memberi kebal singkat.' },
+      { label: '', value: '', note: 'Skill elemen, weapon skill, dan ultimate belum diimplementasikan — rencananya di batch berikutnya.' },
+    ];
+  }
+
+  /** Quest: the live tracker, plus what the hero has to show for it. */
+  private questLines(): InfoLine[] {
+    const q = this.story.questText();
+    const lines: InfoLine[] = [{ label: q.title, value: `tahap ${this.state.quest.stage}/4` }];
+    for (const line of q.lines) lines.push({ label: line, value: '' });
+    lines.push({ label: 'Monster hutan', value: `${this.state.quest.kills}/${KILLS_NEEDED}` });
+    lines.push({ label: 'Puzzle batu', value: this.state.puzzleSolved ? 'selesai' : 'belum' });
+    lines.push({ label: 'Kolosus Kelam', value: this.state.bossDefeated ? 'tumbang' : 'masih hidup' });
+    lines.push({ label: 'Lentera Agung', value: this.state.flags.lanternLit ? 'menyala' : 'padam' });
+    lines.push({ label: 'Level', value: `${this.character.level} (${this.character.exp}/${this.character.expNeeded || '-'} EXP)` });
+    return lines;
+  }
+
+  /** Set by the boot code: open the settings overlay from the pause menu. */
+  onOpenSettings: () => void = () => undefined;
+  /** Set by the boot code: save is already done, take the player back to the title screen. */
+  onQuit: () => void = () => undefined;
 
   /** Set by the boot code so the touch controls can hide while a scene plays. */
   onCutsceneChange: (playing: boolean) => void = () => undefined;
@@ -987,6 +1085,7 @@ export class Game3D {
     this.puzzle.dispose();
     this.minimap.destroy();
     this.csOverlay.destroy();
+    this.pause.destroy();
     this.sheet.destroy();
     this.dialogue.destroy();
     this.hud.destroy();

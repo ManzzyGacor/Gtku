@@ -14,6 +14,7 @@ import { unlockAudio } from '../core/audio';
 import { input, type Action } from '../core/input';
 import { settings } from '../core/settings';
 import { el, injectStyle } from './dom';
+import { safeInsets } from './safearea';
 
 const BASE_R = 34;
 const KNOB_R = 15;
@@ -105,30 +106,55 @@ export class TouchControls {
     return BASE_R * settings.get('stickScale');
   }
 
-  /** Put the stick back at its resting position and size. */
+  /**
+   * Put the stick back at its resting position and size, and place the action buttons.
+   *
+   * Everything here is clamped into the safe area rather than to the raw window: on a phone in
+   * landscape the notch is on one side and the gesture bar along the bottom, so a button at
+   * "8px from the right" can end up under a camera cutout, and a joystick on the bottom edge
+   * fights the system's swipe-up. The insets also mean the layout differs left-to-right, which is
+   * why each edge is computed separately instead of using one margin.
+   */
   layout(): void {
+    const safe = safeInsets();
     const w = window.innerWidth;
     const h = window.innerHeight;
     const scale = settings.get('stickScale');
     const r = BASE_R * scale;
     const k = KNOB_R * scale;
+    const minX = safe.left + r + 6;
+    const maxX = Math.max(minX, w * STICK_ZONE - r);
+    const minY = safe.top + r + 6;
+    const maxY = Math.max(minY, h - safe.bottom - r - 6);
     this.center = {
-      x: Math.max(r + 6, Math.min(w * STICK_ZONE - r, w * settings.get('stickX'))),
-      y: Math.max(r + 6, Math.min(h - r - 6, h * settings.get('stickY'))),
+      x: Math.max(minX, Math.min(maxX, w * settings.get('stickX'))),
+      y: Math.max(minY, Math.min(maxY, h * settings.get('stickY'))),
     };
     Object.assign(this.base.style, { width: `${r * 2}px`, height: `${r * 2}px` });
     Object.assign(this.knob.style, { width: `${k * 2}px`, height: `${k * 2}px` });
     this.place(this.center.x, this.center.y, 0, 0);
     this.setIdle(true);
 
+    /*
+     * Action buttons, anchored to the bottom-right *inside* the safe area.
+     *
+     * The offsets are scaled by the player's button size, so turning the buttons up moves them
+     * further from the corner as well as making them bigger — otherwise a 1.8x button hangs off
+     * the edge of the screen. Each one is then clamped so the whole circle stays on screen even
+     * at the largest size on the shortest phone.
+     */
     const bs = settings.get('buttonScale');
+    const rightEdge = w - safe.right;
+    const bottomEdge = h - safe.bottom;
     for (const b of this.buttons) {
       const br = b.r * bs;
+      const cx = Math.min(rightEdge - br - 4, Math.max(w * 0.55, rightEdge - b.ox * bs));
+      const cy = Math.min(bottomEdge - br - 4, Math.max(safe.top + br + 4, bottomEdge - b.oy * bs));
       Object.assign(b.node.style, {
         width: `${br * 2}px`,
         height: `${br * 2}px`,
-        left: `${w - b.ox * bs}px`,
-        top: `${h - b.oy * bs}px`,
+        left: `${cx}px`,
+        top: `${cy}px`,
         fontSize: `${Math.max(8, Math.round(9 * bs))}px`,
       });
     }

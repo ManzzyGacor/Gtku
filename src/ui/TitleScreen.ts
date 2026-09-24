@@ -41,6 +41,14 @@ const CSS = `
 .lm-title-input { width: min(280px, 74vw); min-height: 44px; padding: 0 12px; font: inherit;
   font-size: 15px; text-align: center; letter-spacing: 2px; border-radius: 5px; color: #fff8e6;
   background: rgba(12,9,26,0.9); border: 1px solid rgba(255,217,138,0.5); }
+/* Akun / Kredit: a panel that slides up over the menu */
+.lm-title-panel { display: none; flex-direction: column; gap: 12px; align-items: center;
+  width: min(560px, 86vw); padding: 14px 16px; border-radius: 6px; text-align: left;
+  background: rgba(14,10,28,0.92); border: 1px solid rgba(154,140,214,0.4);
+  animation: lm-rise-in 220ms ease both; }
+.lm-title-panel.on { display: flex; }
+.lm-title-panel-body { white-space: pre-line; color: #d9cfff; font-size: 12px; line-height: 1.6; }
+@keyframes lm-rise-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 /* a few embers drifting up, so the screen is not static */
 .lm-ember { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #ffb04a;
   animation: lm-rise linear infinite; opacity: 0; }
@@ -56,11 +64,17 @@ export interface TitleChoice {
   continueGame: boolean;
 }
 
+/** The main menu's own panel, for Pengaturan / Akun / Kredit. */
+export interface TitleHooks {
+  /** Open the settings overlay (the same one the gear opens in game). */
+  settings?(): void;
+}
+
 export class TitleScreen {
   private root: HTMLDivElement;
   private resolve: ((c: TitleChoice) => void) | null = null;
 
-  constructor(parent: HTMLElement = document.body) {
+  constructor(parent: HTMLElement = document.body, private readonly hooks: TitleHooks = {}) {
     injectStyle('lm-ui-title', CSS);
     this.root = el('div');
     this.root.className = 'lm-title';
@@ -97,6 +111,49 @@ export class TitleScreen {
       this.askName();
     });
     menu.appendChild(fresh);
+
+    /*
+     * The rest of the main menu (docs/OVERHAUL.md §4): Pengaturan, Akun, Kredit.
+     *
+     * Akun is honest about itself. The account system is Batch 7, and the plan is explicit that
+     * nothing here may pretend to be connected — so the button exists, says what it will be, and
+     * says when. A greyed-out button with no explanation just looks broken.
+     */
+    const settingsBtn = el('button', {}, 'PENGATURAN');
+    settingsBtn.className = 'lm-title-btn ghost';
+    onTap(settingsBtn, () => {
+      unlockAudio();
+      this.hooks.settings?.();
+    });
+    menu.appendChild(settingsBtn);
+
+    const account = el('button', {}, 'AKUN');
+    account.className = 'lm-title-btn ghost';
+    onTap(account, () => {
+      this.showPanel(
+        'AKUN',
+        'Belum tersedia.\n\nLogin, daftar, dan nama karakter yang tersimpan di server dijadwalkan di Batch 7. ' +
+          'Sampai itu ada, progresmu disimpan di HP ini saja \u2014 lewat penyimpanan browser, bukan akun. ' +
+          'Membersihkan data situs akan menghapusnya.',
+      );
+    });
+    menu.appendChild(account);
+
+    const credits = el('button', {}, 'KREDIT');
+    credits.className = 'lm-title-btn ghost';
+    onTap(credits, () => {
+      this.showPanel(
+        'KREDIT',
+        'LENTERA MALAM\n\n' +
+          'Kode, desain, dan seluruh pixel art dibuat khusus untuk proyek ini.\n' +
+          'Semua gambar dihasilkan dari kode (src/art) dengan palet original.\n' +
+          'Musik dan efek suara disintesis WebAudio (src/core/audio).\n' +
+          'Cerita, nama, dan karakter original \u2014 naskahnya di docs/STORY.md.\n\n' +
+          'Library: Three.js (MIT), TypeScript, Vite.\n' +
+          'Belum ada aset pihak ketiga. Daftar lengkapnya di CREDITS.md.',
+      );
+    });
+    menu.appendChild(credits);
 
     /*
      * Naming the character.
@@ -137,9 +194,31 @@ export class TitleScreen {
       this.root.appendChild(ember);
     }
 
-    this.root.append(name, sub, menu, this.nameBox, foot);
+    this.panel = el('div');
+    this.panel.className = 'lm-title-panel';
+    this.root.append(name, sub, menu, this.nameBox, this.panel, foot);
     parent.appendChild(this.root);
     this.menu = menu;
+  }
+
+  /** A simple text panel over the title, for Akun and Kredit. */
+  private showPanel(title: string, body: string): void {
+    this.menu.style.display = 'none';
+    this.panel.innerHTML = '';
+    const h = el('div', {}, title);
+    h.className = 'lm-title-sub';
+    h.style.color = '#ffd98a';
+    h.style.letterSpacing = '3px';
+    const text = el('div', {}, body);
+    text.className = 'lm-title-panel-body';
+    const back = el('button', {}, 'KEMBALI');
+    back.className = 'lm-title-btn ghost';
+    onTap(back, () => {
+      this.panel.classList.remove('on');
+      this.menu.style.display = 'flex';
+    });
+    this.panel.append(h, text, back);
+    this.panel.classList.add('on');
   }
 
   private askName(): void {
@@ -163,6 +242,7 @@ export class TitleScreen {
   private menu: HTMLDivElement;
   private nameBox: HTMLDivElement;
   private nameInput: HTMLInputElement;
+  private panel: HTMLDivElement;
   private status: HTMLDivElement | null = null;
 
   private pick(continueGame: boolean): void {

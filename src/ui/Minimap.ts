@@ -41,7 +41,8 @@ export interface MapMark {
 }
 
 const CSS = `
-.lm-map { position: fixed; right: 6px; top: 44px; z-index: 66; pointer-events: none;
+.lm-map { position: fixed; right: calc(6px + var(--lm-sar, 0px)); top: calc(44px + var(--lm-sat, 0px));
+  z-index: 66; pointer-events: none;
   padding: 3px; border-radius: 5px;
   background: linear-gradient(180deg, rgba(26,20,48,0.9), rgba(15,11,28,0.9));
   border: 1px solid rgba(154,140,214,0.45); }
@@ -78,6 +79,16 @@ export class Minimap {
     this.areaLabel.className = 'lm-map-area';
     this.box.append(this.canvas, this.areaLabel);
     parent.appendChild(this.box);
+  }
+
+  /**
+   * The whole world painted once, at one pixel per tile.
+   *
+   * Exposed so the pause menu's full map can draw the same image scaled up rather than walking
+   * 256x128 tiles again: the atlas is built at construction and never changes.
+   */
+  get worldAtlas(): HTMLCanvasElement {
+    return this.atlas;
   }
 
   private paintAtlas(): void {

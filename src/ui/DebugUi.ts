@@ -42,6 +42,11 @@ export class DebugUi {
   }
 
   /** The active renderer calls this once it is running. */
+  /** Open the settings overlay from somewhere else (the pause menu's Pengaturan entry). */
+  openSettings(): void {
+    this.panel.setOpen(true);
+  }
+
   attach(source: DiagnosticsSource): void {
     this.source = source;
     if (this.panel.open) source.setPaused(true);

@@ -15,10 +15,14 @@
  * inventory in docs/PROGRESS.md and the tag `v0.2-2d-final` if any of it is ever needed again.
  */
 import { installErrorOverlay, recordError } from './core/errors';
+import { safeInsets } from './ui/safearea';
 import { ensureDebugUi } from './ui/DebugUi';
 import { TitleScreen } from './ui/TitleScreen';
 
 installErrorOverlay();
+// Resolve the notch/rounded-corner insets once, up front: every panel's CSS reads the custom
+// properties this installs, and the touch controls read the numbers.
+safeInsets();
 
 // The settings menu, FPS counter and error panel live outside the canvas so they keep working
 // unchanged while the renderer underneath changes (docs/OVERHAUL.md §7).
@@ -35,7 +39,7 @@ const host = document.getElementById('game') ?? document.body;
 
 async function boot(): Promise<void> {
   document.getElementById('boot-msg')?.remove();
-  const title = new TitleScreen();
+  const title = new TitleScreen(document.body, { settings: () => debug.openSettings() });
   // Start the download now, not after the tap: by the time anyone reads the menu it is usually in.
   const loading = import('./render3d/boot3d');
   const choice = await title.choice();

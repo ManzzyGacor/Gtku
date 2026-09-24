@@ -124,7 +124,8 @@ const CSS = `
 .lm-ov { position: fixed; inset: 0; z-index: 85; display: none; background: rgba(9, 7, 18, 0.72);
          font: 13px/1.45 ui-monospace, monospace; color: #e7e0ff; -webkit-tap-highlight-color: transparent; }
 .lm-ov.on { display: flex; align-items: stretch; justify-content: center; }
-.lm-card { width: 100%; max-width: 460px; margin: 8px; display: flex; flex-direction: column;
+.lm-card { width: 100%; max-width: 460px; display: flex; flex-direction: column;
+           margin: calc(8px + var(--lm-sat, 0px)) calc(8px + var(--lm-sar, 0px)) calc(8px + var(--lm-sab, 0px)) calc(8px + var(--lm-sal, 0px));
            background: rgba(20, 16, 38, 0.95); border: 1px solid #3a2f5e; border-radius: 6px; overflow: hidden; }
 .lm-top { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #3a2f5e; }
 .lm-title { flex: 1; color: #ffd98a; letter-spacing: 1px; font-size: 14px; }
@@ -136,7 +137,8 @@ const CSS = `
 .lm-hint { display: block; color: #8189a8; font-size: 10.5px; }
 .lm-val { min-width: 92px; text-align: center; color: #ffe9a8; }
 .lm-btn { border: 1px solid #6a7094; background: #241c44; color: #e7e0ff; border-radius: 4px;
-          padding: 5px 9px; min-width: 34px; font: inherit; cursor: pointer; touch-action: manipulation; }
+          padding: 5px 9px; min-width: 40px; min-height: 40px; font: inherit; cursor: pointer;
+          touch-action: manipulation; }
 .lm-btn:active { background: #ffb82e; color: #1a1430; }
 .lm-btn.wide { min-width: 68px; }
 .lm-locked { opacity: 0.5; }
@@ -144,7 +146,7 @@ const CSS = `
 .lm-note { padding: 8px 10px; color: #8189a8; font-size: 10.5px; border-top: 1px solid #3a2f5e; }
 .lm-dump { margin: 0; padding: 8px 10px; white-space: pre-wrap; word-break: break-word;
            font-size: 11px; color: #cfc6ff; background: #0f0b1c; max-height: 46vh; overflow: auto; }
-.lm-gear { position: fixed; right: 4px; top: 4px; z-index: 80; width: 34px; height: 34px; padding: 0;
+.lm-gear { position: fixed; right: calc(4px + var(--lm-sar, 0px)); top: calc(4px + var(--lm-sat, 0px)); z-index: 80; width: 34px; height: 34px; padding: 0;
            border: 1px solid #6a7094; background: rgba(20, 16, 38, 0.8); color: #ffd98a; border-radius: 17px;
            font: 17px/1 ui-monospace, monospace; cursor: pointer; touch-action: manipulation; }
 `;

@@ -46,10 +46,11 @@ export class InputHub {
   lastDevice: 'keyboard' | 'touch' = 'keyboard';
   now: () => number = () => performance.now();
   /**
-   * Keys that open UI rather than driving the hero (`I`/`Tab` for the character sheet). The game
-   * sets this; the hub only routes the key, so `src/core` still knows nothing about the panels.
+   * Keys that open UI rather than driving the hero: `I`/`Tab` for the character sheet, `Escape`/`P`
+   * for the pause menu. The game sets this; the hub only routes the key, so `src/core` still knows
+   * nothing about the panels themselves.
    */
-  onMenu: (which: 'sheet') => void = () => undefined;
+  onMenu: (which: 'sheet' | 'pause') => void = () => undefined;
 
   constructor(target: Window | null = typeof window !== 'undefined' ? window : null) {
     target?.addEventListener('keydown', (e) => this.onKey(e, true));
@@ -69,6 +70,12 @@ export class InputHub {
         e.preventDefault();
         this.lastDevice = 'keyboard';
         this.onMenu('sheet');
+        return;
+      }
+      if (e.code === 'Escape' || e.code === 'KeyP') {
+        e.preventDefault();
+        this.lastDevice = 'keyboard';
+        this.onMenu('pause');
         return;
       }
       this.keys.add(e.code);
