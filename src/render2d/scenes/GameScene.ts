@@ -548,6 +548,7 @@ export class GameScene extends Phaser.Scene {
       mx: ax.x,
       my: ax.y,
       attack: input.consume('attack'),
+      attackHeld: input.isHeld('attack'),
       dodge: input.consume('dodge'),
       skill: input.consume('skill'),
     };

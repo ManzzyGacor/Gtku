@@ -8,6 +8,7 @@
  * Rows are data. Anything not wired to real game state is left out entirely rather than shown as a
  * dead control (audio volumes wait for Batch 5).
  */
+import { COMBAT_TUNABLES, isTuned, resetCombatTuning, saveCombatTuning } from '../core/entities/combatTuning';
 import { formatErrors, recentErrors } from '../core/errors';
 import { PROFILES, probeDevice, profileOf } from '../core/graphics';
 import { buildReport, copyText } from '../core/report';
@@ -57,6 +58,14 @@ const ROWS: Row[] = [
     button: 'Salin',
     note: () => 'Perangkat, FPS, preset, dan error terakhir',
     run: (p) => void p.copyReport(),
+  },
+  { kind: 'header', label: 'Combat (mode debug)' },
+  {
+    kind: 'action',
+    label: 'Setelan Combat',
+    button: 'Buka',
+    note: () => (isTuned() ? 'Ada nilai yang sudah kamu ubah' : `${COMBAT_TUNABLES.length} angka: durasi, langkah, jangkauan`),
+    run: (p) => p.toggleCombat(),
   },
   {
     kind: 'action',
@@ -113,6 +122,8 @@ export class SettingsPanel {
   private dump: HTMLPreElement | null = null;
   private refreshers: (() => void)[] = [];
   private probeTimer: ReturnType<typeof setInterval> | null = null;
+  private combatBox!: HTMLDivElement;
+  private combatBuilt = false;
   private unsubscribe: () => void;
   open = false;
   /** Called whenever the panel opens or closes, so the game can pause. */
@@ -142,6 +153,8 @@ export class SettingsPanel {
     this.note = el('div', {}, '');
     this.note.className = 'lm-note';
 
+    this.combatBox = el('div', { display: 'none' });
+    this.combatBox.className = 'lm-combat';
     card.append(top, this.body, this.note);
     this.overlay.appendChild(card);
     // A tap on the dimmed backdrop closes; taps inside must not fall through to the canvas.
@@ -306,6 +319,73 @@ export class SettingsPanel {
     const full = extra.length ? `${text}\n\n[RENDERER]\n${extra.join('\n')}` : text;
     const ok = await copyText(full);
     this.showDump(ok ? `Laporan tersalin ke clipboard. Tempel ke chat.\n\n${full}` : `Clipboard ditolak browser — pilih teks di bawah dan salin manual.\n\n${full}`);
+  }
+
+  /**
+   * Show or hide the combat tuning rows.
+   *
+   * Every timing that decides how a swing feels lives in `combatTuning.ts`, and the only way to
+   * judge those numbers is to change one and swing again — on the phone, without a code editor.
+   * The rows are built the first time they are opened, because there are a few dozen of them.
+   */
+  toggleCombat(): void {
+    if (!this.combatBuilt) {
+      this.combatBuilt = true;
+      const reset = el('div');
+      reset.className = 'lm-row';
+      const label = el('div');
+      label.className = 'lm-label';
+      label.appendChild(el('span', {}, 'Kembalikan semua'));
+      const hint = el('span', {}, 'Ke angka bawaan');
+      hint.className = 'lm-hint';
+      label.appendChild(hint);
+      const btn = el('button', {}, 'Reset');
+      btn.className = 'lm-btn wide';
+      onTap(btn, () => {
+        resetCombatTuning();
+        this.refresh();
+      });
+      reset.append(label, btn);
+      this.combatBox.appendChild(reset);
+
+      for (const tune of COMBAT_TUNABLES) {
+        const line = el('div');
+        line.className = 'lm-row';
+        const lab = el('div');
+        lab.className = 'lm-label';
+        lab.appendChild(el('span', {}, tune.label));
+        line.appendChild(lab);
+        const minus = el('button', {}, '\u2212');
+        minus.className = 'lm-btn';
+        const val = el('div', {}, '');
+        val.className = 'lm-val';
+        const plus = el('button', {}, '+');
+        plus.className = 'lm-btn';
+        const nudge = (dir: number): void => {
+          const next = Math.max(tune.min, Math.min(tune.max, Math.round((tune.get() + tune.step * dir) / tune.step) * tune.step));
+          tune.set(Number(next.toFixed(4)));
+          saveCombatTuning();
+          this.refresh();
+        };
+        onTap(minus, () => nudge(-1));
+        onTap(plus, () => nudge(1));
+        line.append(minus, val, plus);
+        this.combatBox.appendChild(line);
+        this.refreshers.push(() => {
+          const v = tune.get();
+          val.textContent = `${v % 1 === 0 ? v : v.toFixed(2)}${tune.unit ? ` ${tune.unit}` : ''}`;
+          minus.disabled = v <= tune.min;
+          plus.disabled = v >= tune.max;
+        });
+      }
+      this.body.appendChild(this.combatBox);
+    }
+    const open = this.combatBox.style.display === 'none';
+    this.combatBox.style.display = open ? 'block' : 'none';
+    if (open) {
+      this.refresh();
+      this.combatBox.scrollIntoView({ block: 'nearest' });
+    }
   }
 
   /**

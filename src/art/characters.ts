@@ -353,16 +353,18 @@ function reach(angle: number, r: number): [number, number] {
   return [Math.round(Math.cos(rad(angle)) * r), Math.round(Math.sin(rad(angle)) * r)];
 }
 
-function attackPose(dir: Dir, n: 1 | 2 | 3, f: 0 | 1 | 2): Pose {
+function attackPose(dir: Dir, n: 1 | 2 | 3 | 4, f: 0 | 1 | 2): Pose {
   const base = BASE_ANGLE[dir];
   const table: Record<number, [number, number, number]> = {
     1: [-105, -10, 55],
     2: [75, 5, -70],
     3: [0, 0, 0],
+    // the heavy finisher: a wide overhead swing that travels further than any light swing
+    4: [-140, -15, 80],
   };
   const ang = base + table[n][f];
   const isThrust = n === 3;
-  const r = isThrust ? [2, 7, 6][f] : [3, 6, 5][f];
+  const r = isThrust ? [2, 7, 6][f] : n === 4 ? [3, 8, 7][f] : [3, 6, 5][f];
   const armAngle = isThrust ? base : ang;
   const hand = reach(armAngle, r);
   const lean = dir === 's' ? [0, 2, 1][f] * (isThrust ? 1.5 : 1) : 0;
@@ -371,7 +373,7 @@ function attackPose(dir: Dir, n: 1 | 2 | 3, f: 0 | 1 | 2): Pose {
     lean: Math.round(lean),
     armR: [hand[0], hand[1] + 1],
     armL: dir === 's' ? [-2, 5] : [-2, 5],
-    sword: { angle: ang, len: isThrust ? 12 : 11, behind: dir === 'u' && f === 1 },
+    sword: { angle: ang, len: isThrust ? 12 : n === 4 ? 13 : 11, behind: dir === 'u' && f === 1 },
     legL: 0,
     legR: 0,
     scarfWave: f,
@@ -452,6 +454,8 @@ export const HERO_ANIMS = {
   a1: 3,
   a2: 3,
   a3: 3,
+  /** The heavy finisher, reached by holding the attack button. */
+  a4: 3,
   hurt: 1,
 } as const;
 export type HeroAnim = keyof typeof HERO_ANIMS;
@@ -464,7 +468,7 @@ export function buildHeroSheet(): Sheet {
   for (const dir of ['d', 'u', 's'] as Dir[]) {
     IDLE.forEach((p, i) => add(`hero_${dir}_idle_${i}`, drawHumanoid(HERO_LOOK, dir, { ...p, sword: undefined })));
     for (let i = 0; i < 4; i++) add(`hero_${dir}_walk_${i}`, drawHumanoid(HERO_LOOK, dir, walkPose(dir, i)));
-    for (const n of [1, 2, 3] as const)
+    for (const n of [1, 2, 3, 4] as const)
       for (const f of [0, 1, 2] as const) add(`hero_${dir}_a${n}_${f}`, drawHumanoid(HERO_LOOK, dir, attackPose(dir, n, f)));
     add(`hero_${dir}_hurt_0`, drawHumanoid(HERO_LOOK, dir, HURT));
   }

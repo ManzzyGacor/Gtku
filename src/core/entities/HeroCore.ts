@@ -11,7 +11,10 @@ export type Dir4 = 'd' | 'u' | 's';
 export interface HeroInput {
   mx: number;
   my: number;
+  /** True on the frame the attack was pressed. */
   attack: boolean;
+  /** True while the attack button stays down — this is what turns a tap into a heavy swing. */
+  attackHeld?: boolean;
   dodge: boolean;
   skill: boolean;
 }
@@ -38,7 +41,7 @@ export type HeroEvent =
   | { type: 'cast-start' }
   | { type: 'skill-ready' };
 
-interface AttackDef {
+export interface AttackDef {
   windup: number;
   active: number;
   recover: number;
@@ -50,11 +53,22 @@ interface AttackDef {
 }
 
 const D = Math.PI / 180;
+
+/**
+ * The combo, as data. Index 3 is the **heavy** finisher, reached by holding the attack button
+ * rather than by tapping. Every field here is adjustable at runtime from the combat panel
+ * (see `combatTuning.ts`), because how a swing feels can only be judged on the device.
+ */
 export const ATTACKS: AttackDef[] = [
-  { windup: 0.07, active: 0.08, recover: 0.16, dmg: 2, range: 30, arc: 64 * D, knock: 70, lunge: 90 },
-  { windup: 0.06, active: 0.08, recover: 0.16, dmg: 2, range: 30, arc: 64 * D, knock: 70, lunge: 90 },
-  { windup: 0.1, active: 0.1, recover: 0.24, dmg: 4, range: 36, arc: 80 * D, knock: 150, lunge: 190 },
+  { windup: 0.08, active: 0.09, recover: 0.14, dmg: 2, range: 32, arc: 70 * D, knock: 70, lunge: 130 },
+  { windup: 0.07, active: 0.09, recover: 0.14, dmg: 2, range: 32, arc: 70 * D, knock: 80, lunge: 150 },
+  { windup: 0.11, active: 0.11, recover: 0.22, dmg: 4, range: 38, arc: 84 * D, knock: 150, lunge: 210 },
+  { windup: 0.22, active: 0.13, recover: 0.32, dmg: 7, range: 44, arc: 100 * D, knock: 230, lunge: 250 },
 ];
+/** Index of the heavy finisher in `ATTACKS`. */
+export const HEAVY_INDEX = 3;
+/** How many swings a tapped combo runs through before it loops. */
+export const LIGHT_COMBO = 3;
 
 export const HERO_STATS = {
   hw: 5,
@@ -67,8 +81,22 @@ export const HERO_STATS = {
   rollInvuln: 0.3,
   rollSpeed: 178,
   rollCooldown: 0.5,
-  comboWindow: 0.24,
+  comboWindow: 0.3,
   invulnAfterHit: 0.9,
+  /** Holding the attack button this long turns the swing into the heavy finisher. */
+  holdTime: 0.26,
+  /** How fast the hero may keep turning during a swing's wind-up, in degrees per second. */
+  attackTurnRate: 420,
+  /** Fraction of walking speed the player keeps during a swing's wind-up. */
+  attackSteer: 0.3,
+  /** Simulation freeze on a landed hit, in milliseconds. */
+  hitStopMs: 70,
+  /** Camera shake on a landed hit, in pixels. */
+  hitShake: 3.5,
+  /** Half-angle of the auto-aim cone, in degrees. */
+  aimCone: 55,
+  /** How far auto-aim looks for a target, in pixels. */
+  aimRange: 62,
   skillCooldown: 7,
   skillCast: 0.42,
   skillFire: 0.2,
@@ -90,6 +118,9 @@ export class HeroCore {
   combo = 0;
   comboTimer = 0;
   queuedAttack = false;
+  /** Set when the attack button has been held long enough to promote the follow-up to heavy. */
+  queuedHeavy = false;
+  private holdT = 0;
   rollCd = 0;
   skillCd = 0;
   invuln = 0;
@@ -120,6 +151,11 @@ export class HeroCore {
   }
 
   /** Attack phase 0 = windup, 1 = active, 2 = recovery. */
+  /** True while this swing is the heavy finisher. */
+  get isHeavy(): boolean {
+    return this.combo === HEAVY_INDEX;
+  }
+
   get attackPhase(): 0 | 1 | 2 {
     const a = this.attackDef;
     return this.stateT < a.windup ? 0 : this.stateT < a.windup + a.active ? 1 : 2;
@@ -146,6 +182,8 @@ export class HeroCore {
     this.invuln = 1.2;
     this.rolling = false;
     this.queuedAttack = false;
+    this.queuedHeavy = false;
+    this.holdT = 0;
   }
 
   heal(n: number): void {
@@ -192,7 +230,15 @@ export class HeroCore {
     this.setState('attack');
     this.swingFired = false;
     this.queuedAttack = false;
+    this.queuedHeavy = false;
+    this.holdT = 0;
     this.events.push({ type: 'swing-start', index: this.combo, angle });
+  }
+
+  /** Begin the heavy finisher. Reached by holding rather than tapping. */
+  private startHeavy(input: HeroInput): void {
+    this.combo = HEAVY_INDEX;
+    this.startAttack(input);
   }
 
   private startRoll(input: HeroInput): void {
@@ -249,20 +295,51 @@ export class HeroCore {
           this.events.push({ type: 'cast-start' });
         } else if (this.bufAtk > 0) {
           this.bufAtk = 0;
-          this.combo = this.comboTimer > 0 ? Math.min(this.combo + 1, ATTACKS.length - 1) : 0;
+          this.combo = this.comboTimer > 0 ? Math.min(this.combo + 1, LIGHT_COMBO - 1) : 0;
           this.startAttack(inp);
-        }
+          this.holdT = 0;
+        } else if (inp.attackHeld) {
+          // holding without a fresh tap (e.g. the button was already down) goes straight to heavy
+          this.holdT += dt;
+          if (this.holdT >= HERO_STATS.holdTime) this.startHeavy(inp);
+        } else this.holdT = 0;
         break;
       }
 
       case 'attack': {
         const a = this.attackDef;
         if (this.bufAtk > 0) this.queuedAttack = true;
-        // lunge along aim during windup + active
+        // holding the button past the threshold turns the follow-up into the heavy finisher
+        if (inp.attackHeld && this.combo !== HEAVY_INDEX) {
+          this.holdT += dt;
+          if (this.holdT >= HERO_STATS.holdTime) this.queuedHeavy = true;
+        } else this.holdT = 0;
+
+        const inWindup = this.stateT < a.windup;
+        /*
+         * During the wind-up the player still has *some* control: the hero keeps turning toward
+         * the stick (at a limited rate) and keeps a fraction of walking speed. A swing that locks
+         * you in place and facing the wrong way is exactly what makes combat feel stiff.
+         */
+        const mag = clamp(Math.hypot(inp.mx, inp.my), 0, 1);
+        if (inWindup && mag > 0.15) {
+          const want = Math.atan2(inp.my, inp.mx);
+          let d = want - this.aim;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          const maxTurn = (HERO_STATS.attackTurnRate * Math.PI) / 180 * dt;
+          this.aim += Math.abs(d) <= maxTurn ? d : Math.sign(d) * maxTurn;
+        }
+
+        // step forward along the aim through wind-up and the swing itself
         if (this.stateT < a.windup + a.active) {
-          const k = this.stateT < a.windup ? 0.35 : 1;
+          const k = inWindup ? 0.4 : 1;
           targetVx = Math.cos(this.aim) * a.lunge * k;
           targetVy = Math.sin(this.aim) * a.lunge * k;
+          if (inWindup && mag > 0.15) {
+            const steer = HERO_STATS.speed * HERO_STATS.attackSteer;
+            targetVx += (inp.mx / mag) * steer;
+            targetVy += (inp.my / mag) * steer;
+          }
           accel = 4000;
         } else accel = HERO_STATS.decel;
         if (!this.swingFired && this.stateT >= a.windup) {
@@ -281,15 +358,20 @@ export class HeroCore {
         }
         const total = a.windup + a.active + a.recover;
         const doneActive = this.stateT >= a.windup + a.active;
-        if (this.bufDodge > 0 && doneActive && this.rollCd <= 0) {
+        // A dodge cancels a swing at *any* point, not only after the blade has passed. Being
+        // unable to bail out of a committed animation is the other half of feeling stiff.
+        if (this.bufDodge > 0 && this.rollCd <= 0) {
           this.bufDodge = 0;
           this.startRoll(inp);
-        } else if (doneActive && this.queuedAttack && this.combo < ATTACKS.length - 1) {
+        } else if (doneActive && this.queuedHeavy && this.combo !== HEAVY_INDEX) {
+          this.bufAtk = 0;
+          this.startHeavy(inp);
+        } else if (doneActive && this.queuedAttack && this.combo < LIGHT_COMBO - 1) {
           this.bufAtk = 0;
           this.combo += 1;
           this.startAttack(inp);
         } else if (this.stateT >= total) {
-          this.comboTimer = this.combo < ATTACKS.length - 1 ? HERO_STATS.comboWindow : 0;
+          this.comboTimer = this.combo < LIGHT_COMBO - 1 ? HERO_STATS.comboWindow : 0;
           this.setState('free');
         }
         break;

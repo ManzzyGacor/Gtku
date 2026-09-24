@@ -82,6 +82,16 @@ const findNpc = (id: string): any => {
   return hit;
 };
 
+/**
+ * A tap: pressed and released. Holding is now meaningful — it promotes the combo to the heavy
+ * finisher — so a test that only ever presses would leave the button down forever and the hero
+ * would never stop swinging.
+ */
+function tap(action: 'attack' | 'dodge' | 'skill' | 'interact'): void {
+  input.press(action);
+  input.release(action);
+}
+
 function teleport(env: ReturnType<typeof makeGame>, x: number, y: number): void {
   env.game.hero.reset(x, y);
   env.game.hero.invuln = 0;
@@ -110,12 +120,12 @@ test('talking to the elder opens dialogue, advances it and starts the quest', ()
   const wulan = findNpc('wulan');
   teleport(env, wulan.x + 14, wulan.y + 6);
   run(env, 30);
-  input.press('interact');
+  tap('interact');
   run(env, 3);
   assert.equal(ui.dialogOpen, true, 'dialogue opened');
   for (let i = 0; i < 60 && ui.dialogOpen; i++) {
     run(env, 90);
-    input.press('interact');
+    tap('interact');
     run(env, 2);
   }
   assert.equal(ui.dialogOpen, false, 'dialogue closed');
@@ -131,7 +141,7 @@ test('the hero can defeat a slime (aim assist + combo) and counts toward the que
   assert.ok(slimes.length > 0, 'a slime spawned with the chunk');
   const target = slimes.sort((a, b) => Math.hypot(a.x - game.hero.x, a.y - game.hero.y) - Math.hypot(b.x - game.hero.x, b.y - game.hero.y))[0];
   run(env, 60 * 10, (i) => {
-    if (i % 14 === 0) input.press('attack');
+    if (i % 14 === 0) tap('attack');
     if (!target.dead) {
       game.hero.invuln = 1; // focus on the hit logic here
       input.stick.x = Math.sign(target.x - game.hero.x) * (Math.abs(target.x - game.hero.x) > 18 ? 1 : 0);
@@ -149,14 +159,14 @@ test('all enemy kinds run their AI against the hero without throwing (god mode)'
   teleport(env, arch.x - 60, arch.y);
   run(env, 60 * 12, (i) => {
     game.hero.invuln = 0.5;
-    if (i % 90 === 0) input.press('skill');
+    if (i % 90 === 0) tap('skill');
   });
   const cave = findSpawn('bats');
   teleport(env, cave.x, cave.y + 40);
   run(env, 60 * 12, (i) => {
     game.hero.invuln = 0.5;
-    if (i % 20 === 0) input.press('attack');
-    if (i % 200 === 0) input.press('dodge');
+    if (i % 20 === 0) tap('attack');
+    if (i % 200 === 0) tap('dodge');
   });
   assert.ok(true);
 });
@@ -205,7 +215,7 @@ test('boss fight: wakes, closes the door, changes phases, dies, quest advances, 
     if (b && b.awake) woke = true;
     if (game.collision.solidTile(door.tx, door.ty)) doorClosedSeen = true;
     if (b && b.awake && !b.invulnerable && !b.dead && i % 70 === 0) game.director.applyBlast(b.x, b.cy, 120, 7, 0, 0);
-    if (i % 25 === 0) input.press('attack');
+    if (i % 25 === 0) tap('attack');
   });
   assert.ok(woke, 'boss woke');
   assert.ok(doorClosedSeen, 'arena door closed during the fight');
@@ -219,11 +229,11 @@ test('returning the crystal to the elder completes the quest and lights the lant
   const wulan = findNpc('wulan');
   teleport(env, wulan.x + 14, wulan.y + 6);
   run(env, 30);
-  input.press('interact');
+  tap('interact');
   run(env, 3);
   for (let i = 0; i < 60 && ui.dialogOpen; i++) {
     run(env, 90);
-    input.press('interact');
+    tap('interact');
     run(env, 2);
   }
   assert.equal(game.state.quest.stage, 4);

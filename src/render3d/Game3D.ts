@@ -235,6 +235,8 @@ export class Game3D {
       mx: dir.x,
       my: dir.y,
       attack: input.consume('attack'),
+      // held, not just pressed: this is what promotes a tap into the heavy finisher
+      attackHeld: input.isHeld('attack'),
       dodge: input.consume('dodge'),
       skill: input.consume('skill'),
     };

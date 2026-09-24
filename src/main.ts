@@ -2,11 +2,14 @@
  * Entry point. Picks a renderer and loads only that one (`?renderer=2d|3d`, or the settings menu),
  * so a phone never downloads Phaser and Three.js at the same time.
  */
+import { loadCombatTuning } from './core/entities/combatTuning';
 import { installErrorOverlay } from './core/errors';
 import { settings } from './core/settings';
 import { ensureDebugUi } from './ui/DebugUi';
 
 installErrorOverlay();
+// Whatever the player tuned in the combat panel on a previous run.
+loadCombatTuning();
 
 // The settings menu, FPS counter and error panel live outside the canvas so they keep working
 // unchanged while the renderer underneath changes (docs/OVERHAUL.md §7).

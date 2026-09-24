@@ -15,6 +15,53 @@ import { mix } from '../art/pixmap';
 import { HeroCore, HERO_STATS } from '../core/entities/HeroCore';
 import { u } from './worldPlan';
 
+/** Every joint value a pose can set; see `HeroMesh3D.target`. */
+interface PoseTarget {
+  bodyY: number;
+  bodyZ: number;
+  bodyRotX: number;
+  bodyRotY: number;
+  bodyRotZ: number;
+  torsoScaleY: number;
+  headRotX: number;
+  armLX: number;
+  armLZ: number;
+  armRX: number;
+  armRZ: number;
+  legLX: number;
+  legRX: number;
+  cloakX: number;
+  slashOpacity: number;
+  slashRotZ: number;
+  slashScale: number;
+}
+
+const blankPose = (): PoseTarget => ({
+  bodyY: 0,
+  bodyZ: 0,
+  bodyRotX: 0,
+  bodyRotY: 0,
+  bodyRotZ: 0,
+  torsoScaleY: 1,
+  headRotX: 0,
+  armLX: 0,
+  armLZ: 0,
+  armRX: 0,
+  armRZ: 0,
+  legLX: 0,
+  legRX: 0,
+  cloakX: 0,
+  slashOpacity: 0,
+  slashRotZ: 0,
+  slashScale: 1,
+});
+
+const POSE_KEYS = Object.keys(blankPose()) as (keyof PoseTarget)[];
+
+function resetPose(p: PoseTarget): void {
+  Object.assign(p, blankPose());
+}
+
 /** Total height in world units (≈ 25 px, matching the 2D sprite). */
 export const HERO_HEIGHT = 1.55;
 
@@ -207,6 +254,18 @@ export class HeroMesh3D {
   // ───────────────────────── animation ─────────────────────────
 
   /**
+   * Every number a pose can set. Poses write *targets*; the body then eases toward them, which is
+   * what turns four discrete attack frames into a continuous swing. The stiffness the test report
+   * described came from setting these directly and snapping between them.
+   */
+  private readonly target: PoseTarget = blankPose();
+  private readonly current: PoseTarget = blankPose();
+  /** Full-turn rotations (the dodge roll) bypass the smoother — easing a 2π spin would unwind it. */
+  private rollSpin = 0;
+  private rollLift = 0;
+  private smoothRate = 12;
+
+  /**
    * Pose the body from the core's state. `dt` is simulation time, `realDt` keeps the idle breath
    * and the lantern flicker alive even during hit-stop.
    */
@@ -218,12 +277,17 @@ export class HeroMesh3D {
     const wantYaw = Math.atan2(Math.cos(core.aim), Math.sin(core.aim));
     let d = wantYaw - this.yaw;
     d = Math.atan2(Math.sin(d), Math.cos(d));
-    this.yaw += d * Math.min(1, realDt * 18);
+    // turning is quicker mid-swing, so a steered attack actually points where you aimed it
+    const turnRate = core.state === 'attack' ? 26 : 18;
+    this.yaw += d * Math.min(1, realDt * turnRate);
     this.root.rotation.y = this.yaw;
 
     const speed = Math.hypot(core.vx, core.vy);
     this.breath += realDt;
-    this.resetPose();
+    resetPose(this.target);
+    this.rollSpin = 0;
+    this.rollLift = 0;
+    this.smoothRate = 12;
 
     switch (core.state) {
       case 'roll':
@@ -246,97 +310,168 @@ export class HeroMesh3D {
         else this.poseIdle();
     }
 
+    this.ease(realDt);
+    this.apply();
+
     // the lamp always burns, with a small flicker
     const flicker = 0.9 + Math.sin(time * 9) * 0.06 + Math.sin(time * 23) * 0.04;
     this.lantern.intensity = core.alive ? 2.4 * flicker : 0;
     (this.lanternBox.material as THREE.MeshBasicMaterial).color.setHex(core.state === 'cast' ? 0xfff6b0 : 0xffe066);
   }
 
-  private resetPose(): void {
-    this.slash.visible = false;
-    this.slashMaterial.opacity = 0;
-    this.body.position.set(0, 0, 0);
-    this.body.rotation.set(0, 0, 0);
-    this.torso.scale.set(1, 1, 1);
-    this.head.rotation.set(0, 0, 0);
-    for (const j of [this.armL, this.armR, this.legL, this.legR]) j.pivot.rotation.set(0, 0, 0);
-    this.cloak.pivot.rotation.set(0, 0, 0);
+  /** Exponential approach, so the rate is frame-rate independent. */
+  private ease(realDt: number): void {
+    const k = 1 - Math.exp(-this.smoothRate * Math.max(0, realDt));
+    const c = this.current as unknown as Record<string, number>;
+    const t = this.target as unknown as Record<string, number>;
+    for (const key of POSE_KEYS) c[key] += (t[key] - c[key]) * k;
+  }
+
+  private apply(): void {
+    const p = this.current;
+    this.body.position.set(0, p.bodyY + this.rollLift, p.bodyZ);
+    this.body.rotation.set(p.bodyRotX + this.rollSpin, p.bodyRotY, p.bodyRotZ);
+    this.torso.scale.set(1, p.torsoScaleY, 1);
+    this.head.rotation.set(p.headRotX, 0, 0);
+    this.armL.pivot.rotation.set(p.armLX, 0, p.armLZ);
+    this.armR.pivot.rotation.set(p.armRX, 0, p.armRZ);
+    this.legL.pivot.rotation.set(p.legLX, 0, 0);
+    this.legR.pivot.rotation.set(p.legRX, 0, 0);
+    this.cloak.pivot.rotation.set(p.cloakX, 0, 0);
+    this.slash.visible = p.slashOpacity > 0.02;
+    this.slashMaterial.opacity = Math.max(0, p.slashOpacity);
+    this.slash.rotation.z = p.slashRotZ;
+    this.slash.scale.setScalar(Math.max(0.01, p.slashScale));
   }
 
   private poseIdle(): void {
     const b = Math.sin(this.breath * 2.1);
-    this.torso.scale.y = 1 + b * 0.025;
-    this.body.position.y = b * 0.012;
-    this.head.rotation.x = b * 0.04;
-    this.armL.pivot.rotation.x = 0.06 + b * 0.05;
-    this.armR.pivot.rotation.x = 0.06 - b * 0.05;
-    this.cloak.pivot.rotation.x = -0.12 + Math.sin(this.breath * 1.3) * 0.05;
+    const p = this.target;
+    p.torsoScaleY = 1 + b * 0.03;
+    p.bodyY = b * 0.014;
+    p.headRotX = b * 0.05;
+    p.armLX = 0.08 + b * 0.06;
+    p.armRX = 0.08 - b * 0.06;
+    p.cloakX = -0.12 + Math.sin(this.breath * 1.3) * 0.06;
+    this.smoothRate = 9;
   }
 
   private poseWalk(dt: number, speed: number): void {
-    this.walkPhase += dt * (3.2 + speed / HERO_STATS.speed * 4.6);
+    this.walkPhase += dt * (3.2 + (speed / HERO_STATS.speed) * 4.6);
     const s = Math.sin(this.walkPhase);
     const c = Math.cos(this.walkPhase * 2);
-    this.legL.pivot.rotation.x = s * 0.62;
-    this.legR.pivot.rotation.x = -s * 0.62;
-    this.armL.pivot.rotation.x = -s * 0.42;
-    this.armR.pivot.rotation.x = s * 0.42;
-    this.body.position.y = Math.abs(c) * 0.03;
-    this.body.rotation.z = s * 0.035;
+    const p = this.target;
+    p.legLX = s * 0.68;
+    p.legRX = -s * 0.68;
+    p.armLX = -s * 0.46;
+    p.armRX = s * 0.46;
+    p.bodyY = Math.abs(c) * 0.035;
+    p.bodyRotZ = s * 0.04;
     // the cloak lags behind the stride
-    this.cloak.pivot.rotation.x = -0.3 - Math.sin(this.walkPhase - 0.7) * 0.16;
+    p.cloakX = -0.32 - Math.sin(this.walkPhase - 0.7) * 0.18;
+    this.smoothRate = 22;
   }
 
+  /**
+   * Four sub-phases, which is what the eye reads as a swing:
+   * **anticipation** (the blade winds back), **slash** (it whips through), **follow-through**
+   * (the body keeps turning past the target) and **recovery** (it settles back to guard).
+   * The easing between them is what makes the four read as one motion.
+   */
   private poseAttack(core: HeroCore): void {
-    // the trail only exists during the active frames, and sweeps with the swing
-    this.slash.visible = core.attackPhase === 1;
-    this.slashMaterial.opacity = core.attackPhase === 1 ? 0.85 : 0;
-    this.slash.rotation.z = (core.combo === 1 ? -1 : 1) * (0.5 - Math.min(1, core.stateT * 7) * 1.0);
-    this.slash.scale.setScalar(core.combo === 2 ? 1.25 : 1);
-
-    // phase 0 winds up behind the shoulder, 1 slashes through, 2 recovers
-    const swing = [-1.9, 0.9, 0.35][core.attackPhase] ?? 0;
-    const lunge = [0, 0.08, 0.03][core.attackPhase] ?? 0;
+    const a = core.attackDef;
     const twist = core.combo === 1 ? -1 : 1;
-    this.armR.pivot.rotation.x = swing;
-    this.armR.pivot.rotation.z = swing * 0.25 * twist;
-    this.armL.pivot.rotation.x = 0.5;
-    this.body.rotation.y = swing * 0.22 * twist;
-    this.body.position.z = lunge;
-    this.torso.scale.y = core.attackPhase === 1 ? 0.94 : 1;
-    this.cloak.pivot.rotation.x = -0.5 - swing * 0.2;
+    const heavy = core.isHeavy;
+    const p = this.target;
+    const t = core.stateT;
+
+    if (t < a.windup) {
+      // anticipation: wind back and drop the weight onto the back foot
+      const k = Math.min(1, t / Math.max(0.001, a.windup));
+      p.armRX = -1.1 - k * 1.1;
+      p.armRZ = -0.5 * twist;
+      p.armLX = 0.55;
+      p.bodyRotY = 0.4 * twist * k;
+      p.bodyZ = -0.06 * k;
+      p.torsoScaleY = 1 - 0.03 * k;
+      this.smoothRate = heavy ? 16 : 26;
+    } else if (t < a.windup + a.active) {
+      // the slash itself: fastest possible transition, and the trail appears
+      const k = Math.min(1, (t - a.windup) / Math.max(0.001, a.active));
+      p.armRX = 0.5 + k * 0.7;
+      p.armRZ = 0.35 * twist;
+      p.armLX = 0.2;
+      p.bodyRotY = -0.45 * twist;
+      p.bodyZ = 0.12;
+      p.torsoScaleY = 0.94;
+      p.slashOpacity = (heavy ? 1 : 0.85) * (1 - k * 0.35);
+      p.slashRotZ = twist * (0.6 - k * 1.5);
+      p.slashScale = heavy ? 1.5 : core.combo === 2 ? 1.25 : 1;
+      this.smoothRate = 45;
+    } else {
+      const rec = t - a.windup - a.active;
+      const follow = a.recover * 0.4;
+      if (rec < follow) {
+        // follow-through: the swing overshoots before it comes back
+        p.armRX = 1.35;
+        p.armRZ = 0.5 * twist;
+        p.bodyRotY = -0.6 * twist;
+        p.bodyZ = 0.08;
+        p.slashOpacity = 0.35 * (1 - rec / follow);
+        p.slashRotZ = twist * -0.9;
+        p.slashScale = heavy ? 1.5 : 1;
+        this.smoothRate = 30;
+      } else {
+        // recovery: settle back to guard
+        p.armRX = 0.35;
+        p.armLX = 0.3;
+        p.bodyRotY = -0.1 * twist;
+        this.smoothRate = 14;
+      }
+    }
   }
 
   private poseRoll(core: HeroCore): void {
     const t = Math.min(1, core.stateT / HERO_STATS.rollTime);
-    this.body.rotation.x = t * Math.PI * 2;
-    this.body.position.y = -0.2 + Math.sin(t * Math.PI) * 0.16;
-    for (const j of [this.legL, this.legR]) j.pivot.rotation.x = 0.9;
-    for (const j of [this.armL, this.armR]) j.pivot.rotation.x = 1.1;
-    this.cloak.pivot.rotation.x = -0.9;
+    this.rollSpin = t * Math.PI * 2;
+    this.rollLift = -0.18 + Math.sin(t * Math.PI) * 0.16;
+    const p = this.target;
+    p.legLX = 0.95;
+    p.legRX = 0.95;
+    p.armLX = 1.15;
+    p.armRX = 1.15;
+    p.cloakX = -0.95;
+    this.smoothRate = 30;
   }
 
   private poseHurt(): void {
-    this.body.rotation.x = -0.3;
-    this.body.position.y = -0.05;
-    for (const j of [this.armL, this.armR]) j.pivot.rotation.x = -0.7;
-    this.head.rotation.x = -0.25;
+    const p = this.target;
+    p.bodyRotX = -0.32;
+    p.bodyY = -0.05;
+    p.armLX = -0.75;
+    p.armRX = -0.75;
+    p.headRotX = -0.28;
+    this.smoothRate = 34;
   }
 
   private poseCast(core: HeroCore): void {
     const t = Math.min(1, core.stateT / HERO_STATS.skillCast);
-    this.armL.pivot.rotation.x = -2.5 * t;
-    this.armR.pivot.rotation.x = -2.2 * t;
-    this.body.position.y = t * 0.05;
-    this.head.rotation.x = -0.3 * t;
-    this.cloak.pivot.rotation.x = -0.6 * t;
+    const p = this.target;
+    p.armLX = -2.5 * t;
+    p.armRX = -2.2 * t;
+    p.bodyY = t * 0.06;
+    p.headRotX = -0.32 * t;
+    p.cloakX = -0.6 * t;
+    this.smoothRate = 18;
   }
 
   private poseDead(core: HeroCore): void {
     const t = Math.min(1, core.stateT / 0.6);
-    this.body.rotation.x = t * Math.PI * 0.46;
-    this.body.position.y = -t * 0.3;
-    this.cloak.pivot.rotation.x = -0.2;
+    const p = this.target;
+    p.bodyRotX = t * Math.PI * 0.46;
+    p.bodyY = -t * 0.3;
+    p.cloakX = -0.2;
+    this.smoothRate = 8;
   }
 
   dispose(): void {
