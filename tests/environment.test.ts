@@ -7,10 +7,10 @@ import assert from 'node:assert/strict';
 import { test } from 'vitest';
 import * as THREE from 'three';
 import { CHUNK_TILES } from '../src/config';
-import { bakeWaterMask, chunkHasWater } from '../src/art/bake';
+import { bakeWaterMask, chunkHasWater, WATER_MASK_SCALE } from '../src/art/bake';
 import { buildFogNoise } from '../src/art/greybox';
 import { buildTileSheet } from '../src/art/tiles';
-import { isWater } from '../src/core/world/tiles';
+import { isWater, T } from '../src/core/world/tiles';
 import { GeneratedWorld } from '../src/core/world/worldgen';
 import { Environment, fireflySeed } from '../src/render3d/Environment';
 import { World3D } from '../src/render3d/World3D';
@@ -81,7 +81,7 @@ test('the fog noise tiles smoothly in the alpha channel', () => {
   }
 });
 
-test('the water mask marks exactly the water tiles, and only water chunks get one', () => {
+test('the water mask marks the water tiles, their depth, and how far the bank is', () => {
   // find a chunk with water (the village pond / the river) and one without
   let wet: [number, number] | null = null;
   let dry: [number, number] | null = null;
@@ -94,16 +94,28 @@ test('the water mask marks exactly the water tiles, and only water chunks get on
   assert.ok(dry, 'and dry land');
 
   const mask = bakeWaterMask(world, wet[0], wet[1]);
-  assert.equal(mask.w, CHUNK_TILES, 'one texel per tile is all the resolution needed');
+  assert.equal(mask.w, CHUNK_TILES * WATER_MASK_SCALE, 'half-tile texels, so the foam band can hug the bank');
+
   let marked = 0;
-  for (let ty = 0; ty < CHUNK_TILES; ty++)
-    for (let tx = 0; tx < CHUNK_TILES; tx++) {
-      const tile = world.tileAt(wet[0] * CHUNK_TILES + tx, wet[1] * CHUNK_TILES + ty);
-      const opaque = mask.alphaAt(tx, ty) > 0;
-      assert.equal(opaque, isWater(tile), `tile ${tx},${ty} mask/water mismatch`);
-      if (opaque) marked++;
+  let deepSeen = 0;
+  let shoreSeen = 0;
+  for (let sy = 0; sy < mask.h; sy++)
+    for (let sx = 0; sx < mask.w; sx++) {
+      const tile = world.tileAt(wet[0] * CHUNK_TILES + Math.floor(sx / WATER_MASK_SCALE), wet[1] * CHUNK_TILES + Math.floor(sy / WATER_MASK_SCALE));
+      const opaque = mask.alphaAt(sx, sy) > 0;
+      assert.equal(opaque, isWater(tile), `texel ${sx},${sy} mask/water mismatch`);
+      if (!opaque) continue;
+      marked++;
+      const [colour] = mask.get(sx, sy);
+      const depth = (colour >> 16) & 255;
+      const shore = (colour >> 8) & 255;
+      assert.equal(depth > 128, tile === T.WATER, 'open water is deep, shallows are not');
+      if (depth > 128) deepSeen++;
+      if (shore < 40) shoreSeen++;
     }
   assert.ok(marked > 0);
+  assert.ok(deepSeen > 0, 'the chunk has some open water');
+  assert.ok(shoreSeen > 0, 'and some texels right against the bank, for the foam line');
   assert.equal(bakeWaterMask(world, dry[0], dry[1]).w, 0, 'a dry chunk produces no mask at all');
 });
 

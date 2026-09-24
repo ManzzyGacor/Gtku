@@ -107,25 +107,52 @@ export function bakeChunk(world: WorldSource, sheet: Sheet, cx: number, cy: numb
 }
 
 
+/** Water-mask texels per tile. Two lets the shore band be half a tile wide. */
+export const WATER_MASK_SCALE = 2;
+
 /**
- * A 16x16 mask of where the water is in one chunk: one texel per tile, alpha marks water and the
- * red channel says how deep (0 = shallow, 1 = open water).
+ * Where the water is in one chunk, and what it is doing there. One texel per half tile:
+ *   **alpha** — water at all
+ *   **red**   — depth, 0 at the shallows and 1 in open water
+ *   **green** — distance to the nearest shore, 0 at the edge and 1 two tiles out
  *
- * The 3D renderer lays a rippling surface over the baked ground and uses this to know which tiles
- * it may touch. One byte per tile is all the resolution needed — the ripple pattern itself comes
- * from world coordinates, not from this texture.
+ * The green channel is what lets the shader draw a foam line exactly along the bank instead of a
+ * uniform blue sheet. The ripple pattern itself still comes from world coordinates, not from here.
  */
 export function bakeWaterMask(world: WorldSource, cx: number, cy: number): Pixmap {
-  const pm = new Pixmap(CHUNK_TILES, CHUNK_TILES);
-  let any = false;
-  for (let ty = 0; ty < CHUNK_TILES; ty++)
-    for (let tx = 0; tx < CHUNK_TILES; tx++) {
-      const t = world.tileAt(cx * CHUNK_TILES + tx, cy * CHUNK_TILES + ty);
-      if (!isWater(t)) continue;
-      any = true;
-      pm.set(tx, ty, t === T.WATER ? 0xff0000 : 0x000000, 255);
+  const size = CHUNK_TILES * WATER_MASK_SCALE;
+  if (!chunkHasWater(world, cx, cy)) return new Pixmap(0, 0);
+  const pm = new Pixmap(size, size);
+  /** Search this many tiles out for dry land. */
+  const REACH = 2;
+  const tileAt = (tx: number, ty: number): number => world.tileAt(cx * CHUNK_TILES + tx, cy * CHUNK_TILES + ty);
+
+  for (let sy = 0; sy < size; sy++)
+    for (let sx = 0; sx < size; sx++) {
+      const tx = Math.floor(sx / WATER_MASK_SCALE);
+      const ty = Math.floor(sy / WATER_MASK_SCALE);
+      const tile = tileAt(tx, ty);
+      if (!isWater(tile)) continue;
+
+      /*
+       * Distance from this texel to the nearest dry land — measured to the tile's *edge*, not its
+       * centre. Measuring to centres bottoms out at half a tile, so the foam band could never
+       * reach zero and the bank never got its highlight.
+       */
+      const px = (sx + 0.5) / WATER_MASK_SCALE;
+      const pz = (sy + 0.5) / WATER_MASK_SCALE;
+      let shore = REACH;
+      for (let oy = -REACH; oy <= REACH; oy++)
+        for (let ox = -REACH; ox <= REACH; ox++) {
+          if (isWater(tileAt(tx + ox, ty + oy))) continue;
+          const dx = Math.max(0, Math.abs(px - (tx + ox + 0.5)) - 0.5);
+          const dz = Math.max(0, Math.abs(pz - (ty + oy + 0.5)) - 0.5);
+          shore = Math.min(shore, Math.hypot(dx, dz));
+        }
+      const depth = tile === T.WATER ? 1 : 0.35;
+      pm.set(sx, sy, ((Math.round(depth * 255) << 16) | (Math.round(Math.min(1, shore / REACH) * 255) << 8)) >>> 0, 255);
     }
-  return any ? pm : new Pixmap(0, 0);
+  return pm;
 }
 
 /** True when a chunk has any water at all, so the renderer can skip the overlay entirely. */

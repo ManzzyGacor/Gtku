@@ -18,6 +18,11 @@ export interface PixmapTextureOpts {
   flipRows?: boolean;
   /** Tile the texture instead of clamping (needed when the shader scales UVs per instance). */
   tile?: boolean;
+  /**
+   * Filter smoothly instead of nearest. Only for data that is *lighting* rather than art —
+   * a baked light pool should be soft; a texel-sharp pool would look like a stencil.
+   */
+  smooth?: boolean;
 }
 
 export function pixmapTexture(pm: Pixmap, opts: PixmapTextureOpts = {}): THREE.DataTexture {
@@ -34,8 +39,9 @@ export function pixmapTexture(pm: Pixmap, opts: PixmapTextureOpts = {}): THREE.D
     data = new Uint8Array(src);
   }
   const tex = new THREE.DataTexture(data, pm.w, pm.h, THREE.RGBAFormat, THREE.UnsignedByteType);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
+  const filter = opts.smooth ? THREE.LinearFilter : THREE.NearestFilter;
+  tex.magFilter = filter;
+  tex.minFilter = filter;
   tex.generateMipmaps = false;
   tex.colorSpace = THREE.NoColorSpace;
   if (opts.tile) {

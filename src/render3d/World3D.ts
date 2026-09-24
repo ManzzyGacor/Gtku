@@ -24,7 +24,8 @@ import { InstancePool } from './InstancePool';
 import { FADE_LIFT, FADE_RADIUS } from './occlusion';
 import { pixmapTexture } from './textures';
 import { makeWaterUniforms, WaterSurface, type WaterUniforms } from './WaterSurface';
-import { groupKeyOf, planChunk, u, VEGETATION, type ChunkPlan, type PointLightPlan, type ShapeKind } from './worldPlan';
+import { bakeLightMap, lightMapHasLight } from './lightmap';
+import { chunkLights, groupKeyOf, planChunk, u, VEGETATION, type ChunkPlan, type PointLightPlan, type ShapeKind } from './worldPlan';
 
 /**
  * Per-instance UV scaling. Without it a 16x16 texture stretches across whatever face it lands on
@@ -174,7 +175,9 @@ interface LoadedChunk3D {
   cy: number;
   ground: THREE.Mesh;
   texture: THREE.Texture;
-  material: THREE.Material;
+  material: THREE.MeshLambertMaterial;
+  /** Baked warm pools from the static lights; faded in with the night. */
+  lightMap: THREE.Texture | null;
   /** Only chunks with water get a rippling overlay. */
   water: WaterSurface | null;
   lights: PointLightPlan[];
@@ -213,6 +216,8 @@ export class World3D {
   };
   /** Wind strength, 0..1; the preset can calm it down or switch it off. */
   private windStrength = 1;
+  /** How strong the baked light pools get at night. */
+  private lightPoolScale = 1.6;
   /** Real seconds, for wind and flicker (keeps running while the simulation is frozen). */
   private clock = 0;
 
@@ -370,6 +375,26 @@ export class World3D {
     // Pixmap row 0 is north; a flat plane has v = 1 there, so the rows are flipped on upload.
     const texture = pixmapTexture(pm, { flipRows: true });
     const material = new THREE.MeshLambertMaterial({ map: texture });
+
+    /*
+     * Bake the static lights of this chunk *and its neighbours* into a pool map. A lamp two tiles
+     * from the border still lights the ground on the other side of it, so a chunk-local bake would
+     * leave a visible seam.
+     */
+    const lights: PointLightPlan[] = [];
+    for (let oy = -1; oy <= 1; oy++)
+      for (let ox = -1; ox <= 1; ox++) {
+        if (cx + ox < 0 || cy + oy < 0 || cx + ox >= this.chunksWide() || cy + oy >= this.chunksHigh()) continue;
+        lights.push(...(ox === 0 && oy === 0 ? plan.lights : chunkLights(this.world, cx + ox, cy + oy)));
+      }
+    const poolPm = bakeLightMap(lights, cx, cy);
+    let lightMap: THREE.Texture | null = null;
+    if (lightMapHasLight(poolPm)) {
+      // Linear filtering here on purpose: these are soft pools of light, not pixel art.
+      lightMap = pixmapTexture(poolPm, { flipRows: true, smooth: true });
+      material.lightMap = lightMap;
+      material.lightMapIntensity = 0;
+    }
     const ground = new THREE.Mesh(this.groundGeometry, material);
     ground.position.set(u(cx * CHUNK_PX) + CHUNK_TILES / 2, 0, u(cy * CHUNK_PX) + CHUNK_TILES / 2);
     ground.receiveShadow = this.shadowsOn;
@@ -378,15 +403,16 @@ export class World3D {
     // rippling surface, only where there is water to ripple
     let water: WaterSurface | null = null;
     if (chunkHasWater(this.world, cx, cy)) {
-      const maskTex = pixmapTexture(bakeWaterMask(this.world, cx, cy), { flipRows: true });
-      water = new WaterSurface(this.waterGeometry, maskTex, this.waterUniforms, cx, cy);
+      // Smooth filtering on the mask so the depth and shore bands blend instead of stepping.
+      const maskTex = pixmapTexture(bakeWaterMask(this.world, cx, cy), { flipRows: true, smooth: true });
+      water = new WaterSurface(this.waterGeometry, maskTex, this.waterUniforms, cx, cy, lightMap);
       water.mesh.visible = this.waterEnabled;
       this.group.add(water.mesh);
     }
 
     const key = keyOf(cx, cy);
     for (const [groupKey, shapes] of this.byGroup(plan)) this.poolFor(groupKey, shapes[0]).addChunk(key, shapes);
-    this.loaded.set(key, { cx, cy, ground, texture, material, water, lights: plan.lights });
+    this.loaded.set(key, { cx, cy, ground, texture, material, lightMap, water, lights: plan.lights });
     this.rebuildLightList();
   }
 
@@ -436,6 +462,7 @@ export class World3D {
     this.group.remove(c.ground);
     c.material.dispose();
     c.texture.dispose();
+    c.lightMap?.dispose();
     c.water?.dispose();
     this.loaded.delete(key);
   }
@@ -461,6 +488,11 @@ export class World3D {
   /** How lively the vegetation is. The `vlow` preset stands still to save vertex work. */
   setWind(strength: number): void {
     this.windStrength = Math.max(0, strength);
+  }
+
+  /** How bright the baked lamp pools burn at night. */
+  setLightPools(scale: number): void {
+    this.lightPoolScale = Math.max(0, scale);
   }
 
   /** Rippling water costs one extra transparent pass per chunk; the bottom preset skips it. */
@@ -507,6 +539,11 @@ export class World3D {
       const pool = this.pools.get(key);
       if (pool) pool.mesh.visible = lightsOn;
     }
+    // Baked pools of lamp light on the ground: invisible by day, full strength at night.
+    const poolStrength = Math.max(0, (night - 0.12) / 0.88) * this.lightPoolScale;
+    for (const c of this.loaded.values()) if (c.lightMap) c.material.lightMapIntensity = poolStrength;
+    // Lamplight reflected on the water follows the same curve, a little weaker.
+    this.waterUniforms.uLightStrength.value = poolStrength * 0.5;
 
     if (!this.pool.length) return;
     const active = this.activeLights

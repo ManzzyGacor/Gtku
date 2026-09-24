@@ -365,6 +365,19 @@ export interface ChunkPlan {
 }
 
 /**
+ * Just the static lights of one chunk. Cheaper than a full `planChunk` and what the light-map
+ * baker needs from the surrounding chunks (a lamp lights the ground across a chunk border).
+ */
+export function chunkLights(world: WorldSource, cx: number, cy: number): PointLightPlan[] {
+  const out: PointLightPlan[] = [];
+  for (const p of world.chunk(cx, cy).props) {
+    if (PROPS[p.type].special) continue;
+    propLight(p, out);
+  }
+  return out;
+}
+
+/**
  * Plan one chunk: every prop whose foot stands in it, plus its wall tiles.
  *
  * Chunk membership follows the foot position, exactly like the 2D renderer, so a house whose roof
