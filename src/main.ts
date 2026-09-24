@@ -44,8 +44,18 @@ async function boot(): Promise<void> {
     const { startWorld } = await loading;
     (window as unknown as { __game3d: unknown }).__game3d = startWorld(host, debug, choice.continueGame);
   } catch (e) {
-    recordError(String((e as Error)?.message ?? e), 'boot');
-    title.setBusy('Gagal memuat. Muat ulang halaman.');
+    /*
+     * Show what actually failed.
+     *
+     * The first version said only "Gagal memuat. Muat ulang halaman." — which is useless on a
+     * phone, where there is no console to open, and it hid a real crash inside the world's
+     * constructor for a whole release. The message and the first line of the stack go on screen,
+     * and into the error ring so "Salin laporan" carries them too.
+     */
+    const err = e as Error;
+    recordError(String(err?.stack ?? err?.message ?? e), 'boot');
+    const where = String(err?.stack ?? '').split('\n')[1]?.trim() ?? '';
+    title.setBusy(`Gagal memuat:\n${err?.message ?? String(e)}\n${where}\n\nMuat ulang halaman, atau kirim laporan dari menu Pengaturan.`);
     return;
   }
   title.close();

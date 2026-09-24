@@ -21,6 +21,9 @@ const CSS = `
 .lm-title-name .a { color: #ffd98a; }
 .lm-title-name .b { color: #a795ff; }
 .lm-title-sub { color: #d9cfff; opacity: 0.85; }
+/* a boot failure needs its message readable, wrapped, and selectable so it can be copied */
+.lm-title-status { color: #ffc0c0; white-space: pre-wrap; max-width: min(90vw, 620px);
+  font-size: 11px; line-height: 1.5; user-select: text; -webkit-user-select: text; }
 .lm-title-menu { display: flex; flex-direction: column; gap: 9px; width: min(260px, 70vw); }
 .lm-title-btn { padding: 11px 14px; font: inherit; letter-spacing: 2px; cursor: pointer;
   color: #f2e2c2; border-radius: 5px; touch-action: manipulation;
@@ -123,7 +126,7 @@ export class TitleScreen {
     this.menu.style.display = 'none';
     if (!this.status) {
       this.status = el('div');
-      this.status.className = 'lm-title-sub';
+      this.status.className = 'lm-title-sub lm-title-status';
       this.root.appendChild(this.status);
     }
     this.status.textContent = text;

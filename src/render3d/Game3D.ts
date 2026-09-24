@@ -122,12 +122,13 @@ export class Game3D {
       this.saveNotes = migrated.notes;
       this.state.load(migrated.save);
       this.character.load(migrated.save.character);
-      this.applySheet();
+      // Only the hero's own numbers here: the HUD, the combat and the meshes do not exist yet, so
+      // the full `applySheet()` runs at the end of the constructor instead. The HP ceiling has to
+      // be right *before* `reset`, or a saved 18 HP would be clamped to the level 1 ceiling of 12.
+      this.applyHeroStats();
       this.hero.reset(migrated.save.hero.x, migrated.save.hero.y, Math.min(migrated.save.hero.hp, this.hero.maxHp));
       this.dayTime = this.state.dayTime;
       this.camera.snap(u(this.hero.x), u(this.hero.y));
-    } else {
-      this.applySheet();
     }
 
     this.hud = new Hud();
@@ -235,6 +236,9 @@ export class Game3D {
       if (key === 'presetAuto') this.adaptive.auto = settings.get('presetAuto') && !settings.isLocked('preset');
       if (key === 'preset' || key === 'renderScale') this.applyProfile();
     });
+
+    // Now that the HUD, the combat and the meshes exist, push the whole character sheet through.
+    this.applySheet();
 
     this.applyProfile();
     this.resize();
@@ -361,14 +365,25 @@ export class Game3D {
    * and a level-up does not heal you.
    */
   applySheet(): void {
+    this.applyHeroStats();
+    this.combat.character = this.character;
+    this.heroMesh.setLanternRange(this.character.stats.lanternRange / 100);
+    this.hud.setLevel(this.character.level, this.character.exp, this.character.expNeeded);
+  }
+
+  /**
+   * The part of the sheet that only touches `HeroCore`.
+   *
+   * Split out because the save is loaded before the HUD, the combat and the meshes are built — and
+   * the first version called the whole of `applySheet()` there, which threw on `this.combat` being
+   * undefined and turned every boot into "Gagal memuat".
+   */
+  private applyHeroStats(): void {
     this.character.refresh();
     const stats = this.character.stats;
     this.hero.setMaxHp(stats.maxHp);
     this.hero.speedScale = stats.speed / 100;
     this.hero.heavyCritBonus = this.character.heavyCritBonus();
-    this.combat.character = this.character;
-    this.heroMesh.setLanternRange(stats.lanternRange / 100);
-    this.hud.setLevel(this.character.level, this.character.exp, this.character.expNeeded);
   }
 
   /**
