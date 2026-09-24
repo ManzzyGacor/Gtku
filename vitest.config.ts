@@ -1,19 +1,18 @@
 import { defineConfig } from 'vitest/config';
-import { fileURLToPath } from 'node:url';
 
 /**
- * Vitest runs the pure logic in `src/core` plus the integration smoke test.
- * Phaser is aliased to a lightweight fake so the real scenes can run in Node without a browser
- * (there is no GPU on the VPS, so nothing is ever really rendered here).
+ * Vitest runs the pure logic in `src/core`, the renderer-free parts of `src/render3d`, and the
+ * headless playthrough in `tests/playthrough.test.ts`.
+ *
+ * Three.js scene-graph objects work fine in Node — only `WebGLRenderer` needs a real context —
+ * so the tests build real meshes, real enemies and a real quest, and never render a pixel. There
+ * is no GPU on the VPS; that is what the phone is for.
  */
 export default defineConfig({
-  resolve: {
-    alias: { phaser: fileURLToPath(new URL('./tests/mocks/phaser-mock.ts', import.meta.url)) },
-  },
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'node',
-    // Each file gets a fresh module registry: the smoke test installs browser globals of its own.
+    // Each file gets a fresh module registry: several tests install browser globals of their own.
     isolate: true,
     testTimeout: 60_000,
     reporters: ['default'],

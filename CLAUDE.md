@@ -1,7 +1,9 @@
 # CLAUDE.md — Lentera Malam
 
-Open-world action RPG pixel art. **Sedang dioverhaul dari 2D (Phaser) ke 3D pixel-art (Three.js)** —
-rencana induk & urutan batch: **`docs/OVERHAUL.md` (baca ini dulu)**.
+Open-world action RPG **3D pixel-art (Three.js)**. Renderer 2D (Phaser) sudah **dihapus** setelah
+seluruh fiturnya pindah — inventarisnya di `docs/PROGRESS.md`, dan tag **`v0.2-2d-final`** adalah
+titik pulang kalau ada yang ternyata terlewat.
+Rencana induk & urutan batch: **`docs/OVERHAUL.md` (baca ini dulu)**.
 Ringkasan desain: `docs/GAME_DESIGN.md`. Status pekerjaan: `docs/PROGRESS.md`
 (**perbarui setiap satu fitur selesai**). Kredit aset: `CREDITS.md`. Naskah cerita: `docs/STORY.md`.
 
@@ -17,13 +19,12 @@ Ringkasan desain: `docs/GAME_DESIGN.md`. Status pekerjaan: `docs/PROGRESS.md`
 
 ## Stack
 
-- **Phaser 4.2.x** (renderer baru berbasis RenderNode; BUKAN Phaser 3 — lihat catatan API di bawah), **TypeScript 7 (strict)**, **Vite 8**.
-- Dokumentasi Phaser 4 ada lokal: `node_modules/phaser/skills/*/SKILL.md`, `node_modules/phaser/docs`, tipe di `node_modules/phaser/types/phaser.d.ts`.
-- Tes: **Vitest** (`npm test` = `vitest run`, `npm run test:watch` untuk mode tonton), konfigurasi di `vitest.config.ts`.
-  Tes logika murni `src/core` + **`tests/smoke.test.ts`**: menjalankan GameScene/UIScene asli terhadap Phaser palsu
-  (`tests/mocks/phaser-mock.ts`, dialihkan lewat `resolve.alias` Vitest) selama ribuan frame (jalan, kombat, dialog, puzzle,
-  boss, save/load, respawn, cek kebocoran objek, validasi nama frame). Plus `tests/core-purity.test.ts` yang menjaga
-  `src/core` bebas renderer. Tidak ada tes piksel/browser — render nyata WebGL hanya bisa dicek di perangkat.
+- **Three.js 0.186** (WebGL2), **TypeScript 7 (strict)**, **Vite 8**. Tidak ada Phaser lagi.
+- Tes: **Vitest** (`npm test`), konfigurasi `vitest.config.ts`. Objek scene-graph Three.js jalan
+  di Node — hanya `WebGLRenderer` yang butuh konteks nyata — jadi tes membangun mesh, musuh, dan
+  quest sungguhan tanpa pernah merender satu pixel pun. **`tests/playthrough.test.ts`** memainkan
+  seluruh quest secara headless; **`tests/architecture.test.ts`** menjaga batas antar lapisan.
+  Tidak ada tes piksel/browser — render nyata hanya bisa dicek di perangkat.
 
 ## Menjalankan
 
@@ -54,10 +55,10 @@ Semuanya juga ada di menu Pengaturan (gerigi di pojok kanan atas).
 
 ```
 src/
-  main.ts            entry: konfigurasi Phaser + skala integer (core/display.ts)
-  config.ts          konstanta global (TILE, ukuran dunia, key save/setelan)
-  core/              LOGIKA GAME MURNI — dilarang mengimpor phaser/three, dan hanya boleh
-                     mengimpor src/core/** + src/config (dijaga tests/core-purity.test.ts)
+  main.ts            entry: pasang overlay debug lalu muat render3d/boot3d secara dinamis
+  config.ts          konstanta global (TILE, ukuran dunia, key save/setelan, versi)
+  core/              LOGIKA GAME MURNI — dilarang mengimpor three, dan hanya boleh mengimpor
+                     src/core/** + src/config (dijaga tests/architecture.test.ts)
     world/           tile, worldgen, chunk data, WorldSource, koordinat area, collision grid
     entities/        HeroCore (gerak/kombo/senjata/HP), enemies (AI musuh & boss),
                      combatTuning (39 angka combat yang bisa disetel dari HP)
@@ -66,28 +67,26 @@ src/
     state/           GameState (quest, kill, flag, waktu) + serialisasi save
     (akar)           rng, save, storage, input, display, errors, settings, perf, graphics, anim, audio
   art/               PIPELINE SENI MURNI-KODE (tanpa DOM, tanpa renderer): Pixmap, palette,
-                     generator sprite/tile/fx/ui/font, bake (chunk → pixmap), greybox (tekstur 3D)
-  ui/                OVERLAY UI NETRAL-RENDERER (DOM): menu Pengaturan, penghitung FPS,
-                     kontrol sentuh, antarmuka DiagnosticsSource — dilarang mengimpor phaser/three
-  render2d/          SEMUA KODE PHASER: boot2d, scenes (Boot/Title/Game/UI), entities *View,
-                     systems (chunks, lighting, parallax, fx, cameraRig, EnemyDirector, PuzzleSystem),
-                     register (pixmap → tekstur Phaser), pixeltext
+                     generator sprite/tile/fx/ui/font, bake (chunk → pixmap + light mask),
+                     greybox (tekstur 3D 32x32), markers (penanda quest)
+  ui/                OVERLAY UI NETRAL-RENDERER (DOM): TitleScreen, Hud, Dialogue, Minimap,
+                     TouchControls, SettingsPanel, DebugUi, FpsMeterView — dilarang mengimpor three
   render3d/          SEMUA KODE THREE.JS: boot3d, Game3D, PixelRenderer (pipeline pixel),
-                     IsoCamera, World3D, textures (pixmap → DataTexture),
-                     worldPlan (BEBAS three, jadi tata letak 3D bisa dites di Node)
-tests/               Vitest: logika inti, smoke test, dan tests/architecture.test.ts yang menjaga
-                     batas antar lapisan di atas
-scripts/             skrip node (ekspor sheet ke PNG, preview dunia)
-public/assets/override/   TARUH PNG buatan tangan di sini untuk menimpa aset generatif (lihat di bawah)
+                     IsoCamera, World3D (streaming), Combat3D, Story3D, Puzzle3D, HeroMesh3D,
+                     EnemyMesh3D, NpcMesh3D, Environment, Sky, WaterSurface, InstancePool,
+                     lightmap, occlusion, PerfProbe,
+                     worldPlan + pixelPlan (BEBAS three, jadi bisa dites di Node)
+tests/               Vitest: logika inti, playthrough headless, dan penjaga lapisan
+scripts/             skrip node (ekspor sheet, preview dunia, ascii-map, plan-stats,
+                     stream-budget, preview-textures, crop-reference, debug-puzzle)
 docs/                OVERHAUL.md (rencana induk), GAME_DESIGN.md, PROGRESS.md, STORY.md
 docs/reference/      TARGET VISUAL (referensi-visual.png). Buka dengan scripts/crop-reference.ts
                      untuk memeriksa bagiannya dari dekat; scripts/png.ts bisa decode PNG.
 ```
 
 Aturan lapisan (dijaga `tests/architecture.test.ts`): `core` tidak tahu renderer apa pun,
-`art` juga tidak, `ui` tidak boleh mengimpor phaser/three, dan kedua folder renderer tidak boleh
-saling mengimpor. `main.ts` memilih renderer lewat `?renderer=2d|3d` (atau menu) dan hanya memuat
-bundle yang dipilih.
+`art` juga tidak, `ui` tidak boleh mengimpor three, dan tidak ada apa pun yang boleh mengimpor
+phaser.
 
 ## Konvensi kode
 
@@ -135,8 +134,12 @@ bundle yang dipilih.
 
 ## Mengganti aset dengan gambar buatan tangan
 
-Semua gambar dihasilkan dari `src/art/*` menjadi **sheet** (atlas) dengan nama frame tetap (`src/art/sheets.ts`). Untuk mengganti:
-1. `npm run assets` → lihat layout di `.preview/<sheet>.png` dan `.preview/<sheet>.json`.
-2. Gambar ulang dengan ukuran & layout frame yang sama, simpan sebagai `public/assets/override/<sheet>.png`.
-3. Tambahkan nama sheet ke `public/assets/override/manifest.json` (`{"sheets": ["hero", ...]}`); saat boot PNG itu menggantikan piksel sheet
-   generatif (nama frame tetap sama).
+Semua gambar dihasilkan dari `src/art/*`. Untuk melihatnya:
+`npm run assets` (sheet sprite → `.preview/*.png`) dan `npx tsx scripts/preview-textures.ts`
+(tekstur 3D → `.preview/textures.png`).
+
+> **Catatan jujur:** mekanisme override PNG (`public/assets/override/`) dulu dipasang di
+> `BootScene` Phaser dan **ikut terhapus bersama renderer 2D**. Penggantinya untuk 3D belum
+> dibuat: yang dibutuhkan adalah memuat PNG lalu menimpa piksel `DataTexture` di
+> `render3d/textures.ts`. Folder dan manifestnya tetap ada supaya jalurnya tidak hilang.
+> Masuk daftar pekerjaan Batch 5 (aset & UI).

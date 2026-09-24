@@ -404,24 +404,28 @@ jalan di 3D.
 | Kombat: kombo, dodge, skill, hit-stop, getaran | `core/entities/HeroCore` | ✅ Batch 3 (+ 4 fase, tahan = berat) |
 | Musuh: lendir, pemanah, kelelawar, boss | `core/entities/enemies` | ✅ Batch 3 (`Combat3D`) |
 | Bidik otomatis | `HeroCore.aimAssist` | ✅ Batch 3 |
-| Angka damage | — | ⬜ **dipindah di bagian ini** |
-| Pickup penyembuh dari musuh | — | ⬜ **dipindah di bagian ini** |
-| HUD: bar HP + trail, teks quest, hint, banner area, toast | — | ⬜ **dipindah di bagian ini** |
-| Bar HP boss | — | ⬜ **dipindah di bagian ini** |
-| NPC (4) + penanda `!`/`?` | `core/world/source` (NpcDef) | ⬜ **dipindah di bagian ini** |
-| Dialog dengan efek ketik + potret | — | ⬜ **dipindah di bagian ini** |
-| Interactable: bicara, baca papan, istirahat di altar | `core/systems/interactables` | ⬜ **dipindah di bagian ini** |
-| Quest "Cahaya untuk Desa" (4 tahap) | `core/systems/quest` | ⬜ **dipindah di bagian ini** |
-| Puzzle dorong batu → gerbang terbuka | `core/systems/puzzleLogic` | ⬜ **dipindah di bagian ini** |
-| Pintu arena boss menutup saat boss bangun | `PuzzleSystem` (view) | ⬜ **dipindah di bagian ini** |
-| Lentera Agung menyala di akhir quest | — | ⬜ **dipindah di bagian ini** |
-| Minimap jendela 48x32 tile | — | ⬜ **dipindah di bagian ini** |
-| Save/load + autosave 30 dtk + saat event | `core/save`, `core/state/GameState` | ⬜ **dipindah di bagian ini** |
-| Checkpoint + respawn saat mati | — | ⬜ **dipindah di bagian ini** |
-| Layar judul: Lanjutkan / Main Baru | — | ⬜ **dipindah di bagian ini** |
-| Tombol fullscreen + lock landscape | — | ⬜ **dipindah di bagian ini** |
+| Angka damage | — | ✅ **sudah pindah** |
+| Pickup penyembuh dari musuh | — | ✅ **sudah pindah** |
+| HUD: bar HP + trail, teks quest, hint, banner area, toast | — | ✅ **sudah pindah** |
+| Bar HP boss | — | ✅ **sudah pindah** |
+| NPC (4) + penanda `!`/`?` | `core/world/source` (NpcDef) | ✅ **sudah pindah** |
+| Dialog dengan efek ketik + potret | — | ✅ **sudah pindah** |
+| Interactable: bicara, baca papan, istirahat di altar | `core/systems/interactables` | ✅ **sudah pindah** |
+| Quest "Cahaya untuk Desa" (4 tahap) | `core/systems/quest` | ✅ **sudah pindah** |
+| Puzzle dorong batu → gerbang terbuka | `core/systems/puzzleLogic` | ✅ **sudah pindah** |
+| Pintu arena boss menutup saat boss bangun | `PuzzleSystem` (view) | ✅ **sudah pindah** |
+| Lentera Agung menyala di akhir quest | — | ✅ **sudah pindah** |
+| Minimap jendela 48x32 tile | — | ✅ **sudah pindah** |
+| Save/load + autosave 30 dtk + saat event | `core/save`, `core/state/GameState` | ✅ **sudah pindah** |
+| Checkpoint + respawn saat mati | — | ✅ **sudah pindah** |
+| Layar judul: Lanjutkan / Main Baru | — | ✅ **sudah pindah** |
+| Tombol fullscreen + lock landscape | — | ✅ **sudah pindah** |
 | Kontrol sentuh (joystick + tombol) | `core/input` | ✅ `ui/TouchControls` (DOM) |
 | Menu Pengaturan, penghitung FPS, panel error | — | ✅ Fase 0 (DOM, netral renderer) |
+
+**Hasil:** keenam belas fitur sudah pindah dan dibuktikan `tests/playthrough.test.ts` (memainkan
+seluruh quest secara headless). Renderer 2D, parameter `?renderer=2d`, dependency Phaser, dan
+mock Phaser di tes **sudah dihapus**.
 
 **Yang sengaja tidak dipindah:** semuanya yang khas Phaser — `Fx` (partikel Phaser), `Lighting`
 (lightmap kanvas 2D), `Parallax`, `chunks` (bake tekstur chunk Phaser), `cameraRig`,
@@ -487,3 +491,18 @@ mode 3D belum menulis apa pun ke save.
 6. **Atmosfer**: cuaca (hujan/kabut), musuh khusus malam, bayangan dinamis dari pohon/rumah.
 7. **Sistem**: menu pause + pengaturan (volume, tata letak tombol, kualitas), gamepad, multi-slot save, lokalisasi ID/EN.
 8. **Performa & aset**: atlas PNG hasil ekspor + override buatan tangan, `SpriteGPULayer`/`TilemapGPULayer` bila perlu, uji perangkat nyata.
+
+### Angka setelah renderer 2D dihapus
+
+| Yang diukur | Sebelum | Sesudah |
+| --- | --- | --- |
+| Baris kode `src/` | 14.812 | 12.184 |
+| `node_modules` | 271 MB | 153 MB |
+| Bundle yang dikirim ke browser | 2.144 kB (entry 21 + boot3d 662 + **boot2d 1.461**) | 763 kB (entry 35 + boot3d 728) |
+| Yang benar-benar diunduh pemain 3D | 683 kB | 763 kB |
+| Berkas tes | 25 (186 tes) | 24 (171 tes) |
+
+Bundle total turun **64%** karena chunk `boot2d` 1,4 MB tidak lagi ikut dibangun. Yang diunduh
+pemain naik 80 kB: HUD, dialog, minimap, quest, dan puzzle yang baru pindah ke 3D ada di dalamnya.
+Entry naik 21 → 35 kB karena `SettingsPanel` mengimpor `combatTuning` → `HeroCore` secara statis;
+itu ditangani di bagian optimasi bundle.

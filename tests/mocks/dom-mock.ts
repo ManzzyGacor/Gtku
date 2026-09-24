@@ -1,8 +1,8 @@
 /**
  * A DOM small enough to run the overlay UI in Node. It records structure (children, style, text)
- * so the smoke test can assert what the settings menu built, without pulling in jsdom.
+ * so a test can assert what the settings menu or the touch controls built, without pulling in jsdom.
  */
-import { makeCanvas } from './phaser-mock';
+
 
 export interface FakeEl {
   tagName: string;
@@ -116,6 +116,29 @@ export function findByText(root: FakeEl, text: string): FakeEl | undefined {
   return walkEls(root).find((e) => e.textContent === text);
 }
 
+/** Enough of a canvas for code that only sizes one and asks for a context. */
+function makeCanvas(): FakeEl {
+  const node = makeElement('canvas');
+  const ctx = new Proxy(
+    {},
+    {
+      get: (_t, k: string) =>
+        k === 'createRadialGradient' || k === 'createLinearGradient'
+          ? () => ({ addColorStop() {} })
+          : k === 'createImageData'
+            ? (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h })
+            : () => undefined,
+      set: () => true,
+    },
+  );
+  Object.assign(node as unknown as Record<string, unknown>, {
+    width: 1,
+    height: 1,
+    getContext: () => ctx,
+  });
+  return node;
+}
+
 export interface FakeDocument {
   head: FakeEl;
   body: FakeEl;
@@ -130,7 +153,7 @@ export function installDom(): FakeDocument {
   const doc: FakeDocument = {
     head: makeElement('head'),
     body: makeElement('body'),
-    createElement: (tag) => (tag === 'canvas' ? (makeCanvas() as unknown as FakeEl) : makeElement(tag)),
+    createElement: (tag) => (tag === 'canvas' ? makeCanvas() : makeElement(tag)),
     getElementById: (id) => byId.get(id) ?? null,
     execCommand: () => true,
   };

@@ -12,11 +12,7 @@ import { readRaw, writeRaw } from './storage';
 export type PresetId = 'vlow' | 'low' | 'medium' | 'high' | 'ultra';
 export const PRESET_IDS: readonly PresetId[] = ['vlow', 'low', 'medium', 'high', 'ultra'];
 
-/** Which renderer boots. The 2D build stays available until the 3D one matches it. */
-export type RendererId = '2d' | '3d';
-
 export interface Settings {
-  renderer: RendererId;
   /** The quality level currently in effect (persisted, so a reload resumes where AUTO left off). */
   preset: PresetId;
   /** AUTO mode: the watchdog may raise and lower `preset` by itself. Off once the player pins one. */
@@ -48,9 +44,6 @@ export interface Settings {
 }
 
 export const DEFAULTS: Settings = {
-  // 3D is the default from Fase 2 on; `?renderer=2d` (or the settings menu) always gets the
-  // complete 2D game back until the 3D build matches it (docs/OVERHAUL.md §7).
-  renderer: '3d',
   preset: 'medium',
   presetAuto: true,
   fpsCounter: false,
@@ -97,7 +90,6 @@ function sanitize(raw: unknown): Partial<Settings> {
   if (!raw || typeof raw !== 'object') return {};
   const o = raw as Record<string, unknown>;
   const out: Partial<Settings> = {};
-  if (o.renderer === '2d' || o.renderer === '3d') out.renderer = o.renderer;
   if (typeof o.preset === 'string' && PRESET_IDS.includes(o.preset as PresetId)) out.preset = o.preset as PresetId;
   for (const k of ['presetAuto', 'fpsCounter', 'bloom', 'cutsceneSeen'] as const) if (typeof o[k] === 'boolean') out[k] = o[k] as boolean;
   for (const k of Object.keys(RANGES) as NumericKey[]) if (typeof o[k] === 'number' && Number.isFinite(o[k])) out[k] = quantize(k, o[k] as number);
@@ -122,8 +114,6 @@ export function parseUrlOverrides(search: string): Partial<Settings> {
   if (fps !== null) out.fpsCounter = fps;
   const bloom = bool(q.get('bloom'));
   if (bloom !== null) out.bloom = bloom;
-  const r = q.get('renderer');
-  if (r === '2d' || r === '3d') out.renderer = r;
   const p = q.get('preset');
   if (p && PRESET_IDS.includes(p as PresetId)) out.preset = p as PresetId;
   const legacy = q.get('q');

@@ -1,10 +1,12 @@
 /**
- * Entry point. Picks a renderer and loads only that one (`?renderer=2d|3d`, or the settings menu),
- * so a phone never downloads Phaser and Three.js at the same time.
+ * Entry point.
+ *
+ * The 2D (Phaser) renderer was removed once every one of its features had moved across — see the
+ * inventory in docs/PROGRESS.md and the tag `v0.2-2d-final` if any of it is ever needed again.
+ * The world, the quest and the combat all live in `src/core`, so that removal touched no game logic.
  */
 import { loadCombatTuning } from './core/entities/combatTuning';
 import { installErrorOverlay } from './core/errors';
-import { settings } from './core/settings';
 import { ensureDebugUi } from './ui/DebugUi';
 
 installErrorOverlay();
@@ -25,13 +27,9 @@ requestAnimationFrame(overlayFrame);
 const host = document.getElementById('game') ?? document.body;
 
 async function boot(): Promise<void> {
-  if (settings.get('renderer') === '3d') {
-    const { start3d } = await import('./render3d/boot3d');
-    (window as unknown as { __game3d: unknown }).__game3d = await start3d(host, debug);
-  } else {
-    const { start2d } = await import('./render2d/boot2d');
-    (window as unknown as { __game: unknown }).__game = start2d(host);
-  }
+  // Loaded on demand so the entry chunk stays tiny and the title screen appears immediately.
+  const { start3d } = await import('./render3d/boot3d');
+  (window as unknown as { __game3d: unknown }).__game3d = await start3d(host, debug);
 }
 
 void boot();

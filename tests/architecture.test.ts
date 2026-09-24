@@ -4,13 +4,13 @@
  *   src/core     game logic — knows about no renderer at all
  *   src/art      pure pixel-art pipeline — no renderer either
  *   src/ui       overlay UI — must survive the renderer swap, so neither engine
- *   src/render2d Phaser only
- *   src/render3d Three.js only
+ *   src/render3d Three.js only (the only renderer; the 2D one was removed once every feature
+ *                had moved across — see docs/PROGRESS.md and the tag `v0.2-2d-final`)
  *
  * Break any of those and this test names the line that did it.
  */
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, posix, relative } from 'node:path';
 import { test } from 'vitest';
 
@@ -129,18 +129,28 @@ test('src/ui survives the renderer swap: it imports neither Phaser nor Three', (
   assert.deepEqual(reaching, [], `src/ui must not reach into a renderer:\n${reaching.join('\n')}`);
 });
 
-test('each renderer folder uses only its own engine', () => {
-  const two = packageImports('src/render2d').filter((i) => i.pkg === 'three').map((i) => `${i.file}:${i.line}`);
-  assert.deepEqual(two, [], 'src/render2d is the Phaser build');
-  const three = packageImports('src/render3d').filter((i) => i.pkg === 'phaser').map((i) => `${i.file}:${i.line}`);
-  assert.deepEqual(three, [], 'src/render3d is the Three.js build');
+test('the renderer is the only place Three.js appears, and nothing imports Phaser any more', () => {
+  const three = packageImports('src/render3d').filter((i) => i.pkg === 'three');
+  assert.ok(three.length > 0, 'src/render3d is the Three.js build');
 
-  const crossing = [...localTargets('src/render2d'), ...localTargets('src/render3d')].filter((i) => {
-    const own = i.file.startsWith('src/render2d') ? 'src/render2d/' : 'src/render3d/';
-    const other = own === 'src/render2d/' ? 'src/render3d/' : 'src/render2d/';
-    return i.target.startsWith(other);
-  });
-  assert.deepEqual(crossing.map((i) => `${i.file}:${i.line} → ${i.target}`), [], 'the two renderers must not depend on each other');
+  // Phaser is gone: not a dependency, not an import, not a folder.
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  assert.equal(pkg.dependencies?.phaser, undefined, 'phaser must not be a dependency');
+  assert.equal(pkg.devDependencies?.phaser, undefined);
+  assert.equal(existsSync(join(ROOT, 'src/render2d')), false, 'src/render2d is gone');
+
+  const stray: string[] = [];
+  for (const dir of ['src', 'tests', 'scripts']) {
+    for (const file of walk(join(ROOT, dir))) {
+      for (const { spec, line } of specifiers(readFileSync(file, 'utf8'))) {
+        if (spec === 'phaser' || spec.startsWith('phaser/')) stray.push(`${relative(ROOT, file)}:${line}`);
+      }
+    }
+  }
+  assert.deepEqual(stray, [], `nothing may import phaser:\n${stray.join('\n')}`);
 });
 
 test('the world plan is renderer-free so the 3D layout can be tested in Node', () => {
