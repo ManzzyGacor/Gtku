@@ -47,6 +47,12 @@ export class Story3D {
   private npcs: NpcMesh3D[] = [];
   private interactables: Interactable[] = [];
   private pickups: Pickup[] = [];
+  /** Caches for the two things the HUD asks for every frame (see `mapMarks`/`questText`). */
+  private marksCache: MapMark[] | null = null;
+  private marksStage = -1;
+  private questCache: { title: string; lines: string[] } | null = null;
+  private questStage = -1;
+  private questKills = -1;
   private orbGeo: THREE.BufferGeometry;
   private orbMat: THREE.MeshBasicMaterial;
   /** The Great Lantern's beacon, switched on when the quest completes. */
@@ -253,9 +259,16 @@ export class Story3D {
     this.hooks.hint(label);
   }
 
-  /** Markers for the minimap: villagers, checkpoints and the current objective. */
+  /**
+   * Markers for the minimap: villagers, checkpoints and the current objective.
+   *
+   * Cached on the quest stage, which is the only thing that can change them — the HUD asks for
+   * this every frame, and rebuilding a dozen objects sixty times a second to describe a map that
+   * changes four times a playthrough is pure garbage.
+   */
   mapMarks(): MapMark[] {
     const stage = this.state.quest.stage;
+    if (this.marksCache && this.marksStage === stage) return this.marksCache;
     const out: MapMark[] = [];
     for (const npc of this.npcs) {
       const highlight = npc.def.id === 'wulan' && (stage === 0 || stage === 3);
@@ -266,11 +279,19 @@ export class Story3D {
       const b = this.world.markers.boss.spawn;
       out.push({ x: b.x, y: b.y, color: '#ff5a4a', size: 3 });
     }
+    this.marksStage = stage;
+    this.marksCache = out;
     return out;
   }
 
+  /** Also asked for every frame, and also only changes on a stage or a kill. */
   questText(): { title: string; lines: string[] } {
-    return { title: QUEST_TITLE, lines: trackerLines(this.state) };
+    const q = this.state.quest;
+    if (this.questCache && this.questStage === q.stage && this.questKills === q.kills) return this.questCache;
+    this.questStage = q.stage;
+    this.questKills = q.kills;
+    this.questCache = { title: QUEST_TITLE, lines: trackerLines(this.state) };
+    return this.questCache;
   }
 
   dispose(): void {

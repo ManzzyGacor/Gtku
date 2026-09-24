@@ -85,8 +85,11 @@ export class Combat3D {
     return this.boss;
   }
 
+  /** Counted in a loop, not with `filter`: the HUD reads this every frame. */
   get enemyCount(): number {
-    return this.world.enemies.filter((e) => !e.dead).length;
+    let n = 0;
+    for (const e of this.world.enemies) if (!e.dead) n++;
+    return n;
   }
 
   // ───────────────────────── spawning ─────────────────────────

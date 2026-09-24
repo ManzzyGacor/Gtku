@@ -226,6 +226,11 @@ function patchInstanceMaterial(material: THREE.Material, occlusion: OcclusionUni
  * recompiles mid-play; a fixed count means one program. The static lights are baked anyway.
  */
 const MAX_DYNAMIC_LIGHTS = 3;
+/**
+ * How far the camera focus must move (in tiles) before the streamer reconsiders which chunks to
+ * hold. Chunks are 16 tiles wide, so 2 is still an order of magnitude finer than the decision.
+ */
+const STREAM_STEP = 2;
 
 const keyOf = (cx: number, cy: number): number => cy * 1000 + cx;
 
@@ -265,6 +270,11 @@ export class World3D {
   private planCache = new Map<number, ChunkPlan>();
   private queue: { cx: number; cy: number; pri: number }[] = [];
   private activeLights: PointLightPlan[] = [];
+  /** Where the last streaming decision was taken, so the next one can be skipped (see `stream`). */
+  private lastStreamX = Infinity;
+  private lastStreamZ = Infinity;
+  /** Reused by `stream`: the keys worth keeping this pass. */
+  private readonly keepKeys = new Set<number>();
   /** Scratch for `pickNearestLights`, sized once to the light pool so no frame allocates. */
   private lightPick: (PointLightPlan | null)[] = [];
   private lightDist: number[] = [];
@@ -337,8 +347,12 @@ export class World3D {
 
   // ───────────────────────── settings ─────────────────────────
 
-  /** How many chunks of margin beyond the visible rectangle stay loaded. */
+  /**
+   * How many chunks of margin beyond the visible rectangle stay loaded. Re-decides immediately
+   * rather than at the next `STREAM_STEP`, because the player just changed a setting.
+   */
   setRenderDistance(chunks: number): void {
+    this.lastStreamX = Infinity;
     this.radiusChunks = Math.max(1, Math.round(chunks));
   }
 
@@ -349,6 +363,7 @@ export class World3D {
   ): void {
     this.extent = extent;
     this.project = project;
+    this.lastStreamX = Infinity;
   }
 
   /**
@@ -445,16 +460,30 @@ export class World3D {
    * chunk of margin sounds safer but grows the loaded disc by about a quarter, and every chunk is
    * a 256x256 texture.
    */
-  private stream(focusX: number, focusZ: number): void {
+  private stream(focusX: number, focusZ: number, force = false): void {
+    /*
+     * Deciding *which* chunks to hold is not cheap: two passes over a rotated search box, a sort,
+     * and a set — and it used to run every single frame, which meant a hundred short-lived objects
+     * per frame for a decision that cannot possibly change while the hero has moved a third of a
+     * tile. Chunks are 16 tiles across, so re-deciding every couple of tiles is already far finer
+     * than the grid it decides on. At a dodge roll's speed that is about five times a second
+     * instead of sixty.
+     */
+    if (!force && Math.abs(focusX - this.lastStreamX) < STREAM_STEP && Math.abs(focusZ - this.lastStreamZ) < STREAM_STEP) return;
+    this.lastStreamX = focusX;
+    this.lastStreamZ = focusZ;
+
     const want = this.desired(focusX, focusZ, 0);
-    const keep = new Set(this.desired(focusX, focusZ, 0.5).map((c) => keyOf(c.cx, c.cy)));
+    this.keepKeys.clear();
+    for (const c of this.desired(focusX, focusZ, 0.5)) this.keepKeys.add(keyOf(c.cx, c.cy));
     let changed = false;
     for (const [key, c] of this.loaded) {
-      if (keep.has(key)) continue;
+      if (this.keepKeys.has(key)) continue;
       this.unloadChunk(c);
       changed = true;
     }
-    this.queue = want.filter((c) => !this.loaded.has(keyOf(c.cx, c.cy)));
+    this.queue.length = 0;
+    for (const c of want) if (!this.loaded.has(keyOf(c.cx, c.cy))) this.queue.push(c);
     if (changed) this.rebuildLightList();
   }
 
@@ -476,9 +505,12 @@ export class World3D {
   preload(focusX: number, focusZ: number, radius?: number): void {
     const full = this.radiusChunks;
     if (radius !== undefined) this.radiusChunks = Math.max(1, radius);
-    this.stream(focusX, focusZ);
+    this.stream(focusX, focusZ, true);
     this.step(this.queue.length);
     this.radiusChunks = full;
+    // The warm-up deliberately used a smaller radius, so the next frame has to re-decide with the
+    // real one — otherwise standing still after a teleport would never load the rest.
+    if (radius !== undefined) this.lastStreamX = Infinity;
   }
 
   private loadChunk(cx: number, cy: number): void {

@@ -57,6 +57,8 @@ export class Minimap {
   /** The whole world, one pixel per tile, painted once. */
   private atlas: HTMLCanvasElement;
   private blink = 0;
+  /** Signature of the last frame drawn, so an unchanged minimap costs nothing (see `update`). */
+  private lastSig = NaN;
 
   constructor(private readonly world: WorldSource, parent: HTMLElement = document.body) {
     injectStyle('lm-ui-map', CSS);
@@ -118,6 +120,23 @@ export class Minimap {
     const x0 = Math.max(0, Math.min(this.world.widthTiles - VIEW_W, Math.round(hx - VIEW_W / 2)));
     const y0 = Math.max(0, Math.min(this.world.heightTiles - VIEW_H, Math.round(hy - VIEW_H / 2)));
 
+    /*
+     * Redraw only when the picture would actually differ.
+     *
+     * Everything below — clearRect, a scaled drawImage of the atlas, the chunk grid, a dot per
+     * marker — used to run on every single frame for a 96x64 image that changes when the hero
+     * crosses a tile (a few times a second at most) or when the hero dot blinks (three times a
+     * second). Canvas work on a phone is not free, and this was the HUD's largest per-frame cost.
+     */
+    const blinkPhase = Math.floor(this.blink * 3) % 2;
+    let sig = (x0 * 1000 + y0) * 4 + blinkPhase + (Math.floor(hx) * 7 + Math.floor(hy) * 13) * 1e6;
+    for (const m of marks) sig += m.x * 31 + m.y * 17 + (m.size ?? 2) * 5;
+    if (sig === this.lastSig) {
+      if (this.areaLabel.textContent !== areaName) this.areaLabel.textContent = areaName;
+      return;
+    }
+    this.lastSig = sig;
+
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.drawImage(this.atlas, x0, y0, VIEW_W, VIEW_H, 0, 0, VIEW_W * ZOOM, VIEW_H * ZOOM);
 
@@ -130,7 +149,7 @@ export class Minimap {
     };
     for (const m of marks) dot(m.x / TILE, m.y / TILE, m.color, m.size ?? 2);
     // the hero blinks so it is never lost among the markers
-    dot(hx - 0.5, hy - 1, Math.floor(this.blink * 3) % 2 === 0 ? '#ffffff' : '#ff5a5a', 3);
+    dot(hx - 0.5, hy - 1, blinkPhase === 0 ? '#ffffff' : '#ff5a5a', 3);
 
     // chunk grid, faint: it makes the scale readable
     ctx.strokeStyle = 'rgba(255,255,255,0.05)';

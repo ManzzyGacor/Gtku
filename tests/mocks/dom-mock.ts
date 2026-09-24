@@ -31,6 +31,8 @@ export interface FakeEl {
   focus(): void;
   /** Fire a listener as if the player tapped it. */
   tap(): void;
+  /** Canvas elements only: how many times a 2D context member was used. */
+  ctxCalls?(name: string): number;
 }
 
 export function makeElement(tag: string): FakeEl {
@@ -119,15 +121,18 @@ export function findByText(root: FakeEl, text: string): FakeEl | undefined {
 /** Enough of a canvas for code that only sizes one and asks for a context. */
 function makeCanvas(): FakeEl {
   const node = makeElement('canvas');
+  /** Every 2D call is counted, so a test can prove the HUD is not redrawing itself for nothing. */
+  const calls = new Map<string, number>();
   const ctx = new Proxy(
     {},
     {
-      get: (_t, k: string) =>
-        k === 'createRadialGradient' || k === 'createLinearGradient'
-          ? () => ({ addColorStop() {} })
-          : k === 'createImageData'
-            ? (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h })
-            : () => undefined,
+      get: (_t, k: string) => {
+        calls.set(k, (calls.get(k) ?? 0) + 1);
+        if (k === 'createRadialGradient' || k === 'createLinearGradient') return () => ({ addColorStop() {} });
+        if (k === 'createImageData')
+          return (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h });
+        return () => undefined;
+      },
       set: () => true,
     },
   );
@@ -135,6 +140,8 @@ function makeCanvas(): FakeEl {
     width: 1,
     height: 1,
     getContext: () => ctx,
+    /** How many times a 2D context member was touched (`drawImage`, `fillRect`, …). */
+    ctxCalls: (name: string) => calls.get(name) ?? 0,
   });
   return node;
 }
