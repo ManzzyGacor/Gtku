@@ -58,26 +58,50 @@ test('the weapon display shows what the swap will switch to, and the draw meter 
   controls.setWeaponState('BUSUR', 0);
 });
 
+/** Where the fixed base is resting, read off the element the player can see. */
+function stickCentre(): { x: number; y: number } {
+  const base = walkEls(doc.body).find((e) => e.classes.has('lm-stick-base'))!;
+  return { x: parseFloat(base.style.left ?? '0'), y: parseFloat(base.style.top ?? '0') };
+}
+
+test('the stick is fixed: the base stays put wherever the thumb goes', () => {
+  const before = stickCentre();
+  pointer('pointerdown', before.x + 10, before.y + 6);
+  pointer('pointermove', before.x + 400, before.y + 300);
+  assert.deepEqual(stickCentre(), before, 'the base must not chase the thumb');
+  pointer('pointerup', before.x + 400, before.y + 300);
+  assert.deepEqual(stickCentre(), before);
+});
+
 test('the stick has a dead zone, saturates at 1 and releases to zero', () => {
-  pointer('pointerdown', 120, 320);
-  assert.equal(input.stick.x, 0, 'a tap without movement is not a nudge');
+  const c = stickCentre();
+  pointer('pointerdown', c.x, c.y);
+  assert.equal(input.stick.x, 0, 'pressing the centre is not a nudge');
   assert.equal(input.stick.y, 0);
 
-  pointer('pointermove', 123, 320);
+  pointer('pointermove', c.x + 3, c.y);
   assert.equal(input.stick.x, 0, 'inside the dead zone');
 
-  pointer('pointermove', 400, 320); // far beyond the ring
+  pointer('pointermove', c.x + 400, c.y); // far beyond the ring
   assert.ok(Math.abs(input.stick.x - 1) < 1e-6, `saturates at 1, got ${input.stick.x}`);
   assert.ok(Math.abs(input.stick.y) < 1e-6);
 
-  pointer('pointerup', 400, 320);
+  pointer('pointerup', c.x + 400, c.y);
   assert.deepEqual({ x: input.stick.x, y: input.stick.y }, { x: 0, y: 0 }, 'lifting the thumb stops the hero');
 });
 
+test('a touch far from the base is ignored, so the left half is not one giant stick', () => {
+  const c = stickCentre();
+  pointer('pointerdown', c.x + 300, c.y, 7);
+  assert.deepEqual({ x: input.stick.x, y: input.stick.y }, { x: 0, y: 0 }, 'an accidental tap must not walk the hero');
+  pointer('pointerup', c.x + 300, c.y, 7);
+});
+
 test('the stick vector never exceeds 1 in any direction', () => {
+  const c = stickCentre();
   for (const [dx, dy] of [[1, 1], [-1, 1], [-1, -1], [1, -1], [0.3, -0.9]] as const) {
-    pointer('pointerdown', 150, 250, 2);
-    pointer('pointermove', 150 + dx * 500, 250 + dy * 500, 2);
+    pointer('pointerdown', c.x, c.y, 2);
+    pointer('pointermove', c.x + dx * 500, c.y + dy * 500, 2);
     const len = Math.hypot(input.stick.x, input.stick.y);
     assert.ok(len <= 1 + 1e-6, `direction ${dx},${dy} gave length ${len}`);
     assert.ok(len > 0.9, `direction ${dx},${dy} should be near full throw, got ${len}`);

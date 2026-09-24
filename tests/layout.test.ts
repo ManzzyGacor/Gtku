@@ -11,6 +11,7 @@
  */
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { installDom, walkEls, type FakeEl } from './mocks/dom-mock';
 
 /** The reported phone, plus a plausible landscape notch on the left and a gesture bar. */
@@ -76,6 +77,54 @@ function circles(root: FakeEl): Circle[] {
       r: px(e.style.width) / 2,
     }));
 }
+
+test('the UI layers in the right order, so no panel opens behind another', () => {
+  /*
+   * This is here because it already happened: the settings panel sat at z-index 85 and the title
+   * screen at 90, so tapping PENGATURAN in the main menu built the whole panel, laid it out, and
+   * put it *behind* an opaque full-screen gradient. Nothing appeared, and nothing was broken enough
+   * to throw. The order is asserted from the stylesheets themselves rather than trusted to comments.
+   */
+  /*
+   * Read the z-index of each panel's *own* root rule. Taking the lowest number in the file would be
+   * wrong: several of these stylesheets also style a corner button, which deliberately sits at a
+   * different layer from the panel it opens.
+   */
+  const roots: [string, string][] = [
+    ['Hud', '.lm-hud'],
+    ['TouchControls', '.lm-touch'],
+    ['Dialogue', '.lm-dlg'],
+    ['PauseMenu', '.lm-pause'],
+    ['CharacterPanel', '.lm-sheet'],
+    ['TitleScreen', '.lm-title'],
+    ['CutsceneOverlay', '.lm-cs'],
+    ['SettingsPanel', '.lm-ov'],
+  ];
+  const z = new Map<string, number>();
+  for (const [name, selector] of roots) {
+    const src = readFileSync(`src/ui/${name}.ts`, 'utf8');
+    const css = /const CSS = `([\s\S]*?)`;/.exec(src)?.[1] ?? '';
+    const rule = new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
+    const found = /z-index:\s*(\d+)/.exec(rule)?.[1];
+    assert.ok(found, `${name}: no z-index on its root rule (${selector})`);
+    z.set(name, Number(found));
+  }
+
+  // anything that can be opened *from* another panel has to sit above it
+  assert.ok(z.get('SettingsPanel')! > z.get('TitleScreen')!, 'Pengaturan is opened from the main menu');
+  assert.ok(z.get('SettingsPanel')! > z.get('PauseMenu')!, 'and from the pause menu');
+  assert.ok(z.get('SettingsPanel')! > z.get('CharacterPanel')!);
+  assert.ok(z.get('CharacterPanel')! > z.get('PauseMenu')!, 'Inventaris is opened from the pause menu');
+  assert.ok(z.get('PauseMenu')! > z.get('Dialogue')!, 'the pause menu covers the dialogue box');
+  assert.ok(z.get('CutsceneOverlay')! > z.get('TitleScreen')!, 'a cutscene plays over everything in the world');
+  assert.ok(z.get('CutsceneOverlay')! > z.get('CharacterPanel')!);
+  assert.ok(z.get('TouchControls')! > z.get('Hud')!, 'the stick is above the HUD it sits on');
+
+  // and the error panel in index.html stays on top of all of it
+  const html = readFileSync('index.html', 'utf8');
+  const errZ = Number(/#err\s*\{[^}]*z-index:\s*(\d+)/.exec(html)?.[1] ?? 0);
+  assert.ok(errZ > Math.max(...z.values()), `the error panel (${errZ}) must be visible over every panel`);
+});
 
 test('the safe-area insets are read from the browser rather than guessed', () => {
   const insets = safeInsets();

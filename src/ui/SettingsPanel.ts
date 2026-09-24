@@ -121,7 +121,18 @@ const ROWS: Row[] = [
 ];
 
 const CSS = `
-.lm-ov { position: fixed; inset: 0; z-index: 85; display: none; background: rgba(9, 7, 18, 0.72);
+/*
+ * Above the title screen (90), the pause menu (86) and the character sheet (88), because it can be
+ * opened from all three. It was below the title screen, which meant tapping PENGATURAN in the main
+ * menu opened it *behind* an opaque full-screen gradient: the panel was built, laid out and
+ * completely invisible. The whole layering is written down in the table below so the next panel
+ * does not have to guess.
+ *
+ *   66 HUD        70 kontrol sentuh   72 dialog      80 tombol sudut (gear/tas/jeda/fullscreen)
+ *   86 menu jeda  88 lembar karakter  90 layar judul  94 overlay cutscene
+ *   96 pengaturan (ini)               99 panel error (index.html)
+ */
+.lm-ov { position: fixed; inset: 0; z-index: 96; display: none; background: rgba(9, 7, 18, 0.72);
          font: 13px/1.45 ui-monospace, monospace; color: #e7e0ff; -webkit-tap-highlight-color: transparent; }
 .lm-ov.on { display: flex; align-items: stretch; justify-content: center; }
 .lm-card { width: 100%; max-width: 460px; display: flex; flex-direction: column;

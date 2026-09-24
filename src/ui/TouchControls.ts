@@ -6,9 +6,12 @@
  * It writes into the same `input` hub the game logic already reads, so `HeroCore` cannot tell the
  * difference between a finger, a key and a test.
  *
- * The stick is *dynamic*: it appears wherever the thumb lands on the left side of the screen and
- * the base follows the thumb when it runs past the edge, which is what works on a phone held in
- * two hands. Its resting position and size come from the settings menu.
+ * The stick is **fixed**: the base stays at the position and size set in the settings menu, and only
+ * the knob moves. A floating stick that appears under the thumb is fashionable and, on this game,
+ * wrong — the player asked for a fixed one, and the reason holds up: with a fixed base your thumb
+ * learns one spot and can find it without looking, which is what you need while something is
+ * swinging at you. Touching anywhere in the left zone still grabs it, so nothing has to be hit
+ * precisely; the knob simply moves relative to the base instead of the base moving to the thumb.
  */
 import { unlockAudio } from '../core/audio';
 import { input, type Action } from '../core/input';
@@ -21,6 +24,15 @@ const KNOB_R = 15;
 /** Fraction of the screen width that belongs to the stick. */
 const STICK_ZONE = 0.55;
 const DEADZONE = 0.14;
+/**
+ * How far from the base a touch may land and still grab the stick, in base radii.
+ *
+ * Generous, because a thumb is not a mouse: you should not have to look down to find the ring. But
+ * *bounded*, which matters now that the base no longer moves to meet the thumb — without a limit
+ * the whole left half of the screen becomes one giant stick, and an accidental tap near the edge
+ * reads as full tilt and sends the hero walking.
+ */
+const GRAB_RADII = 2.4;
 
 const CSS = `
 .lm-touch { position: fixed; inset: 0; z-index: 70; touch-action: none; }
@@ -243,14 +255,12 @@ export class TouchControls {
     }
     if (this.pointerId >= 0) return;
     if (e.clientX > window.innerWidth * STICK_ZONE) return;
+    // Near enough to the fixed base to count as reaching for it.
+    if (Math.hypot(e.clientX - this.center.x, e.clientY - this.center.y) > this.radius * GRAB_RADII) return;
     this.pointerId = e.pointerId;
     this.root.setPointerCapture?.(e.pointerId);
     input.lastDevice = 'touch';
-    const r = this.radius;
-    this.center = {
-      x: Math.max(r, Math.min(window.innerWidth * STICK_ZONE, e.clientX)),
-      y: Math.max(r, Math.min(window.innerHeight - r, e.clientY)),
-    };
+    // The base does not move to meet the thumb: it stays where the player put it.
     this.setIdle(false);
     this.drag(e.clientX, e.clientY);
   }
@@ -269,18 +279,21 @@ export class TouchControls {
     this.layout();
   }
 
-  /** Shared by pointer events and the tests: move the thumb to a screen position. */
+  /**
+   * Move the thumb to a screen position. Shared by pointer events and the tests.
+   *
+   * The base is fixed, so a thumb past the edge of the ring clamps the knob to the rim and keeps
+   * reading as full tilt in that direction — you can slide well outside the circle and still be
+   * walking, which is what makes a fixed stick usable without looking at it.
+   */
   drag(px: number, py: number): void {
     const r = this.radius;
     let dx = px - this.center.x;
     let dy = py - this.center.y;
     const len = Math.hypot(dx, dy);
     if (len > r) {
-      // Drag the base along so the thumb never runs out of room.
       dx = (dx / len) * r;
       dy = (dy / len) * r;
-      this.center.x += px - this.center.x - dx;
-      this.center.y += py - this.center.y - dy;
     }
     const m = Math.min(1, Math.hypot(dx, dy) / r);
     if (m < DEADZONE) {

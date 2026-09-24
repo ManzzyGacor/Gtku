@@ -753,6 +753,35 @@ animasi hanya transform + opacity (properti compositor, tidak memicu layout pass
 
 **Blur** hanya di preset Tinggi ke atas.
 
+### Dua perbaikan dari laporan tes
+
+**1. Pengaturan tidak muncul apa-apa dari menu utama.** Panelnya dibangun, ditata, dan terbuka —
+tapi di `z-index: 85`, sementara layar judul di `90` dengan latar gradien penuh. Jadi panelnya
+benar-benar ada, persis di belakang sesuatu yang menutupi seluruh layar, dan tidak ada yang cukup
+rusak untuk melempar error. Sekarang di `96`, di atas layar judul (90), menu jeda (86), dan lembar
+karakter (88) — karena bisa dibuka dari ketiganya. Urutan lapisannya sekarang ditulis di satu
+tempat (komentar di `SettingsPanel.ts`) **dan** dijaga tes yang membaca z-index langsung dari
+stylesheet-nya, bukan dari komentar:
+
+```
+66 HUD   70 kontrol sentuh   72 dialog   80 tombol sudut
+86 menu jeda   88 lembar karakter   90 layar judul   94 overlay cutscene
+96 pengaturan   99 panel error
+```
+
+**2. Joystick sekarang posisi tetap.** Sebelumnya dinamis: base-nya muncul di tempat jempol mendarat
+dan ikut bergeser kalau jempol keluar dari cincin. Sekarang base tinggal di tempat yang diatur di
+Pengaturan dan hanya knob-nya yang bergerak. Alasannya masuk akal: dengan base tetap, jempol hafal
+satu titik dan bisa menemukannya tanpa melihat — yang justru dibutuhkan saat ada yang mengayun ke
+arahmu.
+
+Dua detail yang ikut dijaga supaya tidak jadi masalah baru:
+- Jempol yang melewati tepi cincin **dijepit ke pinggirnya** dan tetap terbaca sebagai tilt penuh,
+  jadi kamu bisa menggeser jauh keluar lingkaran dan tetap berjalan.
+- Sentuhan hanya menangkap stick kalau jaraknya dalam **2,4x radius** base. Tanpa batas itu,
+  seluruh paruh kiri layar jadi satu stick raksasa dan ketukan tidak sengaja di tepi terbaca
+  sebagai tilt penuh. Ada tesnya: ketukan jauh dari base tidak menggerakkan hero.
+
 ### Performa
 
 Yang ditambahkan ke jalur per-frame, dan kenapa tidak menurunkan FPS:
