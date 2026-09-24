@@ -32,7 +32,10 @@ export interface GraphicsProfile {
   // ── knobs used by the 3D renderer from Fase 1 on ──
   /** Fraction of the pixel buffer actually rendered, then upscaled (performance dial). */
   renderScale: number;
-  /** Height of the low-resolution pixel buffer in px (the "pixel size" dial). */
+  /**
+   * Rows in the low-resolution pixel buffer — the "how big is a pixel" dial. Higher = smaller,
+   * denser pixels and more visible texture detail. It does **not** change the framing.
+   */
   pixelHeight: number;
   /** Post-process pixel outline. */
   outline: boolean;
@@ -49,27 +52,27 @@ export const PROFILES: Record<PresetId, GraphicsProfile> = {
   vlow: {
     id: 'vlow', name: 'Sangat Rendah', note: 'Untuk HP lama',
     bloom: false, particles: 0.2, lightmapEveryN: 3, parallax: false, fog: false, halos: 6,
-    renderScale: 0.6, pixelHeight: 270, outline: false, shadows: 'off', chunkMargin: 0,
+    renderScale: 0.8, pixelHeight: 216, outline: false, shadows: 'off', chunkMargin: 1,
   },
   low: {
     id: 'low', name: 'Rendah', note: 'Paling ringan',
     bloom: false, particles: 0.4, lightmapEveryN: 2, parallax: false, fog: false, halos: 10,
-    renderScale: 0.75, pixelHeight: 270, outline: false, shadows: 'off', chunkMargin: 0,
+    renderScale: 1, pixelHeight: 270, outline: true, shadows: 'off', chunkMargin: 1,
   },
   medium: {
     id: 'medium', name: 'Sedang', note: 'Seimbang',
     bloom: false, particles: 0.7, lightmapEveryN: 1, parallax: true, fog: false, halos: 16,
-    renderScale: 1, pixelHeight: 270, outline: true, shadows: 'low', chunkMargin: 1,
+    renderScale: 1, pixelHeight: 360, outline: true, shadows: 'low', chunkMargin: 2,
   },
   high: {
     id: 'high', name: 'Tinggi', note: 'Semua efek dasar',
     bloom: true, particles: 1, lightmapEveryN: 1, parallax: true, fog: true, halos: 22,
-    renderScale: 1, pixelHeight: 324, outline: true, shadows: 'high', chunkMargin: 1,
+    renderScale: 1, pixelHeight: 450, outline: true, shadows: 'high', chunkMargin: 2,
   },
   ultra: {
     id: 'ultra', name: 'Ultra', note: 'Paling berat',
     bloom: true, particles: 1.4, lightmapEveryN: 1, parallax: true, fog: true, halos: 22,
-    renderScale: 1, pixelHeight: 360, outline: true, shadows: 'high', chunkMargin: 2,
+    renderScale: 1, pixelHeight: 540, outline: true, shadows: 'high', chunkMargin: 2,
   },
 };
 

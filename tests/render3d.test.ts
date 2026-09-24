@@ -12,7 +12,7 @@ import { FOREST_X0 } from '../src/core/world/areas';
 import { PROPS } from '../src/core/world/props';
 import { T } from '../src/core/world/tiles';
 import { GeneratedWorld } from '../src/core/world/worldgen';
-import { IsoCamera, ISO_YAW_DEG, PITCH_MAX, PITCH_MIN, ZOOM_MAX, ZOOM_MIN } from '../src/render3d/IsoCamera';
+import { IsoCamera, ISO_YAW_DEG, PITCH_MAX, PITCH_MIN, VIEW_TILES_H, ZOOM_MAX, ZOOM_MIN } from '../src/render3d/IsoCamera';
 import { DEFAULTS, settings } from '../src/core/settings';
 import { buildGreyboxTextures } from '../src/art/greybox';
 import { countKinds, groupShapes, planArea, u, UNITS_PER_PX, WALL_HEIGHT } from '../src/render3d/worldPlan';
@@ -103,23 +103,26 @@ test('the pixel buffer keeps whole-number zoom at the requested grid height', ()
   assert.ok(b.height > a.height, `${b.height} should be more rows than ${a.height}`);
 });
 
-test('the camera is orthographic, its frustum matches the pixel buffer, and zoom means closer', () => {
+test('the camera framing is set in tiles, independent of the pixel resolution', () => {
   settings.reset(['camPitch', 'camZoom']);
   const cam = new IsoCamera();
-  cam.setViewport(480, 270);
+  cam.setAspect(480 / 270);
   assert.equal(cam.camera.isOrthographicCamera, true);
-  const wide = cam.camera.right - cam.camera.left;
-  assert.ok(Math.abs(wide - 480 / TILE / DEFAULTS.camZoom) < 1e-6, `frustum ${wide}`);
+  assert.ok(Math.abs(cam.camera.top - cam.camera.bottom - VIEW_TILES_H) < 1e-6, `${VIEW_TILES_H} tiles tall at zoom 1`);
+  assert.ok(Math.abs((cam.camera.right - cam.camera.left) / (cam.camera.top - cam.camera.bottom) - 480 / 270) < 1e-6, 'width follows the aspect ratio');
 
-  settings.set('camZoom', 1);
-  cam.setViewport(480, 270);
-  assert.equal(cam.camera.right - cam.camera.left, 480 / TILE, 'at zoom 1 one tile covers TILE pixels');
-  assert.equal(cam.camera.top - cam.camera.bottom, 270 / TILE);
+  // The framing must not move when the art resolution changes — that was the bug behind
+  // "raising the preset zoomed the camera out".
+  const before = cam.camera.top - cam.camera.bottom;
+  cam.setAspect(720 / 540);
+  assert.equal(cam.camera.top - cam.camera.bottom, before, 'a different resolution keeps the same framing');
+
+  // A hero 1.55 units tall should fill roughly the 8% of screen height the reference art shows.
+  const share = 1.55 / (cam.camera.top - cam.camera.bottom);
+  assert.ok(share > 0.06 && share < 0.11, `hero fills ${(share * 100).toFixed(1)}% of the screen`);
 
   settings.set('camZoom', 2);
-  cam.setViewport(480, 270);
-  assert.ok(cam.camera.right - cam.camera.left < 480 / TILE, 'more zoom shows less world = closer to the hero');
-
+  assert.ok(cam.camera.top - cam.camera.bottom < before, 'more zoom shows less world = closer to the hero');
   settings.set('camZoom', 99);
   assert.equal(cam.zoom, ZOOM_MAX, 'clamped to the settings range');
   settings.set('camZoom', 0);
@@ -132,7 +135,7 @@ test('the camera tilt follows the setting and stays a 3/4 view', () => {
   settings.reset(['camPitch', 'camZoom']);
   assert.ok(DEFAULTS.camPitch >= 35 && DEFAULTS.camPitch <= 45, `default tilt ${DEFAULTS.camPitch}° should be a side-on 3/4 view`);
   const cam = new IsoCamera();
-  cam.setViewport(480, 270);
+  cam.setAspect(480 / 270);
 
   /** Elevation of the camera above the ground, measured from where it actually ended up. */
   const elevation = (): number => {
@@ -254,7 +257,7 @@ test('a tree between the real camera and the hero is cut out; one behind it is n
   const { coverAmount, FADE_LIFT } = await import('../src/render3d/occlusion');
   settings.reset(['camPitch', 'camZoom']);
   const cam = new IsoCamera();
-  cam.setViewport(480, 270);
+  cam.setAspect(480 / 270);
   const heroWorld = new THREE.Vector3(40, 0, 40);
   cam.snap(heroWorld.x, heroWorld.z);
 

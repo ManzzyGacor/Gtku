@@ -1,5 +1,5 @@
-/** Minimal PNG encoder + upscaler for previews (Node only). */
-import { deflateSync } from 'node:zlib';
+/** Minimal PNG encoder, decoder and upscaler for previews and reference inspection (Node only). */
+import { deflateSync, inflateSync } from 'node:zlib';
 import { Pixmap, type Color } from '../src/art/pixmap';
 
 const crcTable = (() => {
@@ -58,5 +58,80 @@ export function upscale(pm: Pixmap, z: number, bg?: Color): Pixmap {
       const col = ((pm.data[i] << 16) | (pm.data[i + 1] << 8) | pm.data[i + 2]) >>> 0;
       out.rect(x * z, y * z, z, z, col, a);
     }
+  return out;
+}
+
+
+/**
+ * Minimal PNG decoder: 8-bit greyscale / RGB / RGBA (with or without alpha), non-interlaced.
+ * Enough to open a reference image and study it with the same `Pixmap` tools the art pipeline uses.
+ */
+export function decodePng(buf: Buffer): Pixmap {
+  if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error('not a PNG');
+  let pos = 8;
+  let w = 0;
+  let h = 0;
+  let depth = 0;
+  let colorType = 0;
+  const idat: Buffer[] = [];
+  while (pos < buf.length) {
+    const len = buf.readUInt32BE(pos);
+    const type = buf.toString('ascii', pos + 4, pos + 8);
+    const data = buf.subarray(pos + 8, pos + 8 + len);
+    if (type === 'IHDR') {
+      w = data.readUInt32BE(0);
+      h = data.readUInt32BE(4);
+      depth = data[8];
+      colorType = data[9];
+      if (data[12] !== 0) throw new Error('interlaced PNGs are not supported');
+      if (depth !== 8) throw new Error(`only 8-bit PNGs are supported (got ${depth})`);
+    } else if (type === 'IDAT') {
+      idat.push(Buffer.from(data));
+    } else if (type === 'IEND') {
+      break;
+    }
+    pos += 12 + len;
+  }
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : colorType === 4 ? 2 : 1;
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = w * channels;
+  const out = new Pixmap(w, h);
+  const prev = new Uint8Array(stride);
+  const line = new Uint8Array(stride);
+
+  for (let y = 0; y < h; y++) {
+    const filter = raw[y * (stride + 1)];
+    const src = raw.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride);
+    for (let i = 0; i < stride; i++) {
+      const a = i >= channels ? line[i - channels] : 0;
+      const b = prev[i];
+      const c = i >= channels ? prev[i - channels] : 0;
+      let v = src[i];
+      switch (filter) {
+        case 1: v += a; break;
+        case 2: v += b; break;
+        case 3: v += (a + b) >> 1; break;
+        case 4: {
+          // Paeth
+          const pa = Math.abs(b - c);
+          const pb = Math.abs(a - c);
+          const pc = Math.abs(a + b - 2 * c);
+          v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+          break;
+        }
+        default: break;
+      }
+      line[i] = v & 255;
+    }
+    for (let x = 0; x < w; x++) {
+      const i = x * channels;
+      const r = line[i];
+      const g = channels >= 3 ? line[i + 1] : r;
+      const b = channels >= 3 ? line[i + 2] : r;
+      const alpha = channels === 4 ? line[i + 3] : channels === 2 ? line[i + 1] : 255;
+      out.set(x, y, ((r << 16) | (g << 8) | b) >>> 0, alpha);
+    }
+    prev.set(line);
+  }
   return out;
 }

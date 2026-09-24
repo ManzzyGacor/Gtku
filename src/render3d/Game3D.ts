@@ -11,12 +11,13 @@ import { AdaptiveQuality, probeDevice, profileOf, suggestPreset } from '../core/
 import { input } from '../core/input';
 import { PerfMeter } from '../core/perf';
 import { settings } from '../core/settings';
-import { DAY_SECONDS, nightAmount, smooth, timeLabel } from '../core/systems/daynight';
+import { DAY_SECONDS, gradeAt, nightAmount, smooth, timeLabel } from '../core/systems/daynight';
 import { CAVE_X0, FOREST_X0 } from '../core/world/areas';
 import { HeroCore, type HeroInput } from '../core/entities/HeroCore';
 import { Collision } from '../core/world/collision';
 import { GeneratedWorld } from '../core/world/worldgen';
 import type { DiagnosticsSource } from '../ui/diagnostics';
+import * as THREE from 'three';
 import { Environment } from './Environment';
 import { HeroMesh3D } from './HeroMesh3D';
 import { IsoCamera } from './IsoCamera';
@@ -48,6 +49,10 @@ export class Game3D {
   private paused = false;
   /** Real seconds since boot, for flicker and breathing (keeps running while paused). */
   private clock = 0;
+  /** Preset multiplier on the bloom (the cheapest thing to turn down). */
+  private bloomScale = 1;
+  private gradeLift = new THREE.Color();
+  private gradeGain = new THREE.Color();
   private unsubscribe: () => void;
   private disposed = false;
 
@@ -86,7 +91,7 @@ export class Game3D {
   resize(): void {
     const p = profileOf(settings.get('preset'));
     const plan = this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, p.pixelHeight, p.renderScale);
-    this.camera.setViewport(plan.pixelW, plan.pixelH);
+    this.camera.setAspect(plan.pixelW / plan.pixelH);
   }
 
   private applyProfile(): void {
@@ -96,6 +101,7 @@ export class Game3D {
     // The bottom preset stands still: swaying every blade costs vertex work.
     this.scene3d.setWind(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.6 : 1);
     this.scene3d.setWater(p.id !== 'vlow');
+    this.bloomScale = p.id === 'vlow' ? 0 : p.id === 'low' ? 0.6 : 1;
     this.environment.setBudget(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.5 : 1);
     this.scene3d.setShadows(p.shadows);
     this.resize();
@@ -146,8 +152,10 @@ export class Game3D {
     const cave = this.caveWeight();
     this.scene3d.setHeroOcclusion(this.heroMesh.root.position, this.camera.camera, this.hero.alive);
     const [fogNear, fogFar] = this.camera.fogRange();
-    this.sky.update(this.dayTime, cave, fogNear, fogFar);
+    const night = nightAmount(this.dayTime);
+    this.sky.update(this.dayTime, cave, fogNear, fogFar, night, this.clock);
     this.pixels.renderer.setClearColor(this.sky.haze, 1);
+    this.applyGrade(cave);
     this.scene3d.setRenderDistance(this.chunkRadius());
     this.scene3d.setHeroGround(u(this.hero.x), u(this.hero.y));
     this.scene3d.update(this.dayTime, this.camera.target, cave, this.paused ? 0 : 1, dt);
@@ -157,6 +165,19 @@ export class Game3D {
     this.scene3d.waterUniforms.uFogRange.value.set(this.sky.fog.near, this.sky.fog.far);
     this.environment.update(dt, this.camera.target, nightAmount(this.dayTime), cave, this.forestWeight(), this.sky.haze);
     this.pixels.render(this.camera.camera);
+  }
+
+  /** Bloom, vignette and colour grade for the current time of day, scaled by the preset. */
+  private applyGrade(cave: number): void {
+    const g = gradeAt(this.dayTime, cave);
+    const p = profileOf(settings.get('preset'));
+    const allow = settings.get('bloom') && p.bloom ? 1 : 0;
+    this.pixels.setGrade({
+      bloom: g.bloom * allow * this.bloomScale,
+      vignette: g.vignette * (p.outline ? 1 : 0.6),
+      lift: this.gradeLift.setRGB(g.lift[0], g.lift[1], g.lift[2]),
+      gain: this.gradeGain.setRGB(g.gain[0], g.gain[1], g.gain[2]),
+    });
   }
 
   /** 0 outside, 1 deep in the cave — the same curve the 2D renderer uses for its lightmap. */
@@ -215,8 +236,8 @@ export class Game3D {
     const s = this.scene3d.stats();
     const plan = this.pixels.plan;
     return [
-      `grid pixel: ${plan.pixelW}x${plan.pixelH} (zoom ${plan.zoom})`,
-      `render target: ${plan.renderW}x${plan.renderH}`,
+      `kanvas: ${plan.canvasW}x${plan.canvasH} px perangkat (layar ${Math.round(window.innerWidth * (window.devicePixelRatio || 1))}x${Math.round(window.innerHeight * (window.devicePixelRatio || 1))})`,
+      `grid pixel: ${plan.pixelW}x${plan.pixelH}   render target: ${plan.renderW}x${plan.renderH}   skala ${plan.scale.toFixed(2)}x`,
       `chunk dimuat: ${s.chunks} (radius ${this.chunkRadius()}, antre ${s.queued})   instance: ${s.instances}   ` +
         `draw group: ${s.draws} (${s.pools} pool, ${s.water} air)   lampu: ${s.lights}`,
       `atmosfer: jam ${timeLabel(this.dayTime)}   malam ${(nightAmount(this.dayTime) * 100).toFixed(0)}%   ` +

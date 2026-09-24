@@ -70,21 +70,22 @@ export interface SkyColors {
 }
 
 const SKY_KEYS: [number, RGB, RGB][] = [
-  // t, top, haze
-  [0.0, [0.05, 0.06, 0.16], [0.10, 0.11, 0.24]],
-  [0.2, [0.07, 0.09, 0.22], [0.15, 0.15, 0.30]],
-  [0.27, [0.28, 0.24, 0.45], [0.86, 0.52, 0.42]],
-  [0.35, [0.44, 0.62, 0.86], [0.85, 0.80, 0.72]],
-  [0.5, [0.38, 0.62, 0.92], [0.76, 0.85, 0.92]],
-  [0.65, [0.42, 0.62, 0.88], [0.88, 0.84, 0.74]],
-  [0.74, [0.44, 0.34, 0.54], [0.95, 0.58, 0.34]],
-  [0.82, [0.16, 0.14, 0.34], [0.46, 0.30, 0.45]],
-  [0.92, [0.06, 0.08, 0.20], [0.14, 0.14, 0.28]],
-  [1.0, [0.05, 0.06, 0.16], [0.10, 0.11, 0.24]],
+  // t, top, haze — tuned against docs/reference/referensi-visual.png, which is a dusk scene lit
+  // almost entirely by lanterns: the distance goes deep teal-to-black, never pale grey.
+  [0.0, [0.016, 0.022, 0.062], [0.035, 0.062, 0.098]],
+  [0.2, [0.028, 0.040, 0.098], [0.055, 0.090, 0.135]],
+  [0.27, [0.180, 0.150, 0.330], [0.560, 0.330, 0.290]],
+  [0.35, [0.320, 0.500, 0.780], [0.640, 0.600, 0.540]],
+  [0.5, [0.260, 0.520, 0.860], [0.560, 0.680, 0.760]],
+  [0.65, [0.300, 0.500, 0.800], [0.680, 0.620, 0.520]],
+  [0.74, [0.300, 0.230, 0.420], [0.680, 0.360, 0.210]],
+  [0.82, [0.080, 0.080, 0.220], [0.230, 0.150, 0.250]],
+  [0.92, [0.022, 0.032, 0.085], [0.060, 0.085, 0.130]],
+  [1.0, [0.016, 0.022, 0.062], [0.035, 0.062, 0.098]],
 ];
 
 /** Deep-cave backdrop: no sky at all, just cold stone haze. */
-export const CAVE_SKY: SkyColors = { top: [0.03, 0.03, 0.08], haze: [0.10, 0.09, 0.18] };
+export const CAVE_SKY: SkyColors = { top: [0.012, 0.012, 0.030], haze: [0.045, 0.040, 0.090] };
 
 export function skyAt(t: number): SkyColors {
   t = wrapDay(t);
@@ -100,7 +101,7 @@ export function skyAt(t: number): SkyColors {
       };
     }
   }
-  return { top: [0.38, 0.62, 0.92], haze: [0.76, 0.85, 0.92] };
+  return { top: [0.26, 0.52, 0.86], haze: [0.56, 0.68, 0.76] };
 }
 
 /** Blend an outdoor sky toward the cave backdrop. */
@@ -134,4 +135,46 @@ export function sunDirection(t: number): { x: number; y: number; z: number; up: 
 export function timeLabel(t: number): string {
   const h = Math.floor(wrapDay(t + 0.0) * 24);
   return `${String(h).padStart(2, '0')}:00`;
+}
+
+
+/**
+ * Post-process look for the time of day: how much bloom, how deep the vignette, and the colour
+ * grade (a lift pushed into the shadows and a gain multiplied into the highlights).
+ *
+ * This is what sells the reference's night: a blue-black ambient with warm light blooming out of
+ * every lantern and window. Pure, so the curve can be checked without a GPU.
+ */
+export interface GradeColors {
+  /** 0..1 bloom strength. */
+  bloom: number;
+  /** 0..1 vignette depth. */
+  vignette: number;
+  /** Added to the shadows. */
+  lift: RGB;
+  /** Multiplied into the highlights. */
+  gain: RGB;
+}
+
+export function gradeAt(t: number, cave = 0): GradeColors {
+  const night = nightAmount(t);
+  // Dusk and dawn are the golden hours: warm gain, moderate bloom.
+  const golden = Math.max(0, 1 - Math.min(Math.abs(wrapDay(t) - 0.74), Math.abs(wrapDay(t) - 0.27)) * 7);
+
+  const dayBloom = 0.22;
+  const nightBloom = 0.95;
+  const bloom = lerp(lerp(dayBloom, nightBloom, night) + golden * 0.25, 1.05, cave);
+
+  const vignette = lerp(lerp(0.18, 0.34, night), 0.46, cave);
+
+  // Shadows drift toward the night's blue, and toward violet underground.
+  const lift: RGB = [
+    lerp(0.0, 0.012, night) + cave * 0.01,
+    lerp(0.0, 0.020, night) + cave * 0.008,
+    lerp(0.0, 0.052, night) + cave * 0.042,
+  ];
+  // Highlights warm up at night and at golden hour, because every light source is a flame.
+  const warm = Math.min(1, night * 0.8 + golden);
+  const gain: RGB = [lerp(1, 1.1, warm), lerp(1, 1.0, warm), lerp(1, 0.9, warm) * lerp(1, 1.06, cave)];
+  return { bloom, vignette, lift, gain };
 }

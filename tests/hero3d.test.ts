@@ -20,7 +20,7 @@ function makeHero(): { hero: HeroCore; camera: IsoCamera } {
   const start = world.markers.playerStart;
   const hero = new HeroCore(start.x, start.y);
   const camera = new IsoCamera();
-  camera.setViewport(480, 270);
+  camera.setAspect(480 / 270);
   camera.snap(u(hero.x), u(hero.y));
   return { hero, camera };
 }

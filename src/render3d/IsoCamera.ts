@@ -10,11 +10,19 @@
  * want to see of the buildings, and only the person holding the phone can judge that.
  */
 import * as THREE from 'three';
-import { TILE } from '../config';
 import { RANGES, settings } from '../core/settings';
 
 /** Rotation around Y. 45° gives the classic isometric diamond. */
 export const ISO_YAW_DEG = 45;
+/**
+ * How many tiles fit on screen vertically at zoom 1 — i.e. the framing.
+ *
+ * Measured off the reference art: the hero fills about 8% of the screen height there, and the hero
+ * is 1.55 units tall, so the view is roughly 19 tiles. Crucially this is **independent of the pixel
+ * resolution**: raising `pixelHeight` makes the pixels smaller and the image sharper, it does not
+ * zoom the camera out.
+ */
+export const VIEW_TILES_H = 19;
 /** Tilt above the ground, in degrees; the player's range. Lower = more side-on. */
 export const PITCH_MIN = RANGES.camPitch.min;
 export const PITCH_MAX = RANGES.camPitch.max;
@@ -38,8 +46,7 @@ export class IsoCamera {
   private offset = new THREE.Vector3();
   private pitchDeg = 38;
   private zoomLevel = 1;
-  private pixelW = 480;
-  private pixelH = 270;
+  private aspect = 16 / 9;
   private unsubscribe: () => void;
 
   constructor() {
@@ -74,16 +81,18 @@ export class IsoCamera {
     return this.zoomLevel;
   }
 
-  /** Match the frustum to the pixel buffer: `TILE` px = 1 world unit at zoom 1. */
-  setViewport(pixelW: number, pixelH: number): void {
-    this.pixelW = pixelW;
-    this.pixelH = pixelH;
+  /**
+   * The screen's aspect ratio. The framing comes from `VIEW_TILES_H`, not from how many pixels
+   * the buffer has, so the two dials stay independent.
+   */
+  setAspect(aspect: number): void {
+    this.aspect = aspect > 0 ? aspect : 16 / 9;
     this.fit();
   }
 
   private fit(): void {
-    const halfW = this.pixelW / TILE / 2 / this.zoomLevel;
-    const halfH = this.pixelH / TILE / 2 / this.zoomLevel;
+    const halfH = VIEW_TILES_H / 2 / this.zoomLevel;
+    const halfW = halfH * this.aspect;
     const c = this.camera;
     c.left = -halfW;
     c.right = halfW;
@@ -94,8 +103,8 @@ export class IsoCamera {
 
   /** Half-extent of the visible ground, in world units — what the chunk streamer needs. */
   get viewRadius(): number {
-    const halfW = this.pixelW / TILE / 2 / this.zoomLevel;
-    const halfH = this.pixelH / TILE / 2 / this.zoomLevel;
+    const halfH = VIEW_TILES_H / 2 / this.zoomLevel;
+    const halfW = halfH * this.aspect;
     // a tilted camera sees further along the ground than its vertical half-extent suggests
     return Math.hypot(halfW, halfH / Math.max(0.35, Math.sin(deg(this.pitchDeg))));
   }

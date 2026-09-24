@@ -1,21 +1,26 @@
 /**
  * The pixel pipeline (docs/OVERHAUL.md §3).
  *
- *   scene ──► low-resolution render target ──► full-screen quad (nearest) ──► canvas
+ *   scene ──► low-resolution render target ──► full-screen quad ──► canvas (always full screen)
  *
- * Two independent dials, exactly as the plan asks:
- *   • **pixelHeight** — the art-directed pixel grid (270…360 px tall). The canvas is sized to an
- *     integer multiple of it, so one texel lands on a whole number of device pixels and the art
- *     stays crisp instead of shimmering.
- *   • **renderScale** — the performance dial. It shrinks the render target *below* the pixel grid;
- *     the quad blows it back up. Lower = fewer fragments to shade, chunkier pixels.
+ * Three independent things, which the first version wrongly tangled together:
+ *   • **the canvas** always covers the whole screen at device resolution. The final blit is one
+ *     textured quad, so this costs nothing and it is the only way to guarantee no letterboxing.
+ *   • **pixelHeight** — the art-directed pixel grid (270…540 rows). It decides how big a "pixel"
+ *     looks and nothing else. It no longer changes the framing.
+ *   • **renderScale** — the performance dial, which shrinks the render target below the pixel grid.
  *
- * The same quad pass also draws the optional pixel outline by comparing neighbouring depths, which
- * costs one extra depth sample per side and needs no second geometry pass.
+ * The upscale uses *sharp bilinear*: nearest-neighbour everywhere except a sub-pixel-wide ramp at
+ * texel boundaries. At a whole-number scale that is identical to nearest; at a fractional one (540
+ * rows on a 759-row screen) it keeps the pixels hard-edged without the crawling that plain nearest
+ * produces when texel and pixel grids disagree.
+ *
+ * The same quad pass draws the pixel outline from neighbouring depths, a soft bloom of the
+ * brightest areas, a gentle colour grade and a thin vignette.
  */
 import * as THREE from 'three';
-import { planDisplay } from '../core/display';
 import { recordError } from '../core/errors';
+import { planPixelBuffers, type PixelPlan } from './pixelPlan';
 
 // The palette is authored as literal bytes; see textures.ts.
 THREE.ColorManagement.enabled = false;
@@ -31,46 +36,113 @@ const QUAD_FRAG = /* glsl */ `
 precision mediump float;
 uniform sampler2D tColor;
 uniform sampler2D tDepth;
-uniform vec2 uTexel;
+uniform sampler2D tBloom;
+uniform vec2 uSize;        // render-target size in texels
+uniform vec2 uTexel;       // 1 / uSize
 uniform float uOutline;
 uniform float uThreshold;
+uniform float uBloom;
+uniform float uVignette;
+uniform vec3 uGradeLift;   // pushed into the shadows (the night's blue)
+uniform vec3 uGradeGain;   // multiplied into the highlights (the lanterns' warmth)
 varying vec2 vUv;
 
+/**
+ * Sharp bilinear: snap to texel centres, then allow one screen pixel of ramp across the boundary.
+ * Identical to nearest at integer scales, but stops the shimmer at fractional ones.
+ */
+vec2 sharpUv(vec2 uv) {
+  vec2 pixels = uv * uSize;
+  vec2 base = floor(pixels) + 0.5;
+  vec2 frac = pixels - base;
+  // fwidth tells us how wide one screen pixel is in texel space
+  vec2 ramp = max(fwidth(pixels), vec2(0.0001));
+  return (base + clamp(frac / ramp, -0.5, 0.5)) * uTexel;
+}
+
 void main() {
-  vec4 c = texture2D(tColor, vUv);
+  vec2 uv = sharpUv(vUv);
+  vec3 c = texture2D(tColor, uv).rgb;
+
   if (uOutline > 0.5) {
-    float d = texture2D(tDepth, vUv).x;
+    float d = texture2D(tDepth, uv).x;
     // Only the *far* side of a silhouette darkens, so the outline hugs the shape in front of it.
     float nearest = min(
-      min(texture2D(tDepth, vUv + vec2(-uTexel.x, 0.0)).x, texture2D(tDepth, vUv + vec2(uTexel.x, 0.0)).x),
-      min(texture2D(tDepth, vUv + vec2(0.0, -uTexel.y)).x, texture2D(tDepth, vUv + vec2(0.0, uTexel.y)).x)
+      min(texture2D(tDepth, uv + vec2(-uTexel.x, 0.0)).x, texture2D(tDepth, uv + vec2(uTexel.x, 0.0)).x),
+      min(texture2D(tDepth, uv + vec2(0.0, -uTexel.y)).x, texture2D(tDepth, uv + vec2(0.0, uTexel.y)).x)
     );
-    if (d - nearest > uThreshold) c.rgb *= 0.52;
+    if (d - nearest > uThreshold) c *= 0.52;
   }
-  gl_FragColor = vec4(c.rgb, 1.0);
+
+  // Bloom: a blurred copy of the bright areas, added back. This is what makes lanterns glow.
+  if (uBloom > 0.0) {
+    vec3 glow = texture2D(tBloom, vUv).rgb;
+    c += glow * uBloom;
+  }
+
+  // Colour grade: lift the shadows toward the night's blue, warm the highlights.
+  float luma = dot(c, vec3(0.299, 0.587, 0.114));
+  c = c * mix(uGradeGain, vec3(1.0), 1.0 - luma) + uGradeLift * (1.0 - luma);
+
+  // Vignette, kept thin so it reads as lens falloff rather than a dark frame.
+  vec2 v = vUv - 0.5;
+  float vig = 1.0 - uVignette * dot(v, v) * 1.6;
+  gl_FragColor = vec4(clamp(c * vig, 0.0, 1.0), 1.0);
 }`;
 
-export interface PixelPlan {
-  /** The art-directed pixel grid. */
-  pixelW: number;
-  pixelH: number;
-  /** Device pixels per pixel-grid cell. */
-  zoom: number;
-  /** Actual render-target size (pixel grid × renderScale). */
-  renderW: number;
-  renderH: number;
+/** Separable blur used to build the bloom, run at quarter resolution. */
+const BLUR_FRAG = /* glsl */ `
+precision mediump float;
+uniform sampler2D tSrc;
+uniform vec2 uStep;
+uniform float uCutoff;
+uniform float uPrefilter;
+varying vec2 vUv;
+void main() {
+  vec3 sum = vec3(0.0);
+  // 9-tap Gaussian
+  const float w0 = 0.227027, w1 = 0.1945946, w2 = 0.1216216, w3 = 0.054054, w4 = 0.016216;
+  sum += texture2D(tSrc, vUv).rgb * w0;
+  sum += texture2D(tSrc, vUv + uStep * 1.0).rgb * w1;
+  sum += texture2D(tSrc, vUv - uStep * 1.0).rgb * w1;
+  sum += texture2D(tSrc, vUv + uStep * 2.0).rgb * w2;
+  sum += texture2D(tSrc, vUv - uStep * 2.0).rgb * w2;
+  sum += texture2D(tSrc, vUv + uStep * 3.0).rgb * w3;
+  sum += texture2D(tSrc, vUv - uStep * 3.0).rgb * w3;
+  sum += texture2D(tSrc, vUv + uStep * 4.0).rgb * w4;
+  sum += texture2D(tSrc, vUv - uStep * 4.0).rgb * w4;
+  if (uPrefilter > 0.5) {
+    // keep only what is brighter than the cutoff, so only real light sources bloom
+    float luma = dot(sum, vec3(0.299, 0.587, 0.114));
+    sum *= smoothstep(uCutoff, uCutoff + 0.35, luma);
+  }
+  gl_FragColor = vec4(sum, 1.0);
+}`;
+
+export type { PixelPlan };
+
+export interface GradeSettings {
+  bloom: number;
+  vignette: number;
+  lift: THREE.Color;
+  gain: THREE.Color;
 }
 
 export class PixelRenderer {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly canvas: HTMLCanvasElement;
-  plan: PixelPlan = { pixelW: 480, pixelH: 270, zoom: 1, renderW: 480, renderH: 270 };
+  plan: PixelPlan = planPixelBuffers(640, 360, 1, 360, 1);
 
   private target: THREE.WebGLRenderTarget;
+  private bloomA: THREE.WebGLRenderTarget;
+  private bloomB: THREE.WebGLRenderTarget;
   private quadScene = new THREE.Scene();
+  private blurScene = new THREE.Scene();
   private quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private quadMaterial: THREE.ShaderMaterial;
+  private blurMaterial: THREE.ShaderMaterial;
+  private bloomEnabled = true;
   /** False when the device can't give us a depth texture; the outline is then skipped. */
   readonly canOutline: boolean;
 
@@ -93,7 +165,26 @@ export class PixelRenderer {
     this.canOutline = this.renderer.capabilities.isWebGL2;
     if (!this.canOutline) recordError('WebGL2 tidak tersedia: outline pixel dimatikan', 'PixelRenderer');
 
-    this.target = this.makeTarget(this.plan.renderW, this.plan.renderH);
+    this.target = this.makeTarget(this.plan.renderW, this.plan.renderH, true);
+    this.bloomA = this.makeTarget(1, 1, false);
+    this.bloomB = this.makeTarget(1, 1, false);
+
+    this.blurMaterial = new THREE.ShaderMaterial({
+      vertexShader: QUAD_VERT,
+      fragmentShader: BLUR_FRAG,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tSrc: { value: null },
+        uStep: { value: new THREE.Vector2() },
+        uCutoff: { value: 0.62 },
+        uPrefilter: { value: 1 },
+      },
+    });
+    const blurQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blurMaterial);
+    blurQuad.frustumCulled = false;
+    this.blurScene.add(blurQuad);
+
     this.quadMaterial = new THREE.ShaderMaterial({
       vertexShader: QUAD_VERT,
       fragmentShader: QUAD_FRAG,
@@ -102,9 +193,15 @@ export class PixelRenderer {
       uniforms: {
         tColor: { value: this.target.texture },
         tDepth: { value: this.target.depthTexture },
+        tBloom: { value: this.bloomB.texture },
+        uSize: { value: new THREE.Vector2(this.plan.renderW, this.plan.renderH) },
         uTexel: { value: new THREE.Vector2(1 / this.plan.renderW, 1 / this.plan.renderH) },
         uOutline: { value: 0 },
         uThreshold: { value: 0.0016 },
+        uBloom: { value: 0.55 },
+        uVignette: { value: 0.3 },
+        uGradeLift: { value: new THREE.Color(0, 0, 0) },
+        uGradeGain: { value: new THREE.Color(1, 1, 1) },
       },
     });
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.quadMaterial);
@@ -112,36 +209,44 @@ export class PixelRenderer {
     this.quadScene.add(quad);
   }
 
-  private makeTarget(w: number, h: number): THREE.WebGLRenderTarget {
-    const depthTexture = new THREE.DepthTexture(w, h, THREE.UnsignedIntType);
-    depthTexture.minFilter = THREE.NearestFilter;
-    depthTexture.magFilter = THREE.NearestFilter;
-    const rt = new THREE.WebGLRenderTarget(w, h, {
-      minFilter: THREE.NearestFilter,
-      magFilter: THREE.NearestFilter,
+  private makeTarget(w: number, h: number, depth: boolean): THREE.WebGLRenderTarget {
+    const opts: THREE.RenderTargetOptions = {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
       generateMipmaps: false,
-      depthBuffer: true,
-      depthTexture,
+      depthBuffer: depth,
       colorSpace: THREE.NoColorSpace,
-    });
+    };
+    if (depth) {
+      const depthTexture = new THREE.DepthTexture(w, h, THREE.UnsignedIntType);
+      depthTexture.minFilter = THREE.NearestFilter;
+      depthTexture.magFilter = THREE.NearestFilter;
+      opts.depthTexture = depthTexture;
+    }
+    const rt = new THREE.WebGLRenderTarget(w, h, opts);
+    // The scene target is sampled texel-exactly by the sharp-bilinear upscale.
+    if (depth) {
+      rt.texture.minFilter = THREE.NearestFilter;
+      rt.texture.magFilter = THREE.NearestFilter;
+    }
     return rt;
   }
 
   /**
-   * Re-plan the buffers. `pixelHeight` is the art grid, `renderScale` the performance dial.
-   * Returns the plan so the camera can re-fit its frustum.
+   * Re-plan the buffers so the canvas fills the screen exactly.
+   *
+   * @param pixelHeight rows in the art grid (the "pixel size" dial)
+   * @param renderScale fraction of that actually rendered (the performance dial)
    */
   resize(cssW: number, cssH: number, dpr: number, pixelHeight: number, renderScale: number): PixelPlan {
-    const d = planDisplay(cssW, cssH, dpr, pixelHeight);
-    const renderW = Math.max(64, Math.round(d.width * renderScale));
-    const renderH = Math.max(36, Math.round(d.height * renderScale));
-    const plan: PixelPlan = { pixelW: d.width, pixelH: d.height, zoom: d.zoom, renderW, renderH };
+    const plan = planPixelBuffers(cssW, cssH, dpr, pixelHeight, renderScale);
+    const { canvasW, canvasH, renderW, renderH } = plan;
     this.plan = plan;
 
-    // Drawing buffer is an exact integer multiple of the pixel grid; CSS scales it to the screen.
-    this.renderer.setSize(plan.pixelW * plan.zoom, plan.pixelH * plan.zoom, false);
-    this.canvas.style.width = `${(plan.pixelW * plan.zoom) / dpr}px`;
-    this.canvas.style.height = `${(plan.pixelH * plan.zoom) / dpr}px`;
+    this.renderer.setSize(canvasW, canvasH, false);
+    // CSS always covers the whole viewport; the browser stretches the (possibly smaller) buffer.
+    this.canvas.style.width = `${plan.cssW}px`;
+    this.canvas.style.height = `${plan.cssH}px`;
 
     if (this.target.width !== renderW || this.target.height !== renderH) {
       this.target.setSize(renderW, renderH);
@@ -151,24 +256,54 @@ export class PixelRenderer {
       depthTexture.magFilter = THREE.NearestFilter;
       this.target.depthTexture = depthTexture;
       this.quadMaterial.uniforms.tDepth.value = depthTexture;
+      const bw = Math.max(32, Math.round(renderW / 4));
+      const bh = Math.max(18, Math.round(renderH / 4));
+      this.bloomA.setSize(bw, bh);
+      this.bloomB.setSize(bw, bh);
     }
+    this.quadMaterial.uniforms.uSize.value.set(renderW, renderH);
     this.quadMaterial.uniforms.uTexel.value.set(1 / renderW, 1 / renderH);
-    return plan;
+    return this.plan;
   }
 
   setOutline(on: boolean): void {
     this.quadMaterial.uniforms.uOutline.value = on && this.canOutline ? 1 : 0;
   }
 
+  /** Bloom strength, vignette depth and the colour grade, all driven by time of day. */
+  setGrade(g: GradeSettings): void {
+    this.bloomEnabled = g.bloom > 0.001;
+    this.quadMaterial.uniforms.uBloom.value = g.bloom;
+    this.quadMaterial.uniforms.uVignette.value = g.vignette;
+    (this.quadMaterial.uniforms.uGradeLift.value as THREE.Color).copy(g.lift);
+    (this.quadMaterial.uniforms.uGradeGain.value as THREE.Color).copy(g.gain);
+  }
+
   render(camera: THREE.Camera): void {
     this.renderer.setRenderTarget(this.target);
     this.renderer.clear();
     this.renderer.render(this.scene, camera);
+
+    if (this.bloomEnabled) {
+      // bright pass + horizontal blur, then vertical blur
+      this.blurMaterial.uniforms.tSrc.value = this.target.texture;
+      this.blurMaterial.uniforms.uPrefilter.value = 1;
+      this.blurMaterial.uniforms.uStep.value.set(1 / this.bloomA.width, 0);
+      this.renderer.setRenderTarget(this.bloomA);
+      this.renderer.render(this.blurScene, this.quadCamera);
+
+      this.blurMaterial.uniforms.tSrc.value = this.bloomA.texture;
+      this.blurMaterial.uniforms.uPrefilter.value = 0;
+      this.blurMaterial.uniforms.uStep.value.set(0, 1 / this.bloomB.height);
+      this.renderer.setRenderTarget(this.bloomB);
+      this.renderer.render(this.blurScene, this.quadCamera);
+    }
+
     this.renderer.setRenderTarget(null);
     this.renderer.render(this.quadScene, this.quadCamera);
   }
 
-  /** Live draw calls / triangles, for the FPS overlay. */
+  /** Live draw calls, for the report. */
   get drawCalls(): number {
     return this.renderer.info.render.calls;
   }
@@ -176,7 +311,10 @@ export class PixelRenderer {
   dispose(): void {
     this.target.depthTexture?.dispose();
     this.target.dispose();
+    this.bloomA.dispose();
+    this.bloomB.dispose();
     this.quadMaterial.dispose();
+    this.blurMaterial.dispose();
     this.renderer.dispose();
     this.canvas.remove();
   }

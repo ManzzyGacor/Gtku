@@ -29,15 +29,48 @@ const FRAG = /* glsl */ `
 precision mediump float;
 uniform vec3 uTop;
 uniform vec3 uHaze;
+uniform float uStars;
+uniform float uTime;
 varying vec2 vScreen;
 
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+// Bayer 4x4 as arithmetic (GLSL ES 1.0 has no bit ops), for banding-free gradients.
+float bayer2(float x, float y) {
+  float d = mod(x + y, 2.0);
+  return d * (2.0 + y) + (1.0 - d) * x;
+}
+float dither(vec2 p) {
+  vec2 lo = mod(p, 2.0);
+  vec2 hi = mod(floor(p * 0.5), 2.0);
+  return (4.0 * bayer2(lo.x, lo.y) + bayer2(hi.x, hi.y) + 0.5) / 16.0 - 0.5;
+}
+
 void main() {
-  float t = smoothstep(0.0, 1.0, vScreen.y);
-  vec3 c = mix(uHaze, uTop, t);
-  // A 270 px buffer bands badly on a smooth gradient, so dither with a 2x2 ordered pattern.
-  vec2 p = mod(gl_FragCoord.xy, 2.0);
-  float d = (p.x * 0.5 + p.y * 0.25) - 0.375;
-  gl_FragColor = vec4(c + d / 255.0 * 3.0, 1.0);
+  // Two-stage ramp: a fast fall near the horizon and a slow one above it reads much more like sky
+  // than a single linear blend, which is what made the first version look flat.
+  float y = clamp(vScreen.y, 0.0, 1.0);
+  float lowBlend = smoothstep(0.0, 0.42, y);
+  float highBlend = smoothstep(0.30, 1.0, y);
+  vec3 horizon = mix(uHaze, uTop, 0.35);
+  vec3 c = mix(mix(uHaze, horizon, lowBlend), uTop, highBlend);
+
+  // Stars: fixed to the screen, which is correct — the camera never rotates and the sky is at
+  // infinity. Only above the horizon haze, and only once it is actually dark.
+  if (uStars > 0.01) {
+    vec2 cell = floor(gl_FragCoord.xy / 2.0);
+    float r = hash(cell);
+    if (r > 0.9975) {
+      float twinkle = 0.55 + 0.45 * sin(uTime * 2.0 + r * 120.0);
+      float high = smoothstep(0.25, 0.75, y);
+      c += vec3(0.85, 0.88, 1.0) * uStars * high * twinkle * (0.5 + hash(cell + 7.0) * 0.5);
+    }
+  }
+
+  // A low-resolution buffer bands badly on a smooth gradient; one LSB of ordered noise removes it.
+  gl_FragColor = vec4(c + dither(gl_FragCoord.xy) * (2.0 / 255.0), 1.0);
 }`;
 
 export class Sky {
@@ -58,6 +91,8 @@ export class Sky {
       uniforms: {
         uTop: { value: new THREE.Color(0x2a3f70) },
         uHaze: { value: new THREE.Color(0x8fa8c0) },
+        uStars: { value: 0 },
+        uTime: { value: 0 },
       },
     });
     this.mesh = new THREE.Mesh(this.geometry, this.material);
@@ -75,7 +110,7 @@ export class Sky {
    * @param near     where fog starts, in world units
    * @param far      where fog reaches the backdrop colour — keep this inside the streamed radius
    */
-  update(dayTime: number, cave: number, near: number, far: number): void {
+  update(dayTime: number, cave: number, near: number, far: number, night = 0, clock = 0): void {
     const sky: SkyColors = blendSky(skyAt(dayTime), cave);
     const top = this.material.uniforms.uTop.value as THREE.Color;
     top.setRGB(sky.top[0], sky.top[1], sky.top[2]);
@@ -83,9 +118,17 @@ export class Sky {
     haze.setRGB(sky.haze[0], sky.haze[1], sky.haze[2]);
     this.haze.copy(haze);
     this.fog.color.copy(haze);
-    // Inside the cave the fog closes in: you should never see the whole cavern at once.
-    this.fog.near = near * (1 - cave * 0.55);
-    this.fog.far = far * (1 - cave * 0.5);
+    // Stars fade in with the night and are invisible underground.
+    this.material.uniforms.uStars.value = Math.max(0, (night - 0.35) / 0.65) * (1 - cave);
+    this.material.uniforms.uTime.value = clock;
+    /*
+     * Inside the cave the fog closes in — you should never see the whole cavern at once. Outdoors
+     * it is deliberately gentle in daylight (a washed-out world was the complaint) and stronger at
+     * night, where it hides the streamed edge behind darkness rather than behind grey.
+     */
+    const reach = 1 + (1 - night) * 0.45;
+    this.fog.near = near * reach * (1 - cave * 0.55);
+    this.fog.far = far * reach * (1 - cave * 0.5);
   }
 
   dispose(): void {

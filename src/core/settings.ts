@@ -56,7 +56,7 @@ export const DEFAULTS: Settings = {
   buttonScale: 1,
   textScale: 2,
   camPitch: 38,
-  camZoom: 1.25,
+  camZoom: 1,
   musicVol: 0.6,
   sfxVol: 0.8,
   cutsceneSeen: false,
@@ -70,7 +70,7 @@ export const RANGES = {
   buttonScale: { min: 0.7, max: 1.8, step: 0.1 },
   textScale: { min: 1, max: 3, step: 1 },
   camPitch: { min: 22, max: 55, step: 1 },
-  camZoom: { min: 0.8, max: 2.2, step: 0.05 },
+  camZoom: { min: 0.6, max: 2, step: 0.05 },
   musicVol: { min: 0, max: 1, step: 0.1 },
   sfxVol: { min: 0, max: 1, step: 0.1 },
 } as const;
