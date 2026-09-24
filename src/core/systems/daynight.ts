@@ -167,11 +167,15 @@ export function gradeAt(t: number, cave = 0): GradeColors {
 
   const vignette = lerp(lerp(0.18, 0.34, night), 0.46, cave);
 
-  // Shadows drift toward the night's blue, and toward violet underground.
+  /*
+   * Shadows drift toward the night's blue, and toward violet underground. The cave's lift is a
+   * little stronger than deep night on purpose: "dungeon ungu kebiruan" should read as its own
+   * place, not merely as somewhere dark.
+   */
   const lift: RGB = [
-    lerp(0.0, 0.012, night) + cave * 0.01,
-    lerp(0.0, 0.020, night) + cave * 0.008,
-    lerp(0.0, 0.052, night) + cave * 0.042,
+    lerp(0.0, 0.012, night) + cave * 0.014,
+    lerp(0.0, 0.020, night) + cave * 0.010,
+    lerp(0.0, 0.052, night) + cave * 0.060,
   ];
   // Highlights warm up at night and at golden hour, because every light source is a flame.
   const warm = Math.min(1, night * 0.8 + golden);
