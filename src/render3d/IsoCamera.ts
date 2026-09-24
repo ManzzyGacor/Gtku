@@ -101,12 +101,38 @@ export class IsoCamera {
     c.updateProjectionMatrix();
   }
 
-  /** Half-extent of the visible ground, in world units — what the chunk streamer needs. */
-  get viewRadius(): number {
+  /**
+   * Half-extents of the ground the camera can see, in world units, measured along the camera's own
+   * axes: `right` across the screen and `forward` into it. The forward extent is larger than the
+   * vertical half-height because the camera is tilted.
+   *
+   * The streamer tests chunks against this **rectangle**. It used to use a circle of radius
+   * `hypot(right, forward)`, which on a 3:1 phone covered nearly twice the area that is actually
+   * on screen — and every extra chunk is a 256x256 texture and a pile of instances.
+   */
+  groundExtent(): { right: number; forward: number } {
     const halfH = VIEW_TILES_H / 2 / this.zoomLevel;
-    const halfW = halfH * this.aspect;
-    // a tilted camera sees further along the ground than its vertical half-extent suggests
-    return Math.hypot(halfW, halfH / Math.max(0.35, Math.sin(deg(this.pitchDeg))));
+    return { right: halfH * this.aspect, forward: halfH / Math.max(0.35, Math.sin(deg(this.pitchDeg))) };
+  }
+
+  /** Worst-case half-extent, for anything that wants one number (fog reach, reports). */
+  get viewRadius(): number {
+    const e = this.groundExtent();
+    return Math.hypot(e.right, e.forward);
+  }
+
+  /**
+   * Project a world point onto the camera's ground axes, relative to `origin`.
+   * Under a fixed yaw the ground projection is just a rotation, so this is two multiplies.
+   */
+  toGroundAxes(px: number, pz: number, originX: number, originZ: number, out = new THREE.Vector2()): THREE.Vector2 {
+    const yaw = deg(ISO_YAW_DEG);
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
+    const dx = px - originX;
+    const dz = pz - originZ;
+    out.set(dx * cos - dz * sin, -(dx * sin + dz * cos));
+    return out;
   }
 
   /**

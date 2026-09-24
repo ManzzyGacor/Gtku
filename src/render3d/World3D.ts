@@ -14,7 +14,7 @@
  */
 import * as THREE from 'three';
 import { CHUNK_PX, CHUNK_TILES } from '../config';
-import { bakeChunk, bakeWaterMask, chunkHasWater } from '../art/bake';
+import { bakeChunk, bakeWaterMask } from '../art/bake';
 import { buildGreyboxTextures, buildGroundDetail, type GreyboxTexture } from '../art/greybox';
 import type { Sheet } from '../art/sheet';
 import { ambientAt, blendAmbient, nightAmount, sunDirection } from '../core/systems/daynight';
@@ -23,7 +23,7 @@ import type { WorldSource } from '../core/world/source';
 import { InstancePool } from './InstancePool';
 import { FADE_LIFT, FADE_RADIUS } from './occlusion';
 import { pixmapTexture } from './textures';
-import { makeWaterUniforms, WaterSurface, type WaterUniforms } from './WaterSurface';
+import { buildWaterGeometry, makeWaterUniforms, WaterSurface, type WaterUniforms } from './WaterSurface';
 import { bakeLightMap, lightMapHasLight } from './lightmap';
 import { chunkLights, groupKeyOf, planChunk, u, VEGETATION, type ChunkPlan, type PointLightPlan, type ShapeKind } from './worldPlan';
 
@@ -220,6 +220,13 @@ function patchInstanceMaterial(material: THREE.Material, occlusion: OcclusionUni
   material.customProgramCacheKey = () => `lm-instance|${opts.sway > 0 ? 's' : ''}${opts.pulse ? 'p' : ''}`;
 }
 
+/**
+ * Dynamic point lights live in a pool of exactly this size for the whole session — see
+ * `setLightBudget`. Three's lighting loop is compiled per light count, so a changing count means
+ * recompiles mid-play; a fixed count means one program. The static lights are baked anyway.
+ */
+const MAX_DYNAMIC_LIGHTS = 3;
+
 const keyOf = (cx: number, cy: number): number => cy * 1000 + cx;
 
 interface LoadedChunk3D {
@@ -246,7 +253,6 @@ export class World3D {
   private groundGeometry: THREE.PlaneGeometry;
   private detailTexture: THREE.Texture;
   private readonly detailStrength = { value: 1 };
-  private waterGeometry: THREE.PlaneGeometry;
   readonly waterUniforms: WaterUniforms = makeWaterUniforms();
   private waterEnabled = true;
 
@@ -257,12 +263,22 @@ export class World3D {
   private queue: { cx: number; cy: number; pri: number }[] = [];
   private activeLights: PointLightPlan[] = [];
   private radiusChunks = 2;
+  /**
+   * Camera ground extents and the projection onto its axes. `setView` replaces these with the real
+   * camera's; until then a generous axis-aligned square keeps the streamer working on its own
+   * (tests and tools drive `World3D` without a camera).
+   */
+  private extent: { right: number; forward: number } = { right: 30, forward: 30 };
+  private project: (px: number, pz: number, ox: number, oz: number, out: THREE.Vector2) => THREE.Vector2 = (px, pz, ox, oz, out) =>
+    out.set(px - ox, pz - oz);
+  private axes: THREE.Vector2[] = [];
   private shadowsOn = true;
 
   // lighting
   private hemi = new THREE.HemisphereLight(0xbfd4ff, 0x3a2f5e, 1);
   private sun = new THREE.DirectionalLight(0xfff2c0, 1.1);
   private pool: THREE.PointLight[] = [];
+  private lightBudget = MAX_DYNAMIC_LIGHTS;
 
   private readonly env: EnvUniforms = {
     uTime: { value: 0 },
@@ -295,6 +311,13 @@ export class World3D {
     scene.add(this.group);
     this.sun.position.set(-0.4, 1, 0.3).multiplyScalar(40);
     scene.add(this.hemi, this.sun, this.sun.target);
+    // Fixed-size light pool, created once and never added to or removed from.
+    for (let i = 0; i < MAX_DYNAMIC_LIGHTS; i++) {
+      const l = new THREE.PointLight(0xffffff, 0, 8, 1.6);
+      l.position.set(0, -1000, 0);
+      scene.add(l);
+      this.pool.push(l);
+    }
 
     const pix = buildGreyboxTextures();
     for (const [name, pm] of Object.entries(pix)) this.textures[name as GreyboxTexture] = pixmapTexture(pm, { tile: true });
@@ -302,30 +325,37 @@ export class World3D {
 
     this.groundGeometry = new THREE.PlaneGeometry(CHUNK_TILES, CHUNK_TILES);
     this.groundGeometry.rotateX(-Math.PI / 2);
-    this.waterGeometry = new THREE.PlaneGeometry(CHUNK_TILES, CHUNK_TILES);
-    this.waterGeometry.rotateX(-Math.PI / 2);
   }
 
   // ───────────────────────── settings ─────────────────────────
 
-  /** How many chunks around the hero stay loaded. */
+  /** How many chunks of margin beyond the visible rectangle stay loaded. */
   setRenderDistance(chunks: number): void {
     this.radiusChunks = Math.max(1, Math.round(chunks));
   }
 
-  /** How many dynamic point lights the current preset allows. */
+  /** Tell the streamer what the camera can see, so it only loads that. */
+  setView(
+    extent: { right: number; forward: number },
+    project: (px: number, pz: number, ox: number, oz: number, out: THREE.Vector2) => THREE.Vector2,
+  ): void {
+    this.extent = extent;
+    this.project = project;
+  }
+
+  /**
+   * How many dynamic point lights actually carry light.
+   *
+   * The pool itself is a **fixed size and always in the scene**. Three compiles the lighting loop
+   * for however many lights are visible, so adding and removing them — or even toggling
+   * `visible` — changes `NUM_POINT_LIGHTS` and forces a shader recompile mid-play. That was
+   * costing frames every time the hero walked past a lamp. Unused lights are parked with zero
+   * intensity instead, which keeps one single program for the whole session.
+   *
+   * Only a handful are needed at all, because the *static* lights are baked into the light map.
+   */
   setLightBudget(n: number): void {
-    while (this.pool.length > n) {
-      const l = this.pool.pop()!;
-      this.scene.remove(l);
-      l.dispose();
-    }
-    while (this.pool.length < n) {
-      const l = new THREE.PointLight(0xffffff, 0, 8, 1.6);
-      l.visible = false;
-      this.scene.add(l);
-      this.pool.push(l);
-    }
+    this.lightBudget = Math.max(0, Math.min(MAX_DYNAMIC_LIGHTS, Math.round(n)));
   }
 
   setShadows(mode: 'off' | 'low' | 'high'): void {
@@ -370,18 +400,31 @@ export class World3D {
     return Math.ceil(this.world.heightTiles / CHUNK_TILES);
   }
 
-  /** Chunk coordinates wanted around a world position, nearest first. */
-  private desired(focusX: number, focusZ: number, margin: number): { cx: number; cy: number; pri: number }[] {
+  /**
+   * Which chunks the camera can see, nearest first.
+   *
+   * Tested against the camera's ground **rectangle** rather than a circle: on a wide phone screen
+   * a circle big enough to cover the corners also covers nearly twice the area that is on screen.
+   */
+  private desired(focusX: number, focusZ: number, marginChunks: number): { cx: number; cy: number; pri: number }[] {
     const hx = focusX / CHUNK_TILES;
     const hy = focusZ / CHUNK_TILES;
-    const r = this.radiusChunks + margin;
     const out: { cx: number; cy: number; pri: number }[] = [];
-    for (let cy = Math.floor(hy - r); cy <= Math.ceil(hy + r); cy++)
-      for (let cx = Math.floor(hx - r); cx <= Math.ceil(hx + r); cx++) {
+    // a chunk's own half-diagonal, so a chunk straddling the edge still counts as visible
+    const slack = (CHUNK_TILES * Math.SQRT2) / 2 + (this.radiusChunks - 1 + marginChunks) * CHUNK_TILES;
+    const limitRight = this.extent.right + slack;
+    const limitForward = this.extent.forward + slack;
+    // search box big enough to contain the rotated rectangle
+    const box = Math.ceil((Math.max(limitRight, limitForward) * Math.SQRT2) / CHUNK_TILES) + 1;
+    for (let cy = Math.floor(hy) - box; cy <= Math.ceil(hy) + box; cy++)
+      for (let cx = Math.floor(hx) - box; cx <= Math.ceil(hx) + box; cx++) {
         if (cx < 0 || cy < 0 || cx >= this.chunksWide() || cy >= this.chunksHigh()) continue;
-        const pri = Math.hypot(cx + 0.5 - hx, cy + 0.5 - hy);
-        if (pri > r + 0.75) continue;
-        out.push({ cx, cy, pri });
+        const centreX = (cx + 0.5) * CHUNK_TILES;
+        const centreZ = (cy + 0.5) * CHUNK_TILES;
+        const g = this.axes.length ? this.axes[0] : (this.axes[0] = new THREE.Vector2());
+        this.project(centreX, centreZ, focusX, focusZ, g);
+        if (Math.abs(g.x) > limitRight || Math.abs(g.y) > limitForward) continue;
+        out.push({ cx, cy, pri: Math.hypot(cx + 0.5 - hx, cy + 0.5 - hy) });
       }
     out.sort((a, b) => a.pri - b.pri);
     return out;
@@ -462,13 +505,13 @@ export class World3D {
     ground.receiveShadow = this.shadowsOn;
     this.group.add(ground);
 
-    // rippling surface, only where there is water to ripple
+    // Rippling surface, built to cover only the water tiles themselves.
     let water: WaterSurface | null = null;
-    if (chunkHasWater(this.world, cx, cy)) {
+    const waterGeo = this.waterEnabled ? buildWaterGeometry(this.world, cx, cy) : null;
+    if (waterGeo) {
       // Smooth filtering on the mask so the depth and shore bands blend instead of stepping.
       const maskTex = pixmapTexture(bakeWaterMask(this.world, cx, cy), { flipRows: true, smooth: true });
-      water = new WaterSurface(this.waterGeometry, maskTex, this.waterUniforms, cx, cy, lightMap);
-      water.mesh.visible = this.waterEnabled;
+      water = new WaterSurface(waterGeo, maskTex, this.waterUniforms, cx, cy, lightMap);
       this.group.add(water.mesh);
     }
 
@@ -589,7 +632,7 @@ export class World3D {
     this.lightPoolScale = Math.max(0, scale);
   }
 
-  /** Rippling water costs one extra transparent pass per chunk; the bottom preset skips it. */
+  /** Rippling water costs a transparent pass; the bottom preset and the probe can switch it off. */
   setWater(on: boolean): void {
     this.waterEnabled = on;
     for (const c of this.loaded.values()) if (c.water) c.water.mesh.visible = on;
@@ -662,20 +705,19 @@ export class World3D {
       }
     }
 
-    if (!this.pool.length) return;
     const active = this.activeLights
       .filter((l) => !l.nightOnly || night > 0.15)
       .map((l) => ({ l, d: (l.x - focus.x) ** 2 + (l.z - focus.z) ** 2 }))
       .sort((a, b) => a.d - b.d)
-      .slice(0, this.pool.length);
+      .slice(0, this.lightBudget);
     this.pool.forEach((p, i) => {
       const hit = active[i];
       if (!hit) {
-        p.visible = false;
+        // parked, not hidden: hiding it would change the light count and recompile the shaders
+        p.intensity = 0;
         return;
       }
       const l = hit.l;
-      p.visible = true;
       p.position.set(l.x, l.y, l.z);
       p.color.setHex(l.color);
       p.distance = l.radius;
@@ -701,7 +743,7 @@ export class World3D {
       queued: this.queue.length,
       instances,
       draws: this.loaded.size + this.pools.size + water,
-      lights: this.pool.length,
+      lights: this.lightBudget,
       pools: this.pools.size,
       water,
       windows,
@@ -709,6 +751,11 @@ export class World3D {
   }
 
   dispose(): void {
+    for (const l of this.pool) {
+      this.scene.remove(l);
+      l.dispose();
+    }
+    this.pool.length = 0;
     for (const c of [...this.loaded.values()]) this.unloadChunk(c);
     for (const p of this.pools.values()) p.dispose();
     this.pools.clear();
@@ -718,12 +765,10 @@ export class World3D {
     this.poolGeometries = [];
     this.poolMaterials = [];
     this.groundGeometry.dispose();
-    this.waterGeometry.dispose();
     this.detailTexture.dispose();
     for (const t of Object.values(this.textures)) t?.dispose();
     this.textures = {};
     this.planCache.clear();
     this.scene.remove(this.group, this.hemi, this.sun, this.sun.target);
-    this.setLightBudget(0);
   }
 }

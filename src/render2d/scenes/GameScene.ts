@@ -200,9 +200,10 @@ export class GameScene extends Phaser.Scene {
       settings.set('preset', suggestPreset(probeDevice()));
     }
     this.adaptive.auto = settings.get('presetAuto') && !settings.isLocked('preset');
-    this.adaptive.onChange = (_from, to, why) => {
-      settings.set('preset', to);
-      const name = profileOf(to).name;
+    this.adaptive.onChange = (rung, why) => {
+      settings.set('preset', rung.preset);
+      settings.set('renderScale', rung.renderScale);
+      const name = profileOf(rung.preset).name;
       this.ui?.toast(why === 'drop' ? `Grafik diturunkan ke ${name} (FPS rendah)` : `Grafik dinaikkan ke ${name}`);
     };
     this.unsubscribeSettings = settings.on((key) => {
@@ -570,7 +571,7 @@ export class GameScene extends Phaser.Scene {
     this.heroView.update(dt, realDt, time / 1000);
     this.fx.update(realDt);
     this.perf.push(realDt);
-    this.adaptive.update(realDt, settings.get('preset'));
+    this.adaptive.update(realDt, settings.get('preset'), settings.get('renderScale'));
 
     // walking through tall grass bends it and kicks up a leaf
     if (dt > 0 && Math.hypot(this.hero.vx, this.hero.vy) > 20 && this.chunks.disturb(this.hero.x, this.hero.y, 11) > 0) {

@@ -60,6 +60,13 @@ const ROWS: Row[] = [
   },
   {
     kind: 'action',
+    label: 'Uji performa',
+    button: 'Ukur',
+    note: () => 'A/B ~15 dtk: mematikan satu fitur per giliran',
+    run: (p) => p.startProbe(),
+  },
+  {
+    kind: 'action',
     label: 'Error terakhir',
     button: 'Lihat',
     note: () => {
@@ -105,6 +112,7 @@ export class SettingsPanel {
   private note: HTMLDivElement;
   private dump: HTMLPreElement | null = null;
   private refreshers: (() => void)[] = [];
+  private probeTimer: ReturnType<typeof setInterval> | null = null;
   private unsubscribe: () => void;
   open = false;
   /** Called whenever the panel opens or closes, so the game can pause. */
@@ -300,6 +308,31 @@ export class SettingsPanel {
     this.showDump(ok ? `Laporan tersalin ke clipboard. Tempel ke chat.\n\n${full}` : `Clipboard ditolak browser — pilih teks di bawah dan salin manual.\n\n${full}`);
   }
 
+  /**
+   * Start the renderer's on-device A/B measurement and poll it until it finishes. Measuring on the
+   * phone is the only way to know what a frame really costs — there is no GPU on the dev machine.
+   */
+  startProbe(): void {
+    const src = this.source();
+    if (!src.startPerfProbe || !src.perfProbeStatus) {
+      this.showDump('Renderer ini tidak punya uji performa (mode 2D).');
+      return;
+    }
+    src.startPerfProbe();
+    if (this.probeTimer !== null) clearInterval(this.probeTimer);
+    this.probeTimer = setInterval(() => {
+      const st = this.source().perfProbeStatus?.();
+      if (!st) return;
+      if (st.running) {
+        this.showDump(`Mengukur… ${Math.round(st.progress * 100)}%\n${st.label}\n\nJangan gerakkan hero selama pengukuran.`);
+        return;
+      }
+      if (this.probeTimer !== null) clearInterval(this.probeTimer);
+      this.probeTimer = null;
+      this.showDump(`Selesai. Tekan "Salin laporan" untuk mengirim hasil ini.\n\n${st.lines.join('\n')}`);
+    }, 400);
+  }
+
   showErrors(): void {
     const lines = formatErrors();
     this.showDump(lines.length ? lines.slice().reverse().join('\n') : 'Belum ada error yang tercatat.');
@@ -334,6 +367,7 @@ export class SettingsPanel {
   }
 
   destroy(): void {
+    if (this.probeTimer !== null) clearInterval(this.probeTimer);
     this.unsubscribe();
     this.overlay.remove();
   }

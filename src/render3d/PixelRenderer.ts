@@ -32,13 +32,19 @@ void main() {
   gl_Position = vec4(position.xy, 0.0, 1.0);
 }`;
 
-const QUAD_FRAG = /* glsl */ `
+/**
+ * Composite pass: outline, bloom, colour grade and vignette — run at **render-target** resolution.
+ *
+ * The first version did all of this in the final blit, i.e. at full canvas resolution. On the test
+ * phone that meant six texture samples across 1.76 million pixels every frame, when the picture
+ * being composited only had 0.89 million. Doing it here and blitting the result costs roughly half.
+ */
+const COMPOSITE_FRAG = /* glsl */ `
 precision mediump float;
 uniform sampler2D tColor;
 uniform sampler2D tDepth;
 uniform sampler2D tBloom;
-uniform vec2 uSize;        // render-target size in texels
-uniform vec2 uTexel;       // 1 / uSize
+uniform vec2 uTexel;       // 1 / render-target size
 uniform float uOutline;
 uniform float uThreshold;
 uniform float uBloom;
@@ -47,21 +53,8 @@ uniform vec3 uGradeLift;   // pushed into the shadows (the night's blue)
 uniform vec3 uGradeGain;   // multiplied into the highlights (the lanterns' warmth)
 varying vec2 vUv;
 
-/**
- * Sharp bilinear: snap to texel centres, then allow one screen pixel of ramp across the boundary.
- * Identical to nearest at integer scales, but stops the shimmer at fractional ones.
- */
-vec2 sharpUv(vec2 uv) {
-  vec2 pixels = uv * uSize;
-  vec2 base = floor(pixels) + 0.5;
-  vec2 frac = pixels - base;
-  // fwidth tells us how wide one screen pixel is in texel space
-  vec2 ramp = max(fwidth(pixels), vec2(0.0001));
-  return (base + clamp(frac / ramp, -0.5, 0.5)) * uTexel;
-}
-
 void main() {
-  vec2 uv = sharpUv(vUv);
+  vec2 uv = vUv;
   vec3 c = texture2D(tColor, uv).rgb;
 
   if (uOutline > 0.5) {
@@ -76,7 +69,7 @@ void main() {
 
   // Bloom: a blurred copy of the bright areas, added back. This is what makes lanterns glow.
   if (uBloom > 0.0) {
-    vec3 glow = texture2D(tBloom, vUv).rgb;
+    vec3 glow = texture2D(tBloom, uv).rgb;
     c += glow * uBloom;
   }
 
@@ -88,6 +81,27 @@ void main() {
   vec2 v = vUv - 0.5;
   float vig = 1.0 - uVignette * dot(v, v) * 1.6;
   gl_FragColor = vec4(clamp(c * vig, 0.0, 1.0), 1.0);
+}`;
+
+/**
+ * Final blit: one sharp-bilinear sample of the composited image onto the canvas.
+ *
+ * Sharp bilinear snaps to texel centres and then allows a single screen pixel of ramp across the
+ * boundary — identical to nearest at whole-number scales, but without the crawling that plain
+ * nearest produces when the texel and pixel grids disagree (540 art rows on a 759-row screen).
+ */
+const BLIT_FRAG = /* glsl */ `
+precision mediump float;
+uniform sampler2D tSrc;
+uniform vec2 uSize;
+uniform vec2 uTexel;
+varying vec2 vUv;
+void main() {
+  vec2 pixels = vUv * uSize;
+  vec2 base = floor(pixels) + 0.5;
+  vec2 ramp = max(fwidth(pixels), vec2(0.0001));
+  vec2 uv = (base + clamp((pixels - base) / ramp, -0.5, 0.5)) * uTexel;
+  gl_FragColor = vec4(texture2D(tSrc, uv).rgb, 1.0);
 }`;
 
 /** Separable blur used to build the bloom, run at quarter resolution. */
@@ -135,12 +149,15 @@ export class PixelRenderer {
   plan: PixelPlan = planPixelBuffers(640, 360, 1, 360, 1);
 
   private target: THREE.WebGLRenderTarget;
+  private composite: THREE.WebGLRenderTarget;
   private bloomA: THREE.WebGLRenderTarget;
   private bloomB: THREE.WebGLRenderTarget;
   private quadScene = new THREE.Scene();
+  private blitScene = new THREE.Scene();
   private blurScene = new THREE.Scene();
   private quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private quadMaterial: THREE.ShaderMaterial;
+  private blitMaterial: THREE.ShaderMaterial;
   private blurMaterial: THREE.ShaderMaterial;
   private bloomEnabled = true;
   /** False when the device can't give us a depth texture; the outline is then skipped. */
@@ -166,6 +183,9 @@ export class PixelRenderer {
     if (!this.canOutline) recordError('WebGL2 tidak tersedia: outline pixel dimatikan', 'PixelRenderer');
 
     this.target = this.makeTarget(this.plan.renderW, this.plan.renderH, true);
+    this.composite = this.makeTarget(this.plan.renderW, this.plan.renderH, false);
+    this.composite.texture.minFilter = THREE.NearestFilter;
+    this.composite.texture.magFilter = THREE.NearestFilter;
     this.bloomA = this.makeTarget(1, 1, false);
     this.bloomB = this.makeTarget(1, 1, false);
 
@@ -187,14 +207,13 @@ export class PixelRenderer {
 
     this.quadMaterial = new THREE.ShaderMaterial({
       vertexShader: QUAD_VERT,
-      fragmentShader: QUAD_FRAG,
+      fragmentShader: COMPOSITE_FRAG,
       depthTest: false,
       depthWrite: false,
       uniforms: {
         tColor: { value: this.target.texture },
         tDepth: { value: this.target.depthTexture },
         tBloom: { value: this.bloomB.texture },
-        uSize: { value: new THREE.Vector2(this.plan.renderW, this.plan.renderH) },
         uTexel: { value: new THREE.Vector2(1 / this.plan.renderW, 1 / this.plan.renderH) },
         uOutline: { value: 0 },
         uThreshold: { value: 0.0016 },
@@ -207,6 +226,21 @@ export class PixelRenderer {
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.quadMaterial);
     quad.frustumCulled = false;
     this.quadScene.add(quad);
+
+    this.blitMaterial = new THREE.ShaderMaterial({
+      vertexShader: QUAD_VERT,
+      fragmentShader: BLIT_FRAG,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tSrc: { value: this.composite.texture },
+        uSize: { value: new THREE.Vector2(this.plan.renderW, this.plan.renderH) },
+        uTexel: { value: new THREE.Vector2(1 / this.plan.renderW, 1 / this.plan.renderH) },
+      },
+    });
+    const blit = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blitMaterial);
+    blit.frustumCulled = false;
+    this.blitScene.add(blit);
   }
 
   private makeTarget(w: number, h: number, depth: boolean): THREE.WebGLRenderTarget {
@@ -256,13 +290,15 @@ export class PixelRenderer {
       depthTexture.magFilter = THREE.NearestFilter;
       this.target.depthTexture = depthTexture;
       this.quadMaterial.uniforms.tDepth.value = depthTexture;
+      this.composite.setSize(renderW, renderH);
       const bw = Math.max(32, Math.round(renderW / 4));
       const bh = Math.max(18, Math.round(renderH / 4));
       this.bloomA.setSize(bw, bh);
       this.bloomB.setSize(bw, bh);
     }
-    this.quadMaterial.uniforms.uSize.value.set(renderW, renderH);
     this.quadMaterial.uniforms.uTexel.value.set(1 / renderW, 1 / renderH);
+    this.blitMaterial.uniforms.uSize.value.set(renderW, renderH);
+    this.blitMaterial.uniforms.uTexel.value.set(1 / renderW, 1 / renderH);
     return this.plan;
   }
 
@@ -299,8 +335,11 @@ export class PixelRenderer {
       this.renderer.render(this.blurScene, this.quadCamera);
     }
 
-    this.renderer.setRenderTarget(null);
+    // composite at render-target resolution, then one cheap sample per screen pixel
+    this.renderer.setRenderTarget(this.composite);
     this.renderer.render(this.quadScene, this.quadCamera);
+    this.renderer.setRenderTarget(null);
+    this.renderer.render(this.blitScene, this.quadCamera);
   }
 
   /** Live draw calls, for the report. */
@@ -311,9 +350,11 @@ export class PixelRenderer {
   dispose(): void {
     this.target.depthTexture?.dispose();
     this.target.dispose();
+    this.composite.dispose();
     this.bloomA.dispose();
     this.bloomB.dispose();
     this.quadMaterial.dispose();
+    this.blitMaterial.dispose();
     this.blurMaterial.dispose();
     this.renderer.dispose();
     this.canvas.remove();

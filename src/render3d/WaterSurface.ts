@@ -15,6 +15,8 @@
 import * as THREE from 'three';
 import { CHUNK_TILES } from '../config';
 import { P } from '../art/palette';
+import { isWater } from '../core/world/tiles';
+import type { WorldSource } from '../core/world/source';
 
 const VERT = /* glsl */ `
 varying vec2 vMaskUv;
@@ -52,7 +54,9 @@ float hash(vec2 p) {
 
 void main() {
   vec4 mask = texture2D(tMask, vMaskUv);
-  if (mask.a < 0.5) discard;
+  // The mesh only covers water tiles now, so this is a safety net rather than the main filter:
+  // relying on discard for every chunk-sized quad disabled early-Z and cost real frames.
+  if (mask.a < 0.4) discard;
   float deep = mask.r;
   float shore = mask.g;   // 0 at the bank, 1 two tiles out
 
@@ -119,9 +123,61 @@ export function makeWaterUniforms(): WaterUniforms {
   };
 }
 
+/**
+ * A mesh covering **only** the water tiles of one chunk.
+ *
+ * The first version laid a full chunk-sized quad over every chunk containing any water and threw
+ * the dry fragments away with `discard`. On a phone that is close to the worst thing you can do:
+ * `discard` turns off early-Z for the whole draw, and a chunk that is 5% pond still shaded 100% of
+ * its area — through a transparent, expensive shader. Horizontally adjacent tiles are merged into
+ * runs, so a river is a handful of triangles rather than one per tile.
+ *
+ * Returns null when the chunk has no water at all.
+ */
+export function buildWaterGeometry(world: WorldSource, cx: number, cy: number): THREE.BufferGeometry | null {
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  const half = CHUNK_TILES / 2;
+
+  for (let lz = 0; lz < CHUNK_TILES; lz++) {
+    let runStart = -1;
+    for (let lx = 0; lx <= CHUNK_TILES; lx++) {
+      const wet = lx < CHUNK_TILES && isWater(world.tileAt(cx * CHUNK_TILES + lx, cy * CHUNK_TILES + lz));
+      if (wet && runStart < 0) runStart = lx;
+      if (wet || runStart < 0) continue;
+
+      // close the run [runStart, lx)
+      const x0 = runStart - half;
+      const x1 = lx - half;
+      const z0 = lz - half;
+      const z1 = lz + 1 - half;
+      const base = positions.length / 3;
+      // v = 1 at the north edge, matching the row-flipped mask upload
+      const u0 = runStart / CHUNK_TILES;
+      const u1 = lx / CHUNK_TILES;
+      const v0 = 1 - lz / CHUNK_TILES;
+      const v1 = 1 - (lz + 1) / CHUNK_TILES;
+      positions.push(x0, 0, z0, x1, 0, z0, x1, 0, z1, x0, 0, z1);
+      uvs.push(u0, v0, u1, v0, u1, v1, u0, v1);
+      indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
+      runStart = -1;
+    }
+  }
+  if (!positions.length) return null;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeBoundingSphere();
+  return geo;
+}
+
 export class WaterSurface {
   readonly mesh: THREE.Mesh;
   private material: THREE.ShaderMaterial;
+  private geometry: THREE.BufferGeometry;
 
   constructor(
     geometry: THREE.BufferGeometry,
@@ -151,6 +207,7 @@ export class WaterSurface {
         uLightStrength: shared.uLightStrength,
       },
     });
+    this.geometry = geometry;
     this.mesh = new THREE.Mesh(geometry, this.material);
     // a hair above the ground so it never z-fights with the baked tiles
     this.mesh.position.set(cx * CHUNK_TILES + CHUNK_TILES / 2, 0.03, cy * CHUNK_TILES + CHUNK_TILES / 2);
@@ -160,6 +217,7 @@ export class WaterSurface {
   dispose(): void {
     this.mesh.removeFromParent();
     this.material.dispose();
+    this.geometry.dispose();
     (this.material.uniforms.tMask.value as THREE.Texture | null)?.dispose();
   }
 }

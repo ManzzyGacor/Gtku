@@ -39,6 +39,11 @@ export interface GraphicsProfile {
   pixelHeight: number;
   /** Post-process pixel outline. */
   outline: boolean;
+  /**
+   * Real shadow-map casting. **Off everywhere by default**: it costs an entire extra geometry pass
+   * over every pool and every chunk, and the baked contact shadows already do the job the reference
+   * art needs. Kept as a knob so the probe can measure it.
+   */
   shadows: 'off' | 'low' | 'high';
   /**
    * Extra chunks streamed *beyond* what the camera can actually see. The visible radius is derived
@@ -52,7 +57,7 @@ export const PROFILES: Record<PresetId, GraphicsProfile> = {
   vlow: {
     id: 'vlow', name: 'Sangat Rendah', note: 'Untuk HP lama',
     bloom: false, particles: 0.2, lightmapEveryN: 3, parallax: false, fog: false, halos: 6,
-    renderScale: 0.8, pixelHeight: 216, outline: false, shadows: 'off', chunkMargin: 1,
+    renderScale: 0.8, pixelHeight: 216, outline: false, shadows: 'off', chunkMargin: 0,
   },
   low: {
     id: 'low', name: 'Rendah', note: 'Paling ringan',
@@ -62,17 +67,17 @@ export const PROFILES: Record<PresetId, GraphicsProfile> = {
   medium: {
     id: 'medium', name: 'Sedang', note: 'Seimbang',
     bloom: false, particles: 0.7, lightmapEveryN: 1, parallax: true, fog: false, halos: 16,
-    renderScale: 1, pixelHeight: 360, outline: true, shadows: 'low', chunkMargin: 2,
+    renderScale: 1, pixelHeight: 360, outline: true, shadows: 'off', chunkMargin: 1,
   },
   high: {
     id: 'high', name: 'Tinggi', note: 'Semua efek dasar',
     bloom: true, particles: 1, lightmapEveryN: 1, parallax: true, fog: true, halos: 22,
-    renderScale: 1, pixelHeight: 450, outline: true, shadows: 'high', chunkMargin: 2,
+    renderScale: 1, pixelHeight: 450, outline: true, shadows: 'off', chunkMargin: 1,
   },
   ultra: {
     id: 'ultra', name: 'Ultra', note: 'Paling berat',
     bloom: true, particles: 1.4, lightmapEveryN: 1, parallax: true, fog: true, halos: 22,
-    renderScale: 1, pixelHeight: 540, outline: true, shadows: 'high', chunkMargin: 2,
+    renderScale: 1, pixelHeight: 540, outline: true, shadows: 'off', chunkMargin: 1,
   },
 };
 
@@ -147,21 +152,62 @@ export function suggestPreset(d: DeviceInfo): PresetId {
 
 // ───────────────────────── AUTO watchdog ─────────────────────────
 
+/**
+ * One rung of the quality ladder AUTO walks.
+ *
+ * Dropping a whole preset is a big, visible step (the pixel size changes). Halving the render scale
+ * inside a preset is a smaller one that costs no art fidelity, only sharpness — so the ladder
+ * interleaves the two, and AUTO can settle much closer to the target frame rate than
+ * preset-stepping alone allowed.
+ */
+export interface QualityRung {
+  preset: PresetId;
+  renderScale: number;
+}
+
+/** Most expensive first. */
+export const QUALITY_LADDER: readonly QualityRung[] = [
+  { preset: 'ultra', renderScale: 1 },
+  { preset: 'ultra', renderScale: 0.85 },
+  { preset: 'high', renderScale: 1 },
+  { preset: 'high', renderScale: 0.85 },
+  { preset: 'medium', renderScale: 1 },
+  { preset: 'medium', renderScale: 0.8 },
+  { preset: 'low', renderScale: 1 },
+  { preset: 'low', renderScale: 0.8 },
+  { preset: 'vlow', renderScale: 1 },
+  { preset: 'vlow', renderScale: 0.7 },
+];
+
+/** The rung that best matches a preset + scale, so AUTO can find where it currently stands. */
+export function rungIndexOf(preset: PresetId, renderScale: number): number {
+  let best = 0;
+  let bestScore = Infinity;
+  QUALITY_LADDER.forEach((r, i) => {
+    const score = (r.preset === preset ? 0 : 10) + Math.abs(r.renderScale - renderScale);
+    if (score < bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  });
+  return best;
+}
+
 /** Below this average FPS the quality steps down. */
-export const FPS_FLOOR = 45;
+export const FPS_FLOOR = 48;
 /** Above this average FPS (with a clean worst-bucket too) the quality may step back up. */
-export const FPS_CEIL = 57;
-const DROP_HOLD = 3;
-const RAISE_HOLD = 12;
+export const FPS_CEIL = 58;
+const DROP_HOLD = 2.5;
+const RAISE_HOLD = 10;
 const MAX_RAISE_HOLD = 120;
 /** After any change, wait this long before judging again. */
-const COOLDOWN = 8;
+const COOLDOWN = 6;
 
 export type QualityChange = 'drop' | 'raise';
 
 export class AdaptiveQuality {
-  /** Fires when the watchdog changed the preset by itself. */
-  onChange: (from: PresetId, to: PresetId, why: QualityChange) => void = () => undefined;
+  /** Fires when the watchdog moved to a different rung by itself. */
+  onChange: (rung: QualityRung, why: QualityChange) => void = () => undefined;
   /** AUTO mode. When false the player pinned a preset and the watchdog keeps its hands off. */
   auto = true;
   private bad = 0;
@@ -171,39 +217,41 @@ export class AdaptiveQuality {
 
   constructor(private readonly meter: PerfMeter) {}
 
-  /** Call once per frame with the real delta and the preset currently in effect. */
-  update(dt: number, current: PresetId): void {
+  /** Call once per frame with the real delta and the quality currently in effect. */
+  update(dt: number, preset: PresetId, renderScale = 1): void {
     if (!(dt > 0) || dt > 1) return;
     if (this.cooldown > 0) {
       this.cooldown -= dt;
       return;
     }
     if (!this.auto || !this.meter.ready) return;
+    const at = rungIndexOf(preset, renderScale);
 
     if (this.meter.avg < FPS_FLOOR) {
       this.good = 0;
       this.bad += dt;
-      if (this.bad >= DROP_HOLD) this.change(current, lowerPreset(current), 'drop');
+      if (this.bad >= DROP_HOLD) this.move(at, +1, 'drop');
       return;
     }
     this.bad = 0;
     // Raising needs the worst half-second to be healthy too, not just the average.
-    if (this.meter.avg > FPS_CEIL && this.meter.low > FPS_FLOOR + 5) {
+    if (this.meter.avg > FPS_CEIL && this.meter.low > FPS_FLOOR) {
       this.good += dt;
-      if (this.good >= this.raiseHold) this.change(current, higherPreset(current), 'raise');
+      if (this.good >= this.raiseHold) this.move(at, -1, 'raise');
     } else {
       this.good = 0;
     }
   }
 
-  private change(from: PresetId, to: PresetId | null, why: QualityChange): void {
+  private move(from: number, step: number, why: QualityChange): void {
     this.bad = 0;
     this.good = 0;
-    if (!to) return; // already at the end of the ladder
+    const to = from + step;
+    if (to < 0 || to >= QUALITY_LADDER.length) return; // already at the end of the ladder
     this.cooldown = COOLDOWN;
     // Each drop makes the next raise harder to earn, so the quality settles instead of flapping.
     if (why === 'drop') this.raiseHold = Math.min(MAX_RAISE_HOLD, this.raiseHold * 2);
     this.meter.reset();
-    this.onChange(from, to, why);
+    this.onChange(QUALITY_LADDER[to], why);
   }
 }

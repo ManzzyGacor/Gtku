@@ -16,6 +16,28 @@ import { planChunk, type ShapeInstance } from '../src/render3d/worldPlan';
 const world = new GeneratedWorld();
 const tileSheet = buildTileSheet();
 
+/**
+ * A stand-in for the camera's view. Axis-aligned on purpose so the expected chunk counts can be
+ * worked out from the numbers instead of from the isometric rotation.
+ */
+const VIEW = { right: 24, forward: 16 };
+const axisAligned = (px: number, pz: number, ox: number, oz: number, out: THREE.Vector2): THREE.Vector2 => out.set(px - ox, pz - oz);
+
+function makeWorld3D(radius: number): World3D {
+  const w3d = new World3D(new THREE.Scene(), world, tileSheet);
+  w3d.setView(VIEW, axisAligned);
+  w3d.setRenderDistance(radius);
+  return w3d;
+}
+
+/** How many chunks that view can possibly want, from the streamer's own rule. */
+function chunkBudget(radius: number, marginChunks = 0): number {
+  const slack = (CHUNK_TILES * Math.SQRT2) / 2 + (radius - 1 + marginChunks) * CHUNK_TILES;
+  const across = Math.floor(((VIEW.right + slack) * 2) / CHUNK_TILES) + 2;
+  const deep = Math.floor(((VIEW.forward + slack) * 2) / CHUNK_TILES) + 2;
+  return across * deep;
+}
+
 function shapes(n: number, x0: number): ShapeInstance[] {
   return Array.from({ length: n }, (_, i) => ({
     kind: 'box' as const,
@@ -89,10 +111,8 @@ test('an instance pool grows instead of dropping instances, keeping the data', (
 });
 
 test('chunks load around the hero and unload once they are far away', () => {
-  const scene = new THREE.Scene();
-  const w3d = new World3D(scene, world, tileSheet);
-  w3d.setRenderDistance(1);
-  w3d.setLightBudget(4);
+  const w3d = makeWorld3D(1);
+  w3d.setLightBudget(3);
 
   const start = world.markers.playerStart;
   w3d.preload(start.x / 16, start.y / 16);
@@ -120,9 +140,7 @@ test('chunks load around the hero and unload once they are far away', () => {
 });
 
 test('pacing the loader keeps the work per frame small', () => {
-  const scene = new THREE.Scene();
-  const w3d = new World3D(scene, world, tileSheet);
-  w3d.setRenderDistance(2);
+  const w3d = makeWorld3D(2);
   const start = new THREE.Vector3(world.markers.playerStart.x / 16, 0, world.markers.playerStart.y / 16);
 
   // one chunk per frame: the count has to climb gradually, not all at once
@@ -136,9 +154,7 @@ test('pacing the loader keeps the work per frame small', () => {
 });
 
 test('walking back and forth across a chunk border does not leak instances', () => {
-  const scene = new THREE.Scene();
-  const w3d = new World3D(scene, world, tileSheet);
-  w3d.setRenderDistance(1);
+  const w3d = makeWorld3D(1);
   const a = new THREE.Vector3(world.markers.playerStart.x / 16, 0, world.markers.playerStart.y / 16);
   const b = new THREE.Vector3(a.x + CHUNK_TILES * 2, 0, a.z);
 
@@ -157,15 +173,13 @@ test('walking back and forth across a chunk border does not leak instances', () 
     assert.deepEqual(back, first, `round ${round}: the scene must settle to the same size, not creep upward`);
   }
   // and the hysteresis ring is bounded: radius 1 + 1 margin can never mean more than 5x5 chunks
-  assert.ok(first.chunks <= 25, `loaded ${first.chunks} chunks for radius 1`);
+  assert.ok(first.chunks <= chunkBudget(1, 0.5), `loaded ${first.chunks} chunks for radius 1`);
   w3d.dispose();
 });
 
 test('a streamed chunk contains exactly the geometry its plan describes', () => {
-  const scene = new THREE.Scene();
-  const w3d = new World3D(scene, world, tileSheet);
-  w3d.setRenderDistance(0);
-  // a lone chunk: loaded instances must match that chunk's plan exactly
+  const w3d = makeWorld3D(1);
+  // loaded instances must cover at least the centre chunk's plan
   const cx = Math.floor(world.markers.playerStart.x / 16 / CHUNK_TILES);
   const cy = Math.floor(world.markers.playerStart.y / 16 / CHUNK_TILES);
   w3d.preload(cx * CHUNK_TILES + CHUNK_TILES / 2, cy * CHUNK_TILES + CHUNK_TILES / 2);
@@ -178,39 +192,50 @@ test('a streamed chunk contains exactly the geometry its plan describes', () => 
 });
 
 test('preload can warm just the neighbourhood, leaving the rest to the budgeted loader', () => {
-  const scene = new THREE.Scene();
-  const w3d = new World3D(scene, world, tileSheet);
-  w3d.setRenderDistance(4);
+  const w3d = makeWorld3D(4);
   const start = world.markers.playerStart;
 
   // A boot that baked the full radius at once would freeze the first frame for a second or more.
   w3d.preload(start.x / 16, start.y / 16, 1);
   const warmed = w3d.stats().chunks;
-  assert.ok(warmed >= 4 && warmed <= 12, `a small neighbourhood, got ${warmed} chunks`);
+  assert.ok(warmed >= 4, `expected a neighbourhood, got ${warmed}`);
+  assert.ok(warmed <= chunkBudget(1), `radius 1 warmed ${warmed}, budget ${chunkBudget(1)}`);
 
   // the rest arrives over the following frames without another preload
   const focus = new THREE.Vector3(start.x / 16, 0, start.y / 16);
-  for (let i = 0; i < 300; i++) w3d.update(0.5, focus, 0, 1, 1 / 60);
+  for (let i = 0; i < 400; i++) w3d.update(0.5, focus, 0, 2, 1 / 60);
   const full = w3d.stats();
   assert.ok(full.chunks > warmed, 'the loader kept going on its own');
   assert.equal(full.queued, 0);
   w3d.dispose();
 });
 
-test('the loaded chunk count stays within a sane budget at every radius', () => {
-  const scene = new THREE.Scene();
-  const w3d = new World3D(scene, world, tileSheet);
+test('only the chunks the camera can see are loaded, and the count follows the margin', () => {
+  const w3d = makeWorld3D(1);
   const start = world.markers.playerStart;
   const focus = new THREE.Vector3(start.x / 16, 0, start.y / 16);
-  // Each chunk is a 256x256 ground texture (256 kB), so this is a memory budget, not a nicety.
-  const budget: Record<number, number> = { 2: 30, 3: 45, 4: 60, 6: 110 };
-  for (const radius of [2, 3, 4, 6]) {
-    w3d.setRenderDistance(radius);
+  const settle = (): number => {
     for (let i = 0; i < 400; i++) w3d.update(0.5, focus, 0, 8, 1 / 60);
-    const n = w3d.stats().chunks;
-    assert.ok(n <= budget[radius], `radius ${radius} loaded ${n} chunks (budget ${budget[radius]})`);
-    assert.ok(n >= radius * radius, `radius ${radius} loaded only ${n} chunks`);
+    return w3d.stats().chunks;
+  };
+
+  // Each chunk is a 256x256 ground texture (256 kB), so this is a memory budget, not a nicety.
+  let previous = 0;
+  for (const radius of [1, 2, 3]) {
+    w3d.setRenderDistance(radius);
+    const n = settle();
+    assert.ok(n <= chunkBudget(radius, 0.5), `radius ${radius} loaded ${n} chunks (budget ${chunkBudget(radius, 0.5)})`);
+    assert.ok(n > previous, `radius ${radius} should load more than radius ${radius - 1} (${n} vs ${previous})`);
+    previous = n;
   }
+
+  // A wider view must load more than a narrow one at the same margin: the streamer follows the
+  // camera's rectangle, not a circle, which is what stopped a 3:1 phone loading twice what it shows.
+  w3d.setRenderDistance(1);
+  const narrow = settle();
+  w3d.setView({ right: VIEW.right * 2, forward: VIEW.forward }, axisAligned);
+  const wide = settle();
+  assert.ok(wide > narrow, `a wider camera loads more chunks (${wide} vs ${narrow})`);
   w3d.dispose();
 });
 

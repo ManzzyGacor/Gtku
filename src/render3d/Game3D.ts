@@ -20,14 +20,18 @@ import type { DiagnosticsSource } from '../ui/diagnostics';
 import * as THREE from 'three';
 import { Environment } from './Environment';
 import { HeroMesh3D } from './HeroMesh3D';
-import { IsoCamera } from './IsoCamera';
+import { CAMERA_DISTANCE, IsoCamera } from './IsoCamera';
+import { PerfProbe, type ProbeScenario } from './PerfProbe';
 import { PixelRenderer } from './PixelRenderer';
 import { Sky } from './Sky';
 import { World3D } from './World3D';
 import { u } from './worldPlan';
 
-/** How many dynamic point lights each preset may keep alive. */
-const LIGHT_BUDGET: Record<string, number> = { vlow: 0, low: 2, medium: 4, high: 8, ultra: 12 };
+/**
+ * How many of the fixed light pool each preset actually lights up. Small on purpose: the static
+ * lights are baked into the ground's light map, so these only add shading on nearby 3D objects.
+ */
+const LIGHT_BUDGET: Record<string, number> = { vlow: 0, low: 1, medium: 2, high: 3, ultra: 3 };
 
 export class Game3D {
   readonly pixels: PixelRenderer;
@@ -53,6 +57,9 @@ export class Game3D {
   private bloomScale = 1;
   private gradeLift = new THREE.Color();
   private gradeGain = new THREE.Color();
+  private probe = new PerfProbe();
+  /** Frame times for the report, in ms. */
+  private frameMs = 16.7;
   private unsubscribe: () => void;
   private disposed = false;
 
@@ -72,7 +79,10 @@ export class Game3D {
       settings.set('preset', suggestPreset(probeDevice()));
     }
     this.adaptive.auto = settings.get('presetAuto') && !settings.isLocked('preset');
-    this.adaptive.onChange = (_from, to) => settings.set('preset', to);
+    this.adaptive.onChange = (rung) => {
+      settings.set('preset', rung.preset);
+      settings.set('renderScale', rung.renderScale);
+    };
     this.unsubscribe = settings.on((key) => {
       if (key === 'presetAuto') this.adaptive.auto = settings.get('presetAuto') && !settings.isLocked('preset');
       if (key === 'preset' || key === 'renderScale') this.applyProfile();
@@ -80,9 +90,10 @@ export class Game3D {
 
     this.applyProfile();
     this.resize();
+    this.scene3d.setView(this.camera.groundExtent(), (px, pz, ox, oz, out) => this.camera.toGroundAxes(px, pz, ox, oz, out));
     // The immediate neighbourhood is ready before the first frame; the rest streams in behind the
     // fog over the next few frames rather than freezing the boot.
-    this.scene3d.preload(u(start.x), u(start.y), 2);
+    this.scene3d.preload(u(start.x), u(start.y), 1);
     window.addEventListener('resize', this.onResize);
   }
 
@@ -103,7 +114,7 @@ export class Game3D {
   private applyProfile(): void {
     const p = profileOf(settings.get('preset'));
     this.pixels.setOutline(p.outline);
-    this.scene3d.setLightBudget(LIGHT_BUDGET[p.id] ?? 4);
+    this.scene3d.setLightBudget(LIGHT_BUDGET[p.id] ?? 2);
     // The bottom preset stands still: swaying every blade costs vertex work.
     this.scene3d.setWind(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.6 : 1);
     this.scene3d.setWater(p.id !== 'vlow');
@@ -125,8 +136,7 @@ export class Game3D {
    * on a weak phone cannot ask for a hundred ground textures at once.
    */
   private chunkRadius(): number {
-    const visible = Math.ceil(this.camera.viewRadius / 16);
-    return Math.min(6, visible + profileOf(settings.get('preset')).chunkMargin);
+    return Math.max(1, profileOf(settings.get('preset')).chunkMargin + 1);
   }
 
   // ───────────────────────── loop ─────────────────────────
@@ -151,23 +161,34 @@ export class Game3D {
   /** One frame. Exposed so a test can drive the simulation without a browser. */
   step(dt: number): void {
     if (this.disposed) return;
+    if (dt > 0) this.frameMs += (dt * 1000 - this.frameMs) * 0.1;
+    this.probe.update(dt);
     this.clock += dt;
     if (!this.paused && dt > 0) {
       this.dayTime = (this.dayTime + dt / DAY_SECONDS) % 1;
       this.updateHero(dt);
       this.camera.follow(u(this.hero.x), u(this.hero.y), dt);
       this.perf.push(dt);
-      this.adaptive.update(dt, settings.get('preset'));
+      this.adaptive.update(dt, settings.get('preset'), settings.get('renderScale'));
     }
     this.heroMesh.update(this.paused ? 0 : dt, dt, this.hero, this.clock);
     const cave = this.caveWeight();
     this.scene3d.setHeroOcclusion(this.heroMesh.root.position, this.camera.camera, this.hero.alive);
-    const [fogNear, fogFar] = this.camera.fogRange();
+    /*
+     * Clamp the fog to what is actually loaded. The report showed fog reaching 155 while only
+     * ~64 units of world existed around the hero, so the fog was doing nothing to hide the
+     * streaming edge — and the chunk radius was paying for ground the fog should have swallowed.
+     */
+    const [rawNear, rawFar] = this.camera.fogRange();
+    const loadedReach = CAMERA_DISTANCE + this.chunkRadius() * 16 * 0.92;
+    const fogFar = Math.min(rawFar, loadedReach);
+    const fogNear = Math.min(rawNear, fogFar - 8);
     const night = nightAmount(this.dayTime);
     this.sky.update(this.dayTime, cave, fogNear, fogFar, night, this.clock);
     this.pixels.renderer.setClearColor(this.sky.haze, 1);
     this.applyGrade(cave);
     this.scene3d.setRenderDistance(this.chunkRadius());
+    this.scene3d.setView(this.camera.groundExtent(), (px, pz, ox, oz, out) => this.camera.toGroundAxes(px, pz, ox, oz, out));
     this.scene3d.setHeroGround(u(this.hero.x), u(this.hero.y));
     this.scene3d.update(this.dayTime, this.camera.target, cave, this.paused ? 0 : 1, dt);
     // the water reflects whatever the sky is doing, and fogs out with everything else
@@ -222,6 +243,56 @@ export class Game3D {
     this.hero.events.length = 0;
   }
 
+  // ───────────────────────── performance probe ─────────────────────────
+
+  /**
+   * The scenarios worth measuring, in the order they are most likely to be the problem.
+   * Each one is applied on top of the player's *own* settings, one change at a time.
+   */
+  private probeScenarios(): ProbeScenario[] {
+    const p = () => profileOf(settings.get('preset'));
+    return [
+      { id: 'base', label: 'semua menyala', apply: () => undefined },
+      { id: 'lights', label: 'tanpa lampu dinamis', apply: () => this.scene3d.setLightBudget(0) },
+      { id: 'shadows', label: 'tanpa bayangan', apply: () => this.scene3d.setShadows('off') },
+      { id: 'water', label: 'tanpa air beriak', apply: () => this.scene3d.setWater(false) },
+      { id: 'bloom', label: 'tanpa bloom', apply: () => this.pixels.setGrade({ bloom: 0, vignette: 0, lift: this.gradeLift, gain: this.gradeGain }) },
+      { id: 'grass', label: 'tanpa angin', apply: () => this.scene3d.setWind(0) },
+      { id: 'detail', label: 'tanpa grain tanah', apply: () => this.scene3d.setGroundDetail(0) },
+      { id: 'rim', label: 'tanpa rim light', apply: () => this.scene3d.setRim(0) },
+      { id: 'env', label: 'tanpa kunang/kabut', apply: () => this.environment.setBudget(0) },
+      { id: 'outline', label: 'tanpa outline', apply: () => this.pixels.setOutline(false) },
+      {
+        id: 'half',
+        label: 'skala render 60%',
+        apply: () => this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, p().pixelHeight, 0.6),
+      },
+      {
+        id: 'px360',
+        label: 'grid pixel 360',
+        apply: () => this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, 360, 1),
+      },
+      {
+        id: 'px270',
+        label: 'grid pixel 270',
+        apply: () => this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, 270, 1),
+      },
+      { id: 'radius', label: 'radius chunk -1', apply: () => this.scene3d.setRenderDistance(Math.max(1, this.chunkRadius() - 1)) },
+    ];
+  }
+
+  startPerfProbe(): void {
+    this.probe.start(
+      this.probeScenarios(),
+      () => {
+        // put every knob back to whatever the player's settings say
+        this.applyProfile();
+        this.applyGrade(this.caveWeight());
+      },
+      () => ({ calls: this.pixels.renderer.info.render.calls, triangles: this.pixels.renderer.info.render.triangles }),
+    );
+  }
+
   // ───────────────────────── diagnostics ─────────────────────────
 
   diagnostics(): DiagnosticsSource {
@@ -239,6 +310,13 @@ export class Game3D {
         if (p) input.reset();
       },
       report: () => this.extraReport(),
+      startPerfProbe: () => this.startPerfProbe(),
+      perfProbeStatus: () => ({
+        running: this.probe.running,
+        label: this.probe.label,
+        progress: this.probe.progress,
+        lines: this.probe.lines(),
+      }),
     };
   }
 
@@ -246,7 +324,11 @@ export class Game3D {
   private extraReport(): string[] {
     const s = this.scene3d.stats();
     const plan = this.pixels.plan;
+    const info = this.pixels.renderer.info.render;
+    const probe = this.probe.lines();
     return [
+      `frame: ${this.frameMs.toFixed(1)} ms (${(1000 / Math.max(0.01, this.frameMs)).toFixed(1)} fps)`,
+      `draw call: ${info.calls}   triangle: ${(info.triangles / 1000).toFixed(0)}k   program: ${this.pixels.renderer.info.programs?.length ?? 0}`,
       `kanvas: ${plan.canvasW}x${plan.canvasH} px perangkat (layar ${Math.round(window.innerWidth * (window.devicePixelRatio || 1))}x${Math.round(window.innerHeight * (window.devicePixelRatio || 1))})`,
       `grid pixel: ${plan.pixelW}x${plan.pixelH}   render target: ${plan.renderW}x${plan.renderH}   skala ${plan.scale.toFixed(2)}x`,
       `chunk dimuat: ${s.chunks} (radius ${this.chunkRadius()}, antre ${s.queued})   instance: ${s.instances}   ` +
@@ -259,6 +341,7 @@ export class Game3D {
       `kamera: sudut ${this.camera.pitch}\u00b0  zoom ${this.camera.zoom.toFixed(2)}x  ` +
         `target (${this.camera.target.x.toFixed(1)}, ${this.camera.target.z.toFixed(1)})  radius pandang ${this.camera.viewRadius.toFixed(1)} unit`,
       `kabut: ${this.sky.fog.near.toFixed(0)} - ${this.sky.fog.far.toFixed(0)} (gua ${(this.caveWeight() * 100).toFixed(0)}%)`,
+      ...(probe.length ? ['', '[UJI PERFORMA] (baseline = setelanmu sendiri, satu fitur dimatikan per baris)', ...probe] : []),
     ];
   }
 

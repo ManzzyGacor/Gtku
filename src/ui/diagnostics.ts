@@ -16,6 +16,9 @@ export interface DiagnosticsSource {
   setPaused(paused: boolean): void;
   /** Renderer-specific lines appended to the "Salin laporan" report. */
   report?(): string[];
+  /** Start the on-device A/B performance measurement. */
+  startPerfProbe?(): void;
+  perfProbeStatus?(): { running: boolean; label: string; progress: number; lines: string[] };
 }
 
 /** Stand-in used before a renderer has started (title screen, boot). */
