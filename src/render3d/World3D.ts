@@ -259,6 +259,9 @@ export class World3D {
   private loaded = new Map<number, LoadedChunk3D>();
   /** When each loaded chunk's ground appeared, for its fade-in. */
   private groundFade = new Map<number, number>();
+  /** Told whenever a chunk arrives or leaves, so combat can spawn and despawn with it. */
+  onChunkLoad: (cx: number, cy: number) => void = () => undefined;
+  onChunkUnload: (cx: number, cy: number) => void = () => undefined;
   private planCache = new Map<number, ChunkPlan>();
   private queue: { cx: number; cy: number; pri: number }[] = [];
   private activeLights: PointLightPlan[] = [];
@@ -521,6 +524,7 @@ export class World3D {
     this.groundFade.set(key, this.clock);
     this.loaded.set(key, { cx, cy, ground, texture, material, lightMap, water, lights: plan.lights });
     this.rebuildLightList();
+    this.onChunkLoad(cx, cy);
   }
 
   /** Add the shared detail layer to a chunk's ground material. */
@@ -589,6 +593,7 @@ export class World3D {
 
   private unloadChunk(c: LoadedChunk3D): void {
     const key = keyOf(c.cx, c.cy);
+    this.onChunkUnload(c.cx, c.cy);
     for (const pool of this.pools.values()) pool.removeChunk(key);
     this.group.remove(c.ground);
     c.material.dispose();

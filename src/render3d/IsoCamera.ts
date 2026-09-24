@@ -48,6 +48,10 @@ export class IsoCamera {
   private zoomLevel = 1;
   private aspect = 16 / 9;
   private unsubscribe: () => void;
+  private shakeLeft = 0;
+  private shakeTotal = 0;
+  private shakeAmount = 0;
+  private readonly shakeOffset = new THREE.Vector3();
 
   constructor() {
     this.readSettings();
@@ -162,9 +166,32 @@ export class IsoCamera {
     this.apply();
   }
 
+  /**
+   * Kick the camera. Combat feedback: a landed hit needs a shove, but a fixed 3/4 camera must not
+   * lose its angle, so the shake offsets the *position* and the look-at target together.
+   */
+  shake(amount: number, seconds = 0.15): void {
+    this.shakeAmount = Math.max(this.shakeAmount, amount);
+    this.shakeLeft = Math.max(this.shakeLeft, seconds);
+    this.shakeTotal = Math.max(this.shakeTotal, seconds);
+  }
+
+  /** Advance the shake. Call once per frame with the real delta. */
+  tick(realDt: number): void {
+    if (this.shakeLeft <= 0) return;
+    this.shakeLeft = Math.max(0, this.shakeLeft - realDt);
+    this.apply();
+  }
+
   private apply(): void {
     this.camera.position.copy(this.target).add(this.offset);
-    this.camera.lookAt(this.target);
+    if (this.shakeLeft > 0) {
+      // decaying random offset in units; 1 unit = 16 px, so a few px of shake is a fraction of one
+      const k = (this.shakeLeft / Math.max(0.001, this.shakeTotal)) * this.shakeAmount * (1 / 16);
+      this.shakeOffset.set((Math.random() * 2 - 1) * k, (Math.random() * 2 - 1) * k * 0.6, (Math.random() * 2 - 1) * k);
+      this.camera.position.add(this.shakeOffset);
+    }
+    this.camera.lookAt(this.shakeLeft > 0 ? this.target.clone().add(this.shakeOffset) : this.target);
     this.camera.updateMatrixWorld();
   }
 

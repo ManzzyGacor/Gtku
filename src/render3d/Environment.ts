@@ -12,6 +12,8 @@ import { hashf } from '../core/rng';
 import { pixmapTexture } from './textures';
 
 const FIREFLY_COUNT = 64;
+/** Pooled hit sparks. Combat never allocates: it borrows from here and gives them back. */
+const SPARK_COUNT = 140;
 /** Half-extent of the box of fireflies kept around the camera, in world units. */
 const FIREFLY_SPREAD = 22;
 
@@ -62,6 +64,42 @@ void main() {
   gl_FragColor = vec4(uColor, a);
 }`;
 
+const SPARK_VERT = /* glsl */ `
+attribute vec3 aVel;
+attribute vec2 aLife;   // x = age, y = lifetime
+attribute vec3 aColor;
+attribute float aSize;
+uniform float uTime;
+varying vec3 vColor;
+varying float vFade;
+void main() {
+  float age = uTime - aLife.x;
+  float t = age / max(0.0001, aLife.y);
+  if (t < 0.0 || t > 1.0) {
+    // parked off screen; the alternative is a per-frame buffer rewrite
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    vFade = 0.0;
+    return;
+  }
+  vColor = aColor;
+  vFade = 1.0 - t;
+  vec3 home = instanceMatrix[3].xyz;
+  // ballistic: outward, then gravity takes over
+  vec3 pos = home + aVel * age + vec3(0.0, -3.2 * age * age, 0.0);
+  vec4 view = viewMatrix * vec4(pos, 1.0);
+  view.xy += position.xy * aSize * (0.35 + vFade * 0.65);
+  gl_Position = projectionMatrix * view;
+}`;
+
+const SPARK_FRAG = /* glsl */ `
+precision mediump float;
+varying vec3 vColor;
+varying float vFade;
+void main() {
+  if (vFade <= 0.01) discard;
+  gl_FragColor = vec4(vColor * (0.6 + vFade * 0.8), vFade);
+}`;
+
 const FOG_VERT = /* glsl */ `
 varying vec2 vWorldXz;
 void main() {
@@ -95,6 +133,15 @@ export class Environment {
   private fogMaterial: THREE.ShaderMaterial;
   private fogGeometry: THREE.PlaneGeometry;
   private fogTexture: THREE.Texture;
+  private sparks: THREE.InstancedMesh;
+  private sparkMaterial: THREE.ShaderMaterial;
+  private sparkGeometry: THREE.PlaneGeometry;
+  private sparkNext = 0;
+  private sparkVel!: THREE.InstancedBufferAttribute;
+  private sparkLife!: THREE.InstancedBufferAttribute;
+  private sparkColor!: THREE.InstancedBufferAttribute;
+  private sparkSize!: THREE.InstancedBufferAttribute;
+  private sparkMatrix = new THREE.Matrix4();
   /** 0..1, set by the graphics preset. */
   private budget = 1;
   private clock = 0;
@@ -152,6 +199,57 @@ export class Environment {
     this.fog.renderOrder = 3;
     this.fog.visible = false;
     scene.add(this.fog);
+
+    // ── hit sparks ──
+    this.sparkGeometry = new THREE.PlaneGeometry(1, 1);
+    this.sparkMaterial = new THREE.ShaderMaterial({
+      vertexShader: SPARK_VERT,
+      fragmentShader: SPARK_FRAG,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: { uTime: { value: 0 } },
+    });
+    this.sparks = new THREE.InstancedMesh(this.sparkGeometry, this.sparkMaterial, SPARK_COUNT);
+    this.sparks.frustumCulled = false;
+    this.sparks.renderOrder = 12;
+    this.sparkVel = new THREE.InstancedBufferAttribute(new Float32Array(SPARK_COUNT * 3), 3);
+    this.sparkLife = new THREE.InstancedBufferAttribute(new Float32Array(SPARK_COUNT * 2).fill(-999), 2);
+    this.sparkColor = new THREE.InstancedBufferAttribute(new Float32Array(SPARK_COUNT * 3).fill(1), 3);
+    this.sparkSize = new THREE.InstancedBufferAttribute(new Float32Array(SPARK_COUNT).fill(0.1), 1);
+    this.sparkGeometry.setAttribute('aVel', this.sparkVel);
+    this.sparkGeometry.setAttribute('aLife', this.sparkLife);
+    this.sparkGeometry.setAttribute('aColor', this.sparkColor);
+    this.sparkGeometry.setAttribute('aSize', this.sparkSize);
+    scene.add(this.sparks);
+  }
+
+  /**
+   * A burst of sparks at a world position (world units). Borrowed from a fixed ring buffer and
+   * animated entirely in the vertex shader from a spawn timestamp, so a busy fight allocates
+   * nothing and costs no per-frame CPU.
+   */
+  spark(x: number, z: number, color: number, big: boolean): void {
+    if (this.budget <= 0) return;
+    const count = Math.max(3, Math.round((big ? 14 : 7) * this.budget));
+    const r = new THREE.Color(color);
+    for (let i = 0; i < count; i++) {
+      const slot = this.sparkNext % SPARK_COUNT;
+      this.sparkNext++;
+      const a = Math.random() * Math.PI * 2;
+      const up = 1.4 + Math.random() * 2.2;
+      const speed = (big ? 2.6 : 1.7) * (0.5 + Math.random());
+      this.sparks.setMatrixAt(slot, this.sparkMatrix.makeTranslation(x, 0.7 + Math.random() * 0.3, z));
+      (this.sparkVel.array as Float32Array).set([Math.cos(a) * speed, up, Math.sin(a) * speed], slot * 3);
+      (this.sparkLife.array as Float32Array).set([this.clock, big ? 0.55 : 0.36], slot * 2);
+      (this.sparkColor.array as Float32Array).set([r.r, r.g, r.b], slot * 3);
+      (this.sparkSize.array as Float32Array)[slot] = big ? 0.15 : 0.1;
+    }
+    this.sparks.instanceMatrix.needsUpdate = true;
+    this.sparkVel.needsUpdate = true;
+    this.sparkLife.needsUpdate = true;
+    this.sparkColor.needsUpdate = true;
+    this.sparkSize.needsUpdate = true;
   }
 
   /** 0 switches both effects off (the bottom graphics preset). */
@@ -171,6 +269,7 @@ export class Environment {
     this.clock += realDt;
     this.flyMaterial.uniforms.uTime.value = this.clock;
     this.fogMaterial.uniforms.uTime.value = this.clock;
+    this.sparkMaterial.uniforms.uTime.value = this.clock;
 
     // Fireflies: a summer-night thing, so night-only and never underground.
     const flyAmount = Math.max(0, night - 0.25) / 0.75 * (1 - cave) * this.budget;
@@ -192,7 +291,10 @@ export class Environment {
   }
 
   dispose(): void {
-    this.scene.remove(this.flies, this.fog);
+    this.scene.remove(this.flies, this.fog, this.sparks);
+    this.sparks.dispose();
+    this.sparkGeometry.dispose();
+    this.sparkMaterial.dispose();
     this.flies.dispose();
     this.flyGeometry.dispose();
     this.flyMaterial.dispose();

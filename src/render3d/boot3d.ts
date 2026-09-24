@@ -15,6 +15,7 @@ export interface Booted3D {
 export function start3d(parent: HTMLElement, debug: DebugUi): Booted3D {
   const game = new Game3D(parent);
   const controls = new TouchControls();
+  game.onWeaponState = (next, charge) => controls.setWeaponState(next, charge);
   debug.attach(game.diagnostics());
   game.start();
   document.getElementById('boot-msg')?.remove();

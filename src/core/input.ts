@@ -2,7 +2,7 @@
  * Unified input hub: keyboard (WASD/arrows + J/K/L/E) and touch controls (written by UIScene) feed the same state.
  * Pure DOM, no Phaser, so gameplay code stays testable.
  */
-export type Action = 'attack' | 'dodge' | 'skill' | 'interact';
+export type Action = 'attack' | 'dodge' | 'skill' | 'interact' | 'swap';
 
 const KEY_ACTIONS: Record<string, Action> = {
   KeyJ: 'attack',
@@ -16,6 +16,10 @@ const KEY_ACTIONS: Record<string, Action> = {
   KeyC: 'skill',
   KeyE: 'interact',
   Enter: 'interact',
+  // quick weapon swap: the plan asks for 1/2 on a keyboard and a button on a phone
+  Digit1: 'swap',
+  Digit2: 'swap',
+  KeyQ: 'swap',
 };
 
 const MOVE_KEYS: Record<string, [number, number]> = {
@@ -31,9 +35,9 @@ const MOVE_KEYS: Record<string, [number, number]> = {
 
 export class InputHub {
   private keys = new Set<string>();
-  private pressedAt: Record<Action, number> = { attack: -1e9, dodge: -1e9, skill: -1e9, interact: -1e9 };
-  private consumed: Record<Action, boolean> = { attack: true, dodge: true, skill: true, interact: true };
-  private heldAction: Record<Action, boolean> = { attack: false, dodge: false, skill: false, interact: false };
+  private pressedAt: Record<Action, number> = { attack: -1e9, dodge: -1e9, skill: -1e9, interact: -1e9, swap: -1e9 };
+  private consumed: Record<Action, boolean> = { attack: true, dodge: true, skill: true, interact: true, swap: true };
+  private heldAction: Record<Action, boolean> = { attack: false, dodge: false, skill: false, interact: false, swap: false };
   /** Analog stick from touch UI, each -1..1. */
   stick = { x: 0, y: 0 };
   /** When false (dialogue, cutscene) movement and combat input are ignored. */
@@ -106,7 +110,7 @@ export class InputHub {
 
   /** True once per press (within `bufferMs` after it happened). */
   consume(a: Action, bufferMs = 160): boolean {
-    if (!this.enabled && a !== 'interact') return false;
+    if (!this.enabled && a !== 'interact' && a !== 'swap') return false;
     if (this.consumed[a]) return false;
     if (this.now() - this.pressedAt[a] > bufferMs) {
       this.consumed[a] = true;

@@ -10,6 +10,7 @@
  * the base follows the thumb when it runs past the edge, which is what works on a phone held in
  * two hands. Its resting position and size come from the settings menu.
  */
+import { unlockAudio } from '../core/audio';
 import { input, type Action } from '../core/input';
 import { settings } from '../core/settings';
 import { el, injectStyle } from './dom';
@@ -31,6 +32,9 @@ const CSS = `
   border: 2px solid rgba(242, 226, 194, 0.7); background: rgba(26, 20, 48, 0.55);
   color: #f2e2c2; font: 11px/1 ui-monospace, monospace; letter-spacing: 0.5px; }
 .lm-act.down { background: rgba(255, 184, 46, 0.85); color: #1a1430; }
+/* the bow's draw meter: a ring that fills as the string is pulled */
+.lm-charge { position: absolute; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none;
+  border: 3px solid rgba(124, 196, 255, 0.9); opacity: 0; }
 `;
 
 /** The buttons Fase 2 can honestly offer: both drive real `HeroCore` states. */
@@ -49,6 +53,9 @@ interface ActionButton {
 const BUTTONS: { action: Action; label: string; r: number; ox: number; oy: number }[] = [
   { action: 'attack', label: 'TEBAS', r: 32, ox: 62, oy: 66 },
   { action: 'dodge', label: 'GESER', r: 24, ox: 132, oy: 44 },
+  // quick weapon swap; the label shows what you are swapping *to*
+  { action: 'swap', label: 'BUSUR', r: 22, ox: 60, oy: 134 },
+  { action: 'skill', label: 'SKILL', r: 22, ox: 140, oy: 110 },
 ];
 
 export class TouchControls {
@@ -58,6 +65,7 @@ export class TouchControls {
   private pointerId = -1;
   private center = { x: 0, y: 0 };
   private buttons: ActionButton[] = [];
+  private chargeRing!: HTMLDivElement;
   private unsubscribe: () => void;
   enabled = true;
 
@@ -76,6 +84,9 @@ export class TouchControls {
       this.root.appendChild(node);
       this.buttons.push({ ...b, node, pointerId: -1 });
     }
+    this.chargeRing = el('div');
+    this.chargeRing.className = 'lm-charge';
+    this.root.appendChild(this.chargeRing);
     parent.appendChild(this.root);
 
     this.root.addEventListener('pointerdown', (e) => this.onDown(e));
@@ -123,6 +134,27 @@ export class TouchControls {
     }
   }
 
+  /**
+   * Show the state of the weapons: what the swap button will switch to, and how far the bow is
+   * drawn. Called every frame by the renderer; the DOM writes are two strings and an opacity.
+   */
+  setWeaponState(nextWeapon: string, charge: number): void {
+    const swap = this.buttons.find((b) => b.action === 'swap');
+    if (swap && swap.node.textContent !== nextWeapon) swap.node.textContent = nextWeapon;
+    const attack = this.buttons.find((b) => b.action === 'attack');
+    if (!attack) return;
+    const bs = settings.get('buttonScale');
+    const r = (attack.r + 7) * bs * (0.75 + charge * 0.25);
+    Object.assign(this.chargeRing.style, {
+      left: attack.node.style.left,
+      top: attack.node.style.top,
+      width: `${r * 2}px`,
+      height: `${r * 2}px`,
+      opacity: charge > 0.02 ? String(0.35 + charge * 0.65) : '0',
+      borderColor: charge >= 1 ? 'rgba(255, 224, 102, 0.95)' : 'rgba(124, 196, 255, 0.9)',
+    });
+  }
+
   /** Which action button is under a screen point, if any. */
   private hitButton(px: number, py: number): ActionButton | null {
     const bs = settings.get('buttonScale');
@@ -161,6 +193,8 @@ export class TouchControls {
 
   private onDown(e: PointerEvent): void {
     if (!this.enabled) return;
+    // Browsers only allow audio to start inside a real gesture; this is that gesture.
+    unlockAudio();
     const hit = this.hitButton(e.clientX, e.clientY);
     if (hit) {
       input.lastDevice = 'touch';

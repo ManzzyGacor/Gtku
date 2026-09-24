@@ -30,12 +30,32 @@ function pointer(type: string, x: number, y: number, id = 1): void {
   for (const fn of root.listeners.get(type) ?? []) fn({ clientX: x, clientY: y, pointerId: id, preventDefault() {}, stopPropagation() {} });
 }
 
-test('the control layer builds a stick and only the buttons Fase 2 can honour', () => {
+test('the control layer builds a stick and the buttons combat actually honours', () => {
   assert.ok(root, 'control layer exists');
   assert.ok(walkEls(doc.body).some((e) => e.classes.has('lm-stick-base')));
   assert.ok(walkEls(doc.body).some((e) => e.classes.has('lm-stick-knob')));
-  const labels = controls.actionButtons.map((b) => b.label);
-  assert.deepEqual(labels, ['TEBAS', 'GESER'], 'movement + dodge; combat buttons wait for Batch 3');
+  const actions = controls.actionButtons.map((b) => b.action);
+  assert.deepEqual(actions, ['attack', 'dodge', 'swap', 'skill'], 'attack, dodge, weapon swap and skill');
+  assert.ok(walkEls(doc.body).some((e) => e.classes.has('lm-charge')), 'and the bow draw meter');
+});
+
+test('the weapon display shows what the swap will switch to, and the draw meter follows the charge', () => {
+  const ring = walkEls(doc.body).find((e) => e.classes.has('lm-charge'))!;
+  const swap = controls.actionButtons.find((b) => b.action === 'swap')!;
+
+  controls.setWeaponState('BUSUR', 0);
+  assert.equal((swap.node as unknown as FakeEl).textContent, 'BUSUR');
+  assert.equal(ring.style.opacity, '0', 'no meter when the string is slack');
+
+  controls.setWeaponState('PEDANG', 0.5);
+  assert.equal((swap.node as unknown as FakeEl).textContent, 'PEDANG', 'it names the *other* weapon');
+  assert.ok(Number(ring.style.opacity) > 0.5, 'the meter shows while drawing');
+  const half = parseFloat(ring.style.width);
+
+  controls.setWeaponState('PEDANG', 1);
+  assert.ok(parseFloat(ring.style.width) > half, 'and grows as the draw completes');
+  assert.ok(ring.style.borderColor.includes('255'), 'a full draw changes colour');
+  controls.setWeaponState('BUSUR', 0);
 });
 
 test('the stick has a dead zone, saturates at 1 and releases to zero', () => {

@@ -4,8 +4,10 @@
  */
 import { clamp } from '../rng';
 import type { Collision } from '../world/collision';
+import type { ElementId } from '../combat/elements';
+import { DEFAULT_LOADOUT, FULL_CHARGE_TIME, shotForCharge, WEAPONS, type ShotDef, type WeaponId } from '../combat/weapons';
 
-export type HeroState = 'free' | 'attack' | 'roll' | 'hurt' | 'cast' | 'dead';
+export type HeroState = 'free' | 'attack' | 'roll' | 'hurt' | 'cast' | 'dead' | 'shoot' | 'swap';
 export type Dir4 = 'd' | 'u' | 's';
 
 export interface HeroInput {
@@ -30,8 +32,26 @@ export interface SwingEvent {
   knock: number;
   index: number;
 }
+/** An arrow leaving the bow. The renderer turns this into a projectile it owns. */
+export interface ShootEvent {
+  type: 'shoot';
+  x: number;
+  y: number;
+  angle: number;
+  speed: number;
+  dmg: number;
+  pierce: number;
+  /** 0..1, for effect scale and sound pitch. */
+  charge: number;
+  element?: ElementId;
+  shot: string;
+}
+
 export type HeroEvent =
   | SwingEvent
+  | ShootEvent
+  | { type: 'swap'; to: WeaponId }
+  | { type: 'charge'; level: number }
   | { type: 'swing-start'; index: number; angle: number }
   | { type: 'blast'; x: number; y: number; radius: number; dmg: number; knock: number; stun: number }
   | { type: 'roll'; x: number; y: number; angle: number }
@@ -121,6 +141,17 @@ export class HeroCore {
   /** Set when the attack button has been held long enough to promote the follow-up to heavy. */
   queuedHeavy = false;
   private holdT = 0;
+
+  // ── weapons ──
+  /** The two slots the player carries, and which one is in hand. */
+  loadout: [WeaponId, WeaponId] = [...DEFAULT_LOADOUT];
+  slot: 0 | 1 = 0;
+  /** Bow draw progress, 0..1. Only meaningful while the attack button is held with the bow out. */
+  charge = 0;
+  /** Element the next hit carries, from the weapon or a buff. */
+  element: ElementId | undefined = undefined;
+  private shot: ShotDef | null = null;
+  private shotFired = false;
   rollCd = 0;
   skillCd = 0;
   invuln = 0;
@@ -151,6 +182,35 @@ export class HeroCore {
   }
 
   /** Attack phase 0 = windup, 1 = active, 2 = recovery. */
+  get weapon(): WeaponId {
+    return this.loadout[this.slot];
+  }
+
+  get weaponDef(): (typeof WEAPONS)[WeaponId] {
+    return WEAPONS[this.weapon];
+  }
+
+  get isRanged(): boolean {
+    return this.weaponDef.kind === 'ranged';
+  }
+
+  /**
+   * Swap to the other slot. Quick on purpose — the plan wants swapping to be usable *inside* a
+   * combo, so it interrupts recovery but not an active swing.
+   */
+  swapWeapon(): boolean {
+    if (this.state === 'dead' || this.state === 'swap' || this.state === 'roll') return false;
+    if (this.state === 'attack' && this.stateT < this.attackDef.windup + this.attackDef.active) return false;
+    this.slot = this.slot === 0 ? 1 : 0;
+    this.charge = 0;
+    this.shot = null;
+    this.combo = 0;
+    this.comboTimer = 0;
+    this.setState('swap');
+    this.events.push({ type: 'swap', to: this.weapon });
+    return true;
+  }
+
   /** True while this swing is the heavy finisher. */
   get isHeavy(): boolean {
     return this.combo === HEAVY_INDEX;
@@ -184,6 +244,8 @@ export class HeroCore {
     this.queuedAttack = false;
     this.queuedHeavy = false;
     this.holdT = 0;
+    this.charge = 0;
+    this.shot = null;
   }
 
   heal(n: number): void {
@@ -198,6 +260,8 @@ export class HeroCore {
     this.vy = Math.sin(a) * knock;
     this.invuln = HERO_STATS.invulnAfterHit;
     this.queuedAttack = false;
+    this.queuedHeavy = false;
+    this.charge = 0;
     this.combo = 0;
     if (this.hp <= 0) {
       this.state = 'dead';
@@ -233,6 +297,18 @@ export class HeroCore {
     this.queuedHeavy = false;
     this.holdT = 0;
     this.events.push({ type: 'swing-start', index: this.combo, angle });
+  }
+
+  /** Loose an arrow. Which shot it is depends on how long the string was drawn. */
+  private startShot(input: HeroInput): void {
+    const has = input.mx !== 0 || input.my !== 0;
+    let angle = has ? Math.atan2(input.my, input.mx) : this.aim;
+    if (this.aimAssist) angle = this.aimAssist(angle);
+    this.aim = angle;
+    this.shot = shotForCharge(this.charge);
+    this.shotFired = false;
+    this.setState('shoot');
+    this.queuedAttack = false;
   }
 
   /** Begin the heavy finisher. Reached by holding rather than tapping. */
@@ -293,6 +369,20 @@ export class HeroCore {
           this.setState('cast');
           this.skillFired = false;
           this.events.push({ type: 'cast-start' });
+        } else if (this.isRanged) {
+          /*
+           * The bow: holding draws the string, releasing lets the arrow go. A tap fires the quick
+           * shot immediately, so the weapon never feels laggy, and holding is what buys the
+           * piercing shot.
+           */
+          if (inp.attackHeld) {
+            const before = this.charge;
+            this.charge = Math.min(1, this.charge + dt / FULL_CHARGE_TIME);
+            if (Math.floor(this.charge * 4) !== Math.floor(before * 4)) this.events.push({ type: 'charge', level: this.charge });
+          } else if (this.bufAtk > 0 || this.charge > 0) {
+            this.bufAtk = 0;
+            this.startShot(inp);
+          }
         } else if (this.bufAtk > 0) {
           this.bufAtk = 0;
           this.combo = this.comboTimer > 0 ? Math.min(this.combo + 1, LIGHT_COMBO - 1) : 0;
@@ -374,6 +464,62 @@ export class HeroCore {
           this.comboTimer = this.combo < LIGHT_COMBO - 1 ? HERO_STATS.comboWindow : 0;
           this.setState('free');
         }
+        break;
+      }
+
+      case 'shoot': {
+        const shot = this.shot!;
+        accel = HERO_STATS.decel;
+        // a little backward drift, like absorbing the recoil
+        if (this.stateT < shot.draw) {
+          targetVx = -Math.cos(this.aim) * 24;
+          targetVy = -Math.sin(this.aim) * 24;
+        }
+        // the player may keep turning while drawing, same as a sword wind-up
+        const mag = clamp(Math.hypot(inp.mx, inp.my), 0, 1);
+        if (this.stateT < shot.draw && mag > 0.15) {
+          const want = Math.atan2(inp.my, inp.mx);
+          let d = want - this.aim;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          const maxTurn = ((HERO_STATS.attackTurnRate * Math.PI) / 180) * dt;
+          this.aim += Math.abs(d) <= maxTurn ? d : Math.sign(d) * maxTurn;
+        }
+        if (!this.shotFired && this.stateT >= shot.draw) {
+          this.shotFired = true;
+          const angle = this.aimAssist ? this.aimAssist(this.aim) : this.aim;
+          this.aim = angle;
+          this.events.push({
+            type: 'shoot',
+            x: this.x,
+            y: this.y - 8,
+            angle,
+            speed: shot.speed,
+            dmg: shot.dmg,
+            pierce: shot.pierce,
+            charge: this.charge,
+            element: this.element,
+            shot: shot.id,
+          });
+          this.charge = 0;
+        }
+        if (this.bufDodge > 0 && this.rollCd <= 0) {
+          this.bufDodge = 0;
+          this.startRoll(inp);
+        } else if (this.stateT >= shot.draw + shot.recover) this.setState('free');
+        break;
+      }
+
+      case 'swap': {
+        accel = HERO_STATS.decel;
+        const mag = clamp(Math.hypot(inp.mx, inp.my), 0, 1);
+        // swapping never roots you: you keep walking at half speed through it
+        if (mag > 0.05) {
+          const sp = HERO_STATS.speed * moveMult * 0.5;
+          targetVx = (inp.mx / mag) * sp;
+          targetVy = (inp.my / mag) * sp;
+          this.aim = Math.atan2(inp.my, inp.mx);
+        }
+        if (this.stateT >= this.weaponDef.swapTime) this.setState('free');
         break;
       }
 

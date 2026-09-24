@@ -13,7 +13,11 @@ import { PerfMeter } from '../core/perf';
 import { settings } from '../core/settings';
 import { DAY_SECONDS, gradeAt, nightAmount, smooth, timeLabel } from '../core/systems/daynight';
 import { CAVE_X0, FOREST_X0 } from '../core/world/areas';
-import { HeroCore, type HeroInput } from '../core/entities/HeroCore';
+import { HeroCore, type HeroEvent, type HeroInput } from '../core/entities/HeroCore';
+import { WEAPONS } from '../core/combat/weapons';
+import { GameState } from '../core/state/GameState';
+import { sfx, unlockAudio } from '../core/audio';
+import { Combat3D } from './Combat3D';
 import { Collision } from '../core/world/collision';
 import { GeneratedWorld } from '../core/world/worldgen';
 import type { DiagnosticsSource } from '../ui/diagnostics';
@@ -43,6 +47,8 @@ export class Game3D {
   readonly scene3d: World3D;
   readonly hero: HeroCore;
   readonly heroMesh: HeroMesh3D;
+  readonly state = new GameState();
+  readonly combat: Combat3D;
   readonly perf = new PerfMeter();
 
   private adaptive = new AdaptiveQuality(this.perf);
@@ -53,6 +59,8 @@ export class Game3D {
   private paused = false;
   /** Real seconds since boot, for flicker and breathing (keeps running while paused). */
   private clock = 0;
+  /** Hit-stop: the simulation holds still while rendering carries on. */
+  private freezeLeft = 0;
   /** Preset multiplier on the bloom (the cheapest thing to turn down). */
   private bloomScale = 1;
   private gradeLift = new THREE.Color();
@@ -75,6 +83,16 @@ export class Game3D {
     this.heroMesh = new HeroMesh3D(this.pixels.scene);
     this.camera.snap(u(start.x), u(start.y));
 
+    this.combat = new Combat3D(this.pixels.scene, this.world, this.collision, this.state, {
+      freeze: (ms) => this.freeze(ms),
+      shake: (amount, seconds) => this.camera.shake(amount, seconds),
+      spark: (x, y, color, big) => this.environment.spark(u(x), u(y), color, big),
+    });
+    // Phone sticks are not precise: nudge every attack toward the nearest enemy in front.
+    this.hero.aimAssist = (angle) => this.combat.aimAssist(this.hero, angle);
+    this.scene3d.onChunkLoad = (cx, cy) => this.combat.spawnForChunk(cx, cy);
+    this.scene3d.onChunkUnload = (cx, cy) => this.combat.despawnForChunk(cx, cy);
+
     if (settings.firstRun && settings.get('presetAuto') && !settings.isLocked('preset')) {
       settings.set('preset', suggestPreset(probeDevice()));
     }
@@ -96,6 +114,9 @@ export class Game3D {
     this.scene3d.preload(u(start.x), u(start.y), 1);
     window.addEventListener('resize', this.onResize);
   }
+
+  /** The HUD listens for which weapon is next and how far the bow is drawn. */
+  onWeaponState: (nextWeapon: string, charge: number) => void = () => undefined;
 
   private onResize = (): void => this.resize();
 
@@ -158,20 +179,34 @@ export class Game3D {
     this.raf = 0;
   }
 
+  /** Freeze the simulation for `ms` while rendering keeps going — the punch behind a landed hit. */
+  freeze(ms: number): void {
+    this.freezeLeft = Math.max(this.freezeLeft, ms / 1000);
+  }
+
   /** One frame. Exposed so a test can drive the simulation without a browser. */
   step(dt: number): void {
     if (this.disposed) return;
     if (dt > 0) this.frameMs += (dt * 1000 - this.frameMs) * 0.1;
     this.probe.update(dt);
     this.clock += dt;
+    // hit-stop freezes the simulation, never the rendering
+    let simDt = this.paused ? 0 : dt;
+    if (this.freezeLeft > 0) {
+      this.freezeLeft = Math.max(0, this.freezeLeft - dt);
+      simDt = 0;
+    }
     if (!this.paused && dt > 0) {
-      this.dayTime = (this.dayTime + dt / DAY_SECONDS) % 1;
-      this.updateHero(dt);
+      this.dayTime = (this.dayTime + simDt / DAY_SECONDS) % 1;
+      this.updateHero(simDt);
+      this.combat.update(simDt, dt, this.hero);
       this.camera.follow(u(this.hero.x), u(this.hero.y), dt);
+      this.camera.tick(dt);
       this.perf.push(dt);
       this.adaptive.update(dt, settings.get('preset'), settings.get('renderScale'));
     }
-    this.heroMesh.update(this.paused ? 0 : dt, dt, this.hero, this.clock);
+    this.heroMesh.update(simDt, dt, this.hero, this.clock);
+    this.onWeaponState(WEAPONS[this.hero.loadout[this.hero.slot === 0 ? 1 : 0]].name.toUpperCase(), this.hero.charge);
     const cave = this.caveWeight();
     this.scene3d.setHeroOcclusion(this.heroMesh.root.position, this.camera.camera, this.hero.alive);
     /*
@@ -235,14 +270,58 @@ export class Game3D {
       mx: dir.x,
       my: dir.y,
       attack: input.consume('attack'),
-      // held, not just pressed: this is what promotes a tap into the heavy finisher
+      // held, not just pressed: this is what promotes a tap into the heavy swing or a bow charge
       attackHeld: input.isHeld('attack'),
       dodge: input.consume('dodge'),
       skill: input.consume('skill'),
     };
+    if (input.consume('swap')) {
+      if (this.hero.swapWeapon()) unlockAudio();
+    }
     this.hero.update(dt, inp, this.collision, this.collision.speedAt(this.hero.x, this.hero.y));
-    // Combat effects arrive in Batch 3; until then the queue is drained so it cannot grow forever.
-    this.hero.events.length = 0;
+    this.handleHeroEvents();
+  }
+
+  /** Turn the hero's events into damage, effects and sound. */
+  private handleHeroEvents(): void {
+    const events: HeroEvent[] = this.hero.events.splice(0);
+    for (const e of events) {
+      switch (e.type) {
+        case 'swing-start':
+          sfx.swing(this.hero.isHeavy);
+          break;
+        case 'swing':
+          this.combat.applySwing(this.hero, e);
+          break;
+        case 'shoot':
+          this.combat.spawnArrow(e);
+          break;
+        case 'charge':
+          if (e.level > 0.5) sfx.bowDraw();
+          break;
+        case 'swap':
+          sfx.swap();
+          break;
+        case 'roll':
+          sfx.roll();
+          this.environment.spark(u(e.x), u(e.y), 0xd8cfff, false);
+          break;
+        case 'blast':
+          this.environment.spark(u(e.x), u(e.y), 0xffe4a0, true);
+          this.camera.shake(4, 0.28);
+          this.combat.applyBlast(e.x, e.y, e.radius, e.dmg, e.knock, e.stun, this.hero);
+          break;
+        case 'hurt':
+          this.camera.shake(3.5, 0.2);
+          break;
+        case 'dead':
+          sfx.die();
+          this.camera.shake(5, 0.4);
+          break;
+        default:
+          break;
+      }
+    }
   }
 
   // ───────────────────────── performance probe ─────────────────────────
@@ -339,6 +418,8 @@ export class Game3D {
         `hutan ${(this.forestWeight() * 100).toFixed(0)}%   jendela menyala ${s.windows}`,
       `outline tersedia: ${this.pixels.canOutline ? 'ya' : 'tidak'}`,
       `hero: (${Math.round(this.hero.x)}, ${Math.round(this.hero.y)}) hp ${this.hero.hp}/${this.hero.maxHp} state ${this.hero.state}`,
+      `senjata: ${this.hero.weapon}${this.hero.isRanged ? ` (charge ${(this.hero.charge * 100).toFixed(0)}%)` : ` (combo ${this.hero.combo})`}`,
+      `musuh hidup: ${this.combat.enemyCount}   status aktif: ${this.combat.statusSummary()}   reaksi terdaftar: ${this.combat.reactionCount}`,
       `area: ${this.world.areaAt(Math.floor(this.hero.x / 16), Math.floor(this.hero.y / 16))}`,
       `kamera: sudut ${this.camera.pitch}\u00b0  zoom ${this.camera.zoom.toFixed(2)}x  ` +
         `target (${this.camera.target.x.toFixed(1)}, ${this.camera.target.z.toFixed(1)})  radius pandang ${this.camera.viewRadius.toFixed(1)} unit`,
@@ -352,6 +433,7 @@ export class Game3D {
     this.stop();
     window.removeEventListener('resize', this.onResize);
     this.unsubscribe();
+    this.combat.dispose();
     this.camera.dispose();
     this.sky.dispose();
     this.environment.dispose();
