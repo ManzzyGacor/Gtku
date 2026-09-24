@@ -114,6 +114,36 @@ function noise(dur: number, gain: number, freq: number, q = 1): void {
   src.start();
 }
 
+/**
+ * Music and ambience are requested by **name**, and the mixer decides what that name sounds like
+ * (`music.ts`, Batch 5 Bagian 3). This file keeps the oscillator plumbing; the two functions below
+ * are the seam the cutscene engine and the area code talk to, so neither has to know whether a
+ * track is synthesised or, later, a real audio file.
+ */
+export interface AudioBus {
+  /** Crossfade to a named track, or `''` for silence. */
+  music(id: string, fadeSeconds?: number): void;
+  /** Switch the ambience bed (wind, night insects, cave drips, fire). */
+  ambient(id: string): void;
+}
+
+/** Replaced by `music.ts` once it is loaded; until then both calls are harmless no-ops. */
+export const bus: AudioBus = {
+  music: () => undefined,
+  ambient: () => undefined,
+};
+
+/** Called by the mixer to take over the two functions above. */
+export function installAudioBus(next: AudioBus): void {
+  bus.music = next.music;
+  bus.ambient = next.ambient;
+}
+
+/** The context and master gain, for the mixer to build its own graph on. */
+export function audioGraph(): { ctx: AudioContext; master: GainNode } | null {
+  return ready && ctx && master ? { ctx, master } : null;
+}
+
 /** The whole vocabulary, so callers never build their own sounds. */
 export const sfx = {
   swing(heavy = false): void {
@@ -165,5 +195,57 @@ export const sfx = {
   /** Picking something up. */
   pickup(): void {
     tone({ from: 700, to: 1050, dur: 0.1, type: 'square', gain: 0.07 });
+  },
+
+  // ── cutscene cues (Batch 5) ──
+
+  /**
+   * Thunder: a long, dark noise sweep with a crack on the front.
+   *
+   * Built from filtered noise rather than a tone, because a sine "boom" reads as a drum. The two
+   * layers are the crack (bright, short) and the roll (dark, long) — the same anatomy a real
+   * thunderclap has.
+   */
+  thunder(): void {
+    noise(0.09, 0.2, 2600, 0.6);
+    noise(1.5, 0.22, 120, 0.4);
+    tone({ from: 70, to: 38, dur: 1.4, type: 'sine', gain: 0.12 });
+  },
+
+  /** A gust of rain, for a scene that needs the storm to swell. */
+  rainBurst(): void {
+    noise(1.6, 0.1, 4200, 0.25);
+  },
+
+  /** A wooden door: the creak, then the stop. */
+  door(): void {
+    tone({ from: 240, to: 170, dur: 0.5, type: 'sawtooth', gain: 0.045 });
+    noise(0.5, 0.05, 900, 0.8);
+    tone({ from: 120, to: 70, dur: 0.12, type: 'square', gain: 0.09, delay: 0.5 });
+  },
+
+  /** Broken glass on a floor. */
+  glass(): void {
+    noise(0.22, 0.12, 5200, 1.6);
+    tone({ from: 2400, to: 1400, dur: 0.14, type: 'triangle', gain: 0.05 });
+    tone({ from: 1900, to: 900, dur: 0.1, type: 'triangle', gain: 0.04, delay: 0.08 });
+  },
+
+  /** Two low thuds. The cheapest way to make a quiet scene tense. */
+  heartbeat(): void {
+    tone({ from: 62, to: 44, dur: 0.16, type: 'sine', gain: 0.22 });
+    tone({ from: 58, to: 40, dur: 0.2, type: 'sine', gain: 0.16, delay: 0.3 });
+  },
+
+  /** The lantern catching: a soft whoosh and a held, cold ring. */
+  lanternLight(): void {
+    noise(0.4, 0.07, 700, 0.5);
+    tone({ from: 300, to: 880, dur: 0.5, type: 'triangle', gain: 0.09 });
+    tone({ from: 1320, to: 1320, dur: 0.9, type: 'sine', gain: 0.05, delay: 0.2 });
+  },
+
+  /** One footstep, for a scene that walks. */
+  footstep(): void {
+    noise(0.07, 0.05, 420, 0.7);
   },
 };

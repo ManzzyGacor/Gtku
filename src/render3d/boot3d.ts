@@ -61,10 +61,20 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
 
   const wire = (g: Game3D): void => {
     g.onWeaponState = (next, charge) => controls.setWeaponState(next, charge);
+    // The touch controls get out of the way while a cutscene plays, and come back after.
+    g.onCutsceneChange = (playing) => controls.setVisible(!playing);
     debug.attach(g.diagnostics());
     g.start();
   };
   wire(game);
+
+  /*
+   * A new game opens with the prologue (docs/STORY.md).
+   *
+   * `auto: true` means "only if it has not been watched", and the save is what remembers that — so
+   * starting over really does replay it, while a rebuild after a lost GPU context does not.
+   */
+  if (!continueGame) game.playCutscene('intro', { auto: true });
 
   /**
    * Rebuild everything that lived on the GPU.

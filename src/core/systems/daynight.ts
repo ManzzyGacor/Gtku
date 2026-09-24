@@ -132,6 +132,26 @@ export function sunDirection(t: number): { x: number; y: number; z: number; up: 
   return { x: x / len, y: y / len, z: z / len, up };
 }
 
+/**
+ * The time of day that produces a given `nightAmount`, searched over the evening half of the
+ * curve (noon → midnight).
+ *
+ * Cutscenes ask for "how dark", not "what o'clock" — a scene wants a mood, and the clock is an
+ * implementation detail of the lighting. Binary search rather than an inverse formula because
+ * `nightAmount` is built from the hand-tuned ambient keyframes and has no closed form.
+ */
+export function dayTimeForNight(night: number): number {
+  const want = clamp(Number.isFinite(night) ? night : 0, 0, 1);
+  let lo = 0.5; // noon, night = 0
+  let hi = 1.0; // midnight (wraps to 0), night = 1
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (nightAmount(mid) < want) lo = mid;
+    else hi = mid;
+  }
+  return wrapDay((lo + hi) / 2);
+}
+
 export function timeLabel(t: number): string {
   const h = Math.floor(wrapDay(t + 0.0) * 24);
   return `${String(h).padStart(2, '0')}:00`;

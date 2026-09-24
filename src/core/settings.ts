@@ -43,6 +43,15 @@ export interface Settings {
   sfxVol: number;
   /** Set once the intro cutscene has been watched (or skipped) to the end. */
   cutsceneSeen: boolean;
+  /**
+   * What the hero is called.
+   *
+   * The story in docs/STORY.md calls him Arka, but that is the *script's* name: in the game the
+   * player names their own character, and every line of dialogue is written with a `{nama}`
+   * placeholder so the same script works whatever they chose. Empty until they pick one, and
+   * `NAME_FALLBACK` covers that case so a cutscene never prints an empty space.
+   */
+  playerName: string;
 }
 
 export const DEFAULTS: Settings = {
@@ -56,6 +65,7 @@ export const DEFAULTS: Settings = {
   buttonScale: 1,
   textScale: 2,
   textSpeed: 42,
+  playerName: '',
   camPitch: 38,
   camZoom: 1,
   renderScale: 1,
@@ -96,9 +106,28 @@ function sanitize(raw: unknown): Partial<Settings> {
   const out: Partial<Settings> = {};
   if (typeof o.preset === 'string' && PRESET_IDS.includes(o.preset as PresetId)) out.preset = o.preset as PresetId;
   for (const k of ['presetAuto', 'fpsCounter', 'bloom', 'cutsceneSeen'] as const) if (typeof o[k] === 'boolean') out[k] = o[k] as boolean;
+  if (typeof o.playerName === 'string') out.playerName = sanitizeName(o.playerName);
   for (const k of Object.keys(RANGES) as NumericKey[]) if (typeof o[k] === 'number' && Number.isFinite(o[k])) out[k] = quantize(k, o[k] as number);
   return out;
 }
+
+/**
+ * Trim a player-chosen name to something that can be printed anywhere.
+ *
+ * Letters, digits, spaces, apostrophes and hyphens only, 14 characters maximum. The limit is not
+ * arbitrary: the name appears in the HUD, in dialogue boxes and over the hero's head, and a
+ * 60-character name would break every one of those layouts.
+ */
+export function sanitizeName(raw: string): string {
+  return String(raw)
+    .replace(/[^\p{L}\p{N} '-]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 14);
+}
+
+/** Shown when the player has not named their character yet. */
+export const NAME_FALLBACK = 'Pengembara';
 
 function readStored(): Partial<Settings> {
   try {

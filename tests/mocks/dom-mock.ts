@@ -10,6 +10,8 @@ export interface FakeEl {
   childNodes: FakeEl[];
   parentNode: FakeEl | null;
   textContent: string;
+  /** `data-*` attributes, which the UI uses to remember what it last drew. */
+  dataset: Record<string, string>;
   /** Only assignment is supported, and only to `''` — which clears the children, like the real DOM. */
   innerHTML: string;
   className: string;
@@ -45,6 +47,7 @@ export function makeElement(tag: string): FakeEl {
     childNodes: [] as FakeEl[],
     parentNode: null as FakeEl | null,
     id: '',
+    dataset: {} as Record<string, string>,
     disabled: false,
     value: '',
     classes: new Set<string>(),

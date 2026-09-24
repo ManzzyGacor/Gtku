@@ -46,6 +46,9 @@ export class IsoCamera {
   private offset = new THREE.Vector3();
   private pitchDeg = 38;
   private zoomLevel = 1;
+  /** Set while a cutscene is framing its own shot; null means "use the player's setting". */
+  private pitchOverride: number | null = null;
+  private zoomOverride: number | null = null;
   private aspect = 16 / 9;
   private unsubscribe: () => void;
   private shakeLeft = 0;
@@ -61,11 +64,28 @@ export class IsoCamera {
   }
 
   private readSettings(): void {
-    this.pitchDeg = clamp(settings.get('camPitch'), PITCH_MIN, PITCH_MAX);
-    this.zoomLevel = clamp(settings.get('camZoom'), ZOOM_MIN, ZOOM_MAX);
+    this.pitchDeg = clamp(this.pitchOverride ?? settings.get('camPitch'), PITCH_MIN, PITCH_MAX);
+    this.zoomLevel = clamp(this.zoomOverride ?? settings.get('camZoom'), ZOOM_MIN, ZOOM_MAX);
     this.rebuildOffset();
     this.fit();
     this.apply();
+  }
+
+  /**
+   * Take the angle and the zoom away from the player's settings for a while (a cutscene).
+   *
+   * Pitch and zoom are *settings* in this game, which is unusual and deliberate — but a cutscene
+   * has to be able to frame a shot. Passing `null` for either hands that dial back to the player,
+   * so their own choice is never quietly overwritten.
+   */
+  setOverride(pitch: number | null, zoom: number | null): void {
+    this.pitchOverride = pitch;
+    this.zoomOverride = zoom;
+    this.readSettings();
+  }
+
+  get overridden(): boolean {
+    return this.pitchOverride !== null || this.zoomOverride !== null;
   }
 
   private rebuildOffset(): void {

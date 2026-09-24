@@ -191,6 +191,17 @@ export class Hud {
     this.applyTextScale();
   }
 
+  /**
+   * Hide the whole HUD (a cutscene, or the pause menu).
+   *
+   * `visibility` rather than `display`, so the floating-damage pool keeps its layout and does not
+   * have to be rebuilt when the HUD comes back.
+   */
+  setVisible(on: boolean): void {
+    this.root.style.visibility = on ? 'visible' : 'hidden';
+    this.fullBtn.style.display = on ? 'block' : 'none';
+  }
+
   /** The text-size setting applies to the HUD too. */
   applyTextScale(): void {
     const scale = 0.85 + settings.get('textScale') * 0.18;

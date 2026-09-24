@@ -184,6 +184,55 @@ test('equipping through the panel reaches the hero, the combat and the save', as
   game.dispose();
 });
 
+test('a new game opens with the prologue, and the world is handed back afterwards', async () => {
+  const { CUTSCENES } = await import('../src/core/story/cutscenes');
+  const game = await boot({ continue: false });
+  const anyGame = game as unknown as { step: (dt: number) => void; paused: boolean };
+
+  assert.equal(game.playCutscene('intro', { auto: true }), true, 'a fresh save has not seen it');
+  assert.equal(game.cutscene.running, true);
+  assert.equal(anyGame.paused, true, 'the world holds still while it plays');
+  assert.equal(game.cutscene.view?.letterbox, true);
+
+  // it must not start a second copy over itself
+  assert.equal(game.playCutscene('intro'), false);
+
+  // run the timeline without ever drawing a frame: the engine is renderer-free by design
+  const steps = CUTSCENES.intro.steps.length;
+  assert.ok(steps > 40, `the prologue should be a real scene, got ${steps} steps`);
+  for (let i = 0; i < 60 * 200 && game.cutscene.running; i++) game.tickCutscene(1 / 60);
+  assert.equal(game.cutscene.running, false, 'it ends on its own rather than hanging');
+
+  game.dispose();
+});
+
+test('skipping the prologue still marks it seen, so it never plays twice', async () => {
+  const first = await boot({ continue: false });
+  assert.equal(first.playCutscene('intro', { auto: true }), true);
+  first.cutscene.skip();
+  // the tidy-up runs from the frame loop, and `tickCutscene` is that frame without the rendering
+  first.tickCutscene(1 / 60);
+  assert.equal(first.state.hasSeen('intro'), true, 'a skip counts as watched');
+  assert.equal(first.playCutscene('intro', { auto: true }), false, 'and it does not come back');
+  // but an explicit replay (Settings) always plays
+  assert.equal(first.playCutscene('intro'), true);
+  first.dispose();
+});
+
+test('the prologue is remembered across a save and reload', async () => {
+  const first = await boot({ continue: false });
+  first.playCutscene('intro', { auto: true });
+  first.cutscene.skip();
+  first.tickCutscene(1 / 60);
+  first.saveNow(true);
+  first.dispose();
+
+  const second = await boot({ continue: true });
+  assert.equal(second.state.hasSeen('intro'), true, 'the save carries it, not the settings');
+  assert.equal(second.playCutscene('intro', { auto: true }), false);
+  second.dispose();
+});
+
 test('the diagnostics report can be produced without a frame ever being drawn', async () => {
   const game = await boot({ continue: false });
   const lines = game.diagnostics().report?.() ?? [];

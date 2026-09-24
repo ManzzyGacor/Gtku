@@ -23,6 +23,10 @@ import { Dialogue } from '../ui/Dialogue';
 import { Hud, type Projector } from '../ui/Hud';
 import { Minimap } from '../ui/Minimap';
 import { CharacterPanel } from '../ui/CharacterPanel';
+import { CutsceneOverlay } from '../ui/CutsceneOverlay';
+import { Cutscene3D } from './Cutscene3D';
+import { CUTSCENES, playerName } from '../core/story/cutscenes';
+import type { ActorSpec, FxSpec } from '../core/story/cutscene';
 import { Puzzle3D } from './Puzzle3D';
 import { Story3D } from './Story3D';
 import { sfx, unlockAudio } from '../core/audio';
@@ -69,6 +73,9 @@ export class Game3D {
   readonly dialogue: Dialogue;
   readonly minimap: Minimap;
   readonly sheet: CharacterPanel;
+  /** The cutscene director (Batch 5). Null-safe: the game runs identically with no scene playing. */
+  readonly cutscene: Cutscene3D;
+  private readonly csOverlay: CutsceneOverlay;
   readonly story: Story3D;
   readonly puzzle: Puzzle3D;
   readonly perf = new PerfMeter();
@@ -100,6 +107,11 @@ export class Game3D {
   private disposed = false;
   /** What the save migration had to change on load, shown in the report so it is never silent. */
   private saveNotes: string[] = [];
+  /** While a cutscene is framing the shot, the day/night clock holds at this time. */
+  private dayTimeOverride: number | null = null;
+  private tintOverride: [number, number, number] | null = null;
+  /** An actor being walked from A to B by a cutscene. */
+  private actorMove: { id: string; fromX: number; fromY: number; toX: number; toY: number; t: number; dur: number } | null = null;
 
   constructor(parent: HTMLElement, options: { continue?: boolean } = {}) {
     this.pixels = new PixelRenderer(parent);
@@ -150,6 +162,24 @@ export class Game3D {
       // no rummaging through the bag while dead — respawn first
       blocked: () => !this.hero.alive,
     });
+    this.csOverlay = new CutsceneOverlay();
+    this.cutscene = new Cutscene3D(this.camera, {
+      setDayTime: (t) => {
+        this.dayTimeOverride = t;
+        if (t !== null) this.dayTime = t;
+      },
+      setTint: (tint) => {
+        this.tintOverride = tint;
+      },
+      actor: (spec) => this.moveActor(spec),
+      fx: (spec) => this.cutsceneFx(spec),
+      flag: (name) => {
+        this.state.flags[name] = true;
+      },
+    });
+    this.csOverlay.onAdvance = () => this.cutscene.advance();
+    this.csOverlay.onSkip = () => this.cutscene.skip();
+
     // `I` / `Tab` on a keyboard; the bag button on a phone.
     input.onMenu = () => this.sheet.toggle();
     // While the sheet is open the hero holds still and the world stops, exactly as during a
@@ -456,6 +486,158 @@ export class Game3D {
     this.saveNow(true);
   }
 
+  // ───────────────────────── cutscenes ─────────────────────────
+
+  /**
+   * Play a cutscene by id.
+   *
+   * `auto` is how the story triggers one: an auto-play is skipped entirely if the save says it has
+   * already been watched, while replaying from Settings always plays. Returns false when nothing
+   * started, so the caller can carry straight on.
+   */
+  playCutscene(id: string, opts: { auto?: boolean } = {}): boolean {
+    const def = CUTSCENES[id];
+    if (!def) return false;
+    if (opts.auto && this.state.hasSeen(id)) return false;
+    if (this.cutscene.running) return false;
+
+    this.cutscene.play(def, {
+      vars: { nama: playerName() },
+      textSpeed: () => settings.get('textSpeed'),
+    });
+    // The world holds still and the game UI gets out of the way.
+    this.paused = true;
+    input.enabled = false;
+    input.reset();
+    this.sheet.hide();
+    this.hud.setVisible(false);
+    this.minimap.setVisible(false);
+    this.sheet.setVisible(false);
+    this.onCutsceneChange(true);
+    this.csOverlay.setVisible(true);
+    return true;
+  }
+
+  /**
+   * Drive the running cutscene, if any: the overlay, the scripted actor walk, and the timeline.
+   *
+   * Public because it is the whole cutscene frame in one call — `step()` uses it, and so can a
+   * test, which matters because a full `step()` cannot run without a GPU.
+   */
+  tickCutscene(dt: number): void {
+    if (!this.cutscene.active) return;
+    const view = this.cutscene.view;
+    if (view) this.csOverlay.render(view, dt);
+    this.tickActors(dt);
+    this.camera.tick(dt);
+    if (!this.cutscene.update(dt)) this.endCutscene();
+  }
+
+  /** Set by the boot code so the touch controls can hide while a scene plays. */
+  onCutsceneChange: (playing: boolean) => void = () => undefined;
+
+  /** Tidy up after a scene: give the world back, remember it was watched, save. */
+  private endCutscene(): void {
+    const id = this.cutscene.id;
+    this.cutscene.clear();
+    this.csOverlay.setVisible(false);
+    this.actorMove = null;
+    this.dayTimeOverride = null;
+    this.tintOverride = null;
+    this.hud.setVisible(true);
+    this.minimap.setVisible(true);
+    this.sheet.setVisible(true);
+    this.paused = false;
+    input.enabled = true;
+    this.onCutsceneChange(false);
+    if (id) {
+      this.state.markSeen(id);
+      this.saveNow(true);
+    }
+  }
+
+  /**
+   * Walk an actor, or put it somewhere.
+   *
+   * Only the hero is an actor the engine can move today: the parents in the opening are *heard*
+   * and never seen, which is how the script in docs/STORY.md tells it, so nothing else needed
+   * staging. An unknown id is ignored rather than throwing — a cutscene must not be able to crash
+   * the game over a typo in a name.
+   */
+  private moveActor(spec: ActorSpec): void {
+    if (spec.id !== 'hero') return;
+    if (spec.face !== undefined) this.hero.aim = spec.face;
+    if (spec.anim === 'idle') {
+      this.hero.vx = 0;
+      this.hero.vy = 0;
+      this.actorMove = null;
+    }
+    if (spec.x === undefined && spec.y === undefined) return;
+    const toX = spec.x ?? this.hero.x;
+    const toY = spec.y ?? this.hero.y;
+    if (spec.dur <= 0) {
+      this.hero.reset(toX, toY, this.hero.hp);
+      this.camera.snap(u(toX), u(toY));
+      this.actorMove = null;
+      return;
+    }
+    this.actorMove = { id: spec.id, fromX: this.hero.x, fromY: this.hero.y, toX, toY, t: 0, dur: spec.dur };
+  }
+
+  /**
+   * Advance a cutscene's actor walk.
+   *
+   * The velocity is written as well as the position, because `HeroMesh3D` decides whether to play
+   * the walk animation from `vx/vy` — so a scripted walk animates exactly like a played one
+   * instead of sliding along frozen.
+   */
+  private tickActors(dt: number): void {
+    const m = this.actorMove;
+    if (!m) return;
+    m.t = Math.min(m.dur, m.t + dt);
+    const k = m.t / m.dur;
+    const x = m.fromX + (m.toX - m.fromX) * k;
+    const y = m.fromY + (m.toY - m.fromY) * k;
+    this.hero.vx = dt > 0 ? (x - this.hero.x) / dt : 0;
+    this.hero.vy = dt > 0 ? (y - this.hero.y) / dt : 0;
+    this.hero.x = x;
+    this.hero.y = y;
+    if (m.t >= m.dur) {
+      this.hero.vx = 0;
+      this.hero.vy = 0;
+      this.actorMove = null;
+    }
+  }
+
+  /**
+   * The named particle effects a script may ask for.
+   *
+   * The table is here, in the game, not in the script — so a scene asks for "the lantern catching"
+   * and this decides what that looks like with whatever the renderer has.
+   */
+  private cutsceneFx(spec: FxSpec): void {
+    const x = spec.x ?? this.hero.x;
+    const y = spec.y ?? this.hero.y;
+    switch (spec.kind) {
+      case 'lantern-blue':
+        this.environment.spark(u(x), u(y), spec.color ?? 0x6fd8ff, true);
+        break;
+      case 'lantern-warm':
+        this.environment.spark(u(x), u(y), spec.color ?? 0xffd98a, true);
+        break;
+      case 'spark':
+        this.environment.spark(u(x), u(y), spec.color ?? 0xffffff, spec.big ?? false);
+        break;
+      case 'dust':
+        for (let i = 0; i < 6; i++) {
+          this.environment.spark(u(x) + (Math.random() - 0.5) * 2, u(y) + (Math.random() - 0.5) * 2, spec.color ?? 0x8a7f6a, false);
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
   /** Death → fade → respawn at the last checkpoint, exactly as the 2D build did it. */
   private updateDeath(dt: number): void {
     if (this.hero.alive) {
@@ -510,6 +692,9 @@ export class Game3D {
       this.freezeLeft = Math.max(0, this.freezeLeft - dt);
       simDt = 0;
     }
+    // ── a cutscene owns the world while it runs ──
+    this.tickCutscene(dt);
+
     if (!this.paused && dt > 0) {
       this.dayTime = (this.dayTime + simDt / DAY_SECONDS) % 1;
       this.updateHero(simDt);
@@ -539,6 +724,7 @@ export class Game3D {
     const loadedReach = CAMERA_DISTANCE + this.chunkRadius() * 16 * 0.92;
     const fogFar = Math.min(rawFar, loadedReach);
     const fogNear = Math.min(rawNear, fogFar - 8);
+    if (this.dayTimeOverride !== null) this.dayTime = this.dayTimeOverride;
     const night = nightAmount(this.dayTime);
     this.sky.update(this.dayTime, cave, fogNear, fogFar, night, this.clock);
     this.pixels.renderer.setClearColor(this.sky.haze, 1);
@@ -558,12 +744,17 @@ export class Game3D {
   /** Bloom, vignette and colour grade for the current time of day, scaled by the preset. */
   private applyGrade(cave: number): void {
     const g = gradeAt(this.dayTime, cave);
+    // A cutscene can push the whole picture toward a colour. It goes into the grade's lift, which
+    // is the one knob that tints the shadows without washing the highlights out.
+    const tint = this.tintOverride;
     const p = profileOf(settings.get('preset'));
     const allow = settings.get('bloom') && p.bloom ? 1 : 0;
     this.pixels.setGrade({
       bloom: g.bloom * allow * this.bloomScale,
       vignette: g.vignette * (p.outline ? 1 : 0.6),
-      lift: this.gradeLift.setRGB(g.lift[0], g.lift[1], g.lift[2]),
+      lift: tint
+        ? this.gradeLift.setRGB(g.lift[0] + tint[0], g.lift[1] + tint[1], g.lift[2] + tint[2])
+        : this.gradeLift.setRGB(g.lift[0], g.lift[1], g.lift[2]),
       gain: this.gradeGain.setRGB(g.gain[0], g.gain[1], g.gain[2]),
     });
   }
@@ -758,6 +949,7 @@ export class Game3D {
     this.story.dispose();
     this.puzzle.dispose();
     this.minimap.destroy();
+    this.csOverlay.destroy();
     this.sheet.destroy();
     this.dialogue.destroy();
     this.hud.destroy();

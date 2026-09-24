@@ -9,6 +9,7 @@
  */
 import { clearSave, hasSave } from '../core/save';
 import { unlockAudio } from '../core/audio';
+import { NAME_FALLBACK, sanitizeName, settings } from '../core/settings';
 import { el, injectStyle, onTap } from './dom';
 
 const CSS = `
@@ -32,6 +33,12 @@ const CSS = `
 .lm-title-btn:active { background: #ffb82e; color: #1a1430; }
 .lm-title-btn.ghost { border-color: rgba(154,140,214,0.4); color: #b9b0d8; }
 .lm-title-foot { position: absolute; bottom: 10px; font-size: 11px; color: #8189a8; padding: 0 16px; }
+/* naming the character, asked once at New Game */
+.lm-title-name-ask { display: none; flex-direction: column; gap: 10px; align-items: center; }
+.lm-title-name-ask.on { display: flex; }
+.lm-title-input { width: min(280px, 74vw); min-height: 44px; padding: 0 12px; font: inherit;
+  font-size: 15px; text-align: center; letter-spacing: 2px; border-radius: 5px; color: #fff8e6;
+  background: rgba(12,9,26,0.9); border: 1px solid rgba(255,217,138,0.5); }
 /* a few embers drifting up, so the screen is not static */
 .lm-ember { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #ffb04a;
   animation: lm-rise linear infinite; opacity: 0; }
@@ -85,9 +92,35 @@ export class TitleScreen {
         return;
       }
       clearSave();
-      this.pick(false);
+      this.askName();
     });
     menu.appendChild(fresh);
+
+    /*
+     * Naming the character.
+     *
+     * Asked here rather than in a menu because this is the one moment it belongs to: a new game.
+     * The story's script calls the hero Arka, but every line is written with `{nama}`, so whatever
+     * is typed here is what the opening cutscene says. Skipping is allowed — "Pengembara" is a
+     * perfectly good name for someone who will not say his own.
+     */
+    this.nameBox = el('div');
+    this.nameBox.className = 'lm-title-name-ask';
+    const prompt = el('div', {}, 'Siapa namamu?');
+    prompt.className = 'lm-title-sub';
+    this.nameInput = el('input');
+    this.nameInput.className = 'lm-title-input';
+    this.nameInput.setAttribute('maxlength', '14');
+    this.nameInput.setAttribute('placeholder', NAME_FALLBACK);
+    this.nameInput.setAttribute('autocomplete', 'off');
+    this.nameInput.value = settings.get('playerName');
+    const go = el('button', {}, 'MULAI');
+    go.className = 'lm-title-btn';
+    onTap(go, () => this.confirmName());
+    this.nameInput.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter') this.confirmName();
+    });
+    this.nameBox.append(prompt, this.nameInput, go);
 
     const foot = el('div', {}, 'Sentuh: joystick kiri, tombol kanan  |  Keyboard: WASD, J tebas, K geser, Q ganti senjata, E bicara');
     foot.className = 'lm-title-foot';
@@ -102,13 +135,32 @@ export class TitleScreen {
       this.root.appendChild(ember);
     }
 
-    this.root.append(name, sub, menu, foot);
+    this.root.append(name, sub, menu, this.nameBox, foot);
     parent.appendChild(this.root);
     this.menu = menu;
   }
 
+  private askName(): void {
+    this.menu.style.display = 'none';
+    this.nameBox.classList.add('on');
+    // focus is best-effort: some mobile browsers refuse it outside a direct gesture
+    try {
+      this.nameInput.focus();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private confirmName(): void {
+    settings.set('playerName', sanitizeName(this.nameInput.value));
+    this.nameBox.classList.remove('on');
+    this.pick(false);
+  }
+
   private confirmed = false;
   private menu: HTMLDivElement;
+  private nameBox: HTMLDivElement;
+  private nameInput: HTMLInputElement;
   private status: HTMLDivElement | null = null;
 
   private pick(continueGame: boolean): void {
