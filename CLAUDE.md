@@ -34,7 +34,11 @@ npm run build      # tsc --noEmit && vite build  → HARUS hijau sebelum commit
 npm test           # Vitest: logika inti (dunia, kombat, AI, quest, save) + smoke test + penjaga lapisan
 npm run test:watch # Vitest mode tonton
 npm run assets     # ekspor semua sheet seni ke .preview/*.png (untuk dilihat/diedit, tidak di-commit)
-npx tsx scripts/plan-stats.ts   # jumlah chunk/instance/draw group/lampu per area di mode 3D
+npx tsx scripts/plan-stats.ts        # jumlah chunk/instance/draw group/lampu per area di mode 3D
+npx tsx scripts/stream-budget.ts     # anggaran chunk/tekstur/draw per preset untuk ukuran layar apa pun
+npx tsx scripts/preview-textures.ts  # ekspor 12 tekstur 3D ke .preview/textures.png
+npx tsx scripts/ascii-map.ts 3       # cetak dunia sebagai ASCII (periksa tata letak tanpa GPU)
+npx tsx scripts/crop-reference.ts docs/reference/referensi-visual.png 400 0 420 320 2 .preview/x.png
 ```
 
 Flag URL untuk menguji di HP: `?renderer=2d|3d`, `?fps=1`, `?bloom=0`, `?preset=vlow|low|medium|high|ultra`.
@@ -74,6 +78,8 @@ tests/               Vitest: logika inti, smoke test, dan tests/architecture.tes
 scripts/             skrip node (ekspor sheet ke PNG, preview dunia)
 public/assets/override/   TARUH PNG buatan tangan di sini untuk menimpa aset generatif (lihat di bawah)
 docs/                OVERHAUL.md (rencana induk), GAME_DESIGN.md, PROGRESS.md, STORY.md
+docs/reference/      TARGET VISUAL (referensi-visual.png). Buka dengan scripts/crop-reference.ts
+                     untuk memeriksa bagiannya dari dekat; scripts/png.ts bisa decode PNG.
 ```
 
 Aturan lapisan (dijaga `tests/architecture.test.ts`): `core` tidak tahu renderer apa pun,

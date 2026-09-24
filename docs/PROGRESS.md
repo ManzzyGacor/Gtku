@@ -163,6 +163,116 @@ Ukur di sini dengan **Ultra, Sedang, dan Rendah**, sambil penghitung FPS menyala
 | **Grotto kristal di Gua Kelam** (cabang buntu di barat balai puzzle) | Kristal terpadat + kabut gua paling tebal |
 | **Arena boss** | Ruang terbuka terbesar sekaligus dinding terbanyak di layar |
 
+---
+
+## Perbaikan visual (target: `docs/reference/referensi-visual.png`)
+
+146 tes hijau. Laporan tes Batch 2: **59,7 fps di Ultra**, tapi **gambar hanya mengisi ~setengah
+layar di Ultra**, langit/kabut kurang enak, air tanpa pantulan, dan pop-in chunk.
+
+### 0. BUG: gambar tidak penuh layar — **diperbaiki paling pertama**
+
+| | |
+| --- | --- |
+| **Sebelum** | Pipeline 3D memakai ulang konstanta renderer 2D `MAX_LOGICAL_W = 720`. Di layar 3:1 (2318x759, dpr 2,8) kanvas hanya **514 dari 828 px CSS = 62% lebar** di preset Tinggi/Ultra, dan 93% di preset 270 px. |
+| **Sesudah** | Kanvas **selalu** seukuran viewport penuh pada resolusi perangkat. Layar raksasa mengecilkan buffer, bukan memotong tampilan. Matematikanya dipisah ke `render3d/pixelPlan.ts` sebagai fungsi murni dan dijaga 7 tes di 7 bentuk layar × 5 preset. |
+
+### 1. Resolusi pixel per preset
+
+| | |
+| --- | --- |
+| **Sebelum** | 270 / 270 / 270 / 324 / 360 baris, dan lebarnya dipotong 720. Menaikkan preset juga **menggeser framing** (kamera ikut menjauh), karena frustum diturunkan dari jumlah pixel. |
+| **Sesudah** | **216 / 270 / 360 / 450 / 540** baris, lebar mengikuti bentuk layar (Ultra = 1649x540 di HP penguji). Framing sekarang diatur dalam **tile** (`VIEW_TILES_H = 19`, diukur dari referensi: hero mengisi ~8% tinggi layar), jadi menaikkan preset **hanya** memperkecil pixel. Upscale memakai *sharp bilinear* supaya skala pecahan (540 baris di layar 759 baris) tidak berkerlip. |
+
+### 2. Texel density & detail tekstur
+
+| | |
+| --- | --- |
+| **Sebelum** | 8 tekstur **16x16**, satu warna dasar + noise. Tanpa AO, tanpa sorotan tepi, tanpa variasi per elemen. |
+| **Sesudah** | 12 tekstur **32x32** (**2x texel density**), dan tiap generator melakukan empat hal: ramp **empat tingkat** (gelap/tengah/terang/highlight), **AO dipanggang** di tiap nat & tumpangan, **sorotan tepi** di sisi yang kena cahaya, dan **variasi** per bata/papan/sirap + speckle. Tekstur baru: `logwall` (kayu balok horizontal dengan shading silinder — dinding kabin di referensi), `beam` (kayu berat + sabuk besi + rivet), `thatch`, `cloth` (tenda bergaris). Sirap ditulis ulang total: percobaan pertama hanya mewarnai kisi bata dan memang terbaca sebagai bata. Lihat sendiri: `npx tsx scripts/preview-textures.ts`. |
+| **Tanah** | Tetap dipanggang 16 px/tile (menggandakannya = ~1 MB per chunk × 51 chunk = 53 MB), tapi kini dapat **lapis grain bersama** yang dihamparkan pada 2x kerapatan tile dan dikalikan di shader — detail frekuensi tinggi, gratis di memori — plus **AO kontak dipanggang** di tempat tanah bertemu benda solid, yang membuat bangunan berhenti terlihat seperti stiker di lantai. |
+
+### 3. Bentuk model
+
+| | |
+| --- | --- |
+| **Sebelum** | Rumah = satu balok + satu limas. Terbaca persis seperti itu. |
+| **Sesudah** | Tiap rumah punya daftar bagian seperti referensi: **sendi batu**, dinding balok, **tiang sudut**, balok atas, atap dengan **teritisan sungguhan** + **papan lisplang**, **tutup bubungan**, pintu **berkusen**, dan jendela dengan **kusen + ambang + kaca**. Balai desa dapat beranda beratap; sumur dapat katrol & timba; lapak dapat 4 tiang + **tenda bergaris** + barang; pagar dapat 2 palang + tiang + sendi batu; pohon dapat akar melebar + 3 massa tajuk; lampion jadi tiang + kurungan besi + tudung. Dunia: 19.000 → **28.000 instance**, 10 → **19 grup draw**. |
+
+### 4. Pencahayaan malam
+
+| | |
+| --- | --- |
+| **Sebelum** | Ambient + matahari terarah + maksimal 12 lampu dinamis. Tidak ada genangan cahaya di tanah, tidak ada bloom, tidak ada grading. |
+| **Sesudah** | Lampu statis **dipanggang jadi light map per chunk** (`render3d/lightmap.ts`): genangan hangat di tanah untuk **sebanyak apa pun** lampion, nol biaya per frame, dipanggang dari chunk ini **dan delapan tetangganya** supaya tidak ada jahitan di batas. Kurvanya sengaja bukan inverse-square (yang cuma menghasilkan titik keras) melainkan *genangan*: rata di bawah lampu lalu melandai. Ditambah **bloom** lembut (bright pass + blur 9-tap di 1/4 resolusi), **color grading** (lift ke biru malam, gain hangat), **vignette** tipis, **rim light** hangat di tepi tiap objek, **jendela menyala**, dan obor berkedip. Beberapa lampu dinamis tetap ada di dekat hero. |
+
+### 5. Air
+
+| | |
+| --- | --- |
+| **Sebelum** | Dua gelombang, empat pita, tanpa busa, tanpa pantulan, mask 1 texel/tile. |
+| **Sesudah** | Lima hal seperti referensi: **gradasi kedalaman** (hampir hitam di palung → teal terang di tepian), **riak** dua train kasar + satu halus dalam lima pita, **garis busa** yang memeluk tepi, **pantulan** langit di puncak riak **dan genangan lampion yang dipanggang** disaput mengikuti riak, serta **kilau** spekular yang berkedip. Mask naik ke 2 texel/tile dengan tiga kanal (ada-air, kedalaman, jarak-ke-tepi); jaraknya diukur ke **tepi** tile daratan, bukan pusatnya — mengukur ke pusat mentok di setengah tile sehingga pita busa tak pernah bisa mencapai nol. |
+
+### 6. Karakter
+
+| | |
+| --- | --- |
+| **Sebelum** | Kepala **19%** dari tinggi tubuh (proporsi realistis). Tanpa wajah. Pedang kecil. |
+| **Sesudah** | **Chibi: kepala 37%**, diukur dari referensi — pada jarak kamera ini kepala hanya ~14 px layar, dan kepala besar itulah yang membuatnya terbaca. Rambut = topi + **7 paku** yang dimiringkan masing-masing. **Wajah**: dua mata dengan kilau, dua tanda rona, mulut. Mantel lebar + ikat pinggang + kerah terang + tali serong + syal, kaki gempal dengan bot bersorotan, tangan bersarung. Pedang diperbesar (bilah baja, pelindung emas, gagang dibalut) + **jejak tebasan biru bercahaya** pada frame aktif ayunan. |
+
+### 7. Langit & kabut
+
+| | |
+| --- | --- |
+| **Sebelum** | Satu blend linear haze→top. Palet siang pucat dan kabut siang kuat, jadi dunia terlihat pudar. Tanpa bintang. Dither 2x2. |
+| **Sesudah** | **Ramp dua tahap** (jatuh cepat di dekat cakrawala, lambat di atasnya) — satu blend linear itulah yang membuat versi pertama terasa datar. Palet diturunkan jauh lebih dalam (teal-ke-hitam) mengikuti referensi; kabut siang dilemahkan supaya dunia tidak pudar dan diperkuat malam. **Bintang berkelip** muncul saat malam (tetap di layar, yang benar: kamera tidak pernah berputar dan langit di tak-hingga). Dither **Bayer 4x4** menggantikan 2x2 → tanpa pita warna. |
+
+### 8. Pop-in chunk
+
+| | |
+| --- | --- |
+| **Sebelum** | Chunk muncul mendadak. |
+| **Sesudah** | Dua fade, keduanya **tanpa biaya CPU per frame**: tiap instance prop menyimpan **waktu kemunculannya** di atribut per-instance dan shader melarutkannya masuk lewat dither Bayer yang sama dengan potongan objek; tanah dimulai tertimpa warna kabut lalu menyelesaikan diri keluar darinya. Margin chunk juga dinaikkan. |
+
+### 9. Performa
+
+| | |
+| --- | --- |
+| **Sebelum** | Ultra: buffer 720x379 = **273k pixel**, 19k instance, 50 draw → 59,7 fps. |
+| **Sesudah** | Ultra: buffer 1649x540 = **890k pixel** (3,3x lebih banyak fragment) + pass bloom, 13k instance termuat, 90 draw, 15,5 MB tekstur tanah. **Ini risiko nyata untuk 60 fps** dan perlu diukur. Tuas baru: setelan **"Skala render" (50–100%)** menurunkan jumlah pixel yang diwarnai tanpa mengubah ukuran pixel seni, dan AUTO tetap menurunkan preset sendiri kalau FPS jatuh. Cek anggaran apa pun ukuran layar: `npx tsx scripts/stream-budget.ts`. |
+
+### Yang TIDAK bisa dicapai dengan aset buatan kode — dan alternatifnya
+
+Jujur: beberapa hal di referensi itu **lukisan tangan**, dan primitif balok/limas prosedural
+tidak akan pernah sampai ke sana.
+
+| Yang tidak tercapai | Kenapa | Alternatif konkret |
+| --- | --- | --- |
+| **Siluet organik** tumbuhan, bunga, rumput, batu | Referensi menggambar tiap helai dan tiap kelopak dengan garis luar tak beraturan. Balok dan limas tidak bisa. Ini **selisih visual terbesar yang tersisa.** | **Billboard sprite**: proyeksikan seni prop 2D yang SUDAH ADA (`src/art/props.ts` — pohon, bunga, rumput, jamur sudah digambar detail) sebagai quad yang selalu menghadap kamera. Murah, dan langsung menutup sebagian besar selisih ini. Rekomendasiku untuk batch berikutnya. |
+| **Detail wajah & lipatan pakaian** hero | Referensi melukis shading di mantel. Balok tidak. | Sama: billboard sprite hero 2D (sudah ada, 3 arah + flip), atau tekstur buatan tangan yang ditempel ke balok lewat mekanisme override yang sudah ada. |
+| **Komposisi khas per bangunan** | Rumah di referensi adalah satu lukisan unik; rumahku adalah kit berparameter. | Model GLB buatan tangan — tapi kamu tidak punya PC, jadi realistisnya: menambah bagian pada kit (sudah dilakukan) atau paket low-poly CC0 (Kenney/Quaternius) dengan sumbernya dicatat di `CREDITS.md`. |
+| **Air terjun** di kanan referensi | Belum ada sama sekali. | Bisa dibuat: bidang bertekstur bergulir + partikel di dasarnya. Masuk daftar Batch berikutnya, bukan hal yang mustahil. |
+| **Blur kedalaman (depth of field)** | Referensi punya fokus lembut di kejauhan. | Bisa didekati dengan kabut + bloom yang sudah ada; DoF sungguhan butuh satu pass blur lagi — bisa, tapi mahal di HP. |
+
+### Cara mengetes di HP
+
+1. **Pertama: apakah gambar sudah penuh layar di SEMUA preset?** Coba kelimanya. Ini bug utama
+   yang diperbaiki. Kalau masih ada pinggiran hitam, **Salin laporan** — laporan sekarang memuat
+   ukuran kanvas, ukuran layar, grid pixel, ukuran render target, dan skala.
+2. **FPS per preset** (nyalakan penghitung FPS). Resolusi Ultra naik 3,3x, jadi angka ini yang
+   paling kubutuhkan. Kalau Ultra tidak 60 fps, coba turunkan **Skala render** ke 80% atau 70%
+   dan laporkan bedanya.
+3. **Kamera**: sudut 38° dan zoom 1,00 sekarang berarti framing referensi (19 tile tinggi).
+   `camZoom` lamamu 1,25 akan terasa lebih dekat dari sebelumnya — reset lewat **Reset kamera**.
+4. **Malam** (tunggu ±3 menit): genangan cahaya di tanah di bawah lampion, jendela menyala,
+   bintang, rim light hangat di tepi objek, bloom di sekitar lampu.
+5. **Air**: kolam desa & sungai hutan — busa di tepi, riak jelas, pantulan langit, dan pantulan
+   lampion di malam hari.
+6. **Berjalan cepat** menyeberangi batas chunk: pop-in harus jadi larut halus, bukan muncul mendadak.
+7. **Hero**: kepala besar, wajah terlihat, dan jejak tebasan biru saat menekan TEBAS.
+
+---
+
 ### Yang belum ada di mode 3D
 
 Musuh & kombat (Batch 3), stats & inventaris (Batch 4), NPC/quest/cutscene/audio/menu (Batch 5),
