@@ -273,6 +273,116 @@ tidak akan pernah sampai ke sana.
 
 ---
 
+---
+
+## Prioritas 1: performa dikembalikan
+
+Laporan: **25,7 fps di Ultra** (sebelumnya ~60), 59 chunk, 10.803 instance, 96 draw group,
+12 lampu, grid 1649x540.
+
+### Cara mengukurnya (karena aku tidak punya GPU)
+
+Menu Pengaturan → **Uji performa**. A/B di HP-mu sendiri: 14 skenario, mulai dari "semua
+menyala" lalu mematikan satu fitur per giliran (lampu dinamis, bayangan, air, bloom, angin,
+grain tanah, rim light, kunang/kabut, outline, skala render 60%, grid 360, grid 270, radius
+chunk −1). Tiap skenario ditahan ~1,5 detik dan diukur **median** waktu frame — median, bukan
+rata-rata, karena satu hentakan GC akan merusak seluruh sampel. Hasilnya tabel
+"bloom hemat 1,8 ms, air hemat 4,1 ms" yang bisa langsung ditempel ke laporan.
+
+Laporan tes juga sekarang memuat **waktu frame (ms)**, **draw call**, jumlah triangle, dan
+jumlah program shader.
+
+### Enam perbaikan
+
+| # | Apa | Sebelum | Sesudah |
+| --- | --- | --- | --- |
+| 1 | **Lampu dinamis** | 12 lampu, dan jumlahnya berubah saat hero lewat lampion — Three mengompilasi loop pencahayaan **per jumlah lampu**, jadi menyalakan/mematikan `visible` memicu **recompile shader di tengah permainan** | Kolam berukuran **tetap** yang selalu ada di scene; yang tak terpakai diparkir dengan intensitas nol. Satu program untuk seluruh sesi. Anggaran maksimal **3** (lampu statis sudah dipanggang) |
+| 2 | **Bayangan** | `high`/`ultra` memakai shadow map 1024 → satu **pass geometri tambahan** atas setiap pool dan setiap chunk | **Mati di semua preset.** AO kontak yang dipanggang sudah melakukan tugas yang dibutuhkan referensi. Tetap jadi tombol supaya probe bisa mengukurnya |
+| 3 | **Composite** | outline + bloom + grade + vignette dihitung di blit akhir = **6 sampel tekstur × 1,76 juta pixel** padahal gambarnya hanya 0,89 juta | Composite di resolusi render target, lalu **satu** sampel sharp-bilinear per pixel layar ≈ setengah biaya |
+| 4 | **Visibilitas chunk** | lingkaran radius `hypot(lebar, dalam)`; di layar 3:1 itu menutupi **hampir 2× area yang benar-benar di layar** | **Persegi pandang kamera.** 51 → **33 chunk**, 11.357 → **6.425 instance**, 80 → **55 draw**, tekstur tanah 13,4 → **8,7 MB** |
+| 5 | **Air** | satu quad seukuran chunk per chunk berair, bagian keringnya dibuang dengan `discard` — di HP itu mematikan **early-Z untuk seluruh draw**, dan chunk yang 5% kolam tetap men-shade 100% areanya lewat shader transparan | Geometri **hanya di atas tile air**, digabung per baris |
+| 6 | **Kabut** | mencapai 155 padahal dunia di sekitar hero hanya ~64 unit — kabut tidak menyembunyikan apa pun, dan radius chunk membayar tanah yang seharusnya ditelan kabut | Dibatasi radius yang benar-benar dimuat |
+
+### AUTO
+
+Dulu hanya menurunkan **preset**, yang langkahnya besar dan kelihatan (ukuran pixel berubah).
+Sekarang menapaki **tangga dua dimensi** yang menyelang preset dan skala render:
+`ultra@1.0 → ultra@0.85 → high@1.0 → high@0.85 → medium@1.0 → …`. Memotong skala render tidak
+mengorbankan kesetiaan seni, hanya ketajaman, jadi AUTO bisa mengendap jauh lebih dekat ke
+sasaran. Ambang dinaikkan ke **48/58 fps** supaya targetnya sekitar 55–60.
+
+Tuas manual baru: setelan **Skala render (50–100%)**.
+
+---
+
+## Prioritas 2: serangan tidak lagi kaku
+
+Laporan: "Serangan terasa SANGAT KAKU."
+
+| Apa | Sebelum | Sesudah |
+| --- | --- | --- |
+| **Transisi animasi** | pose disetel **langsung** dan melompat antar 3 frame diskret | Pose menulis **target**, tubuh meluncur ke arahnya dengan pendekatan eksponensial bebas frame-rate. **Ini penyebab utama kekakuannya.** |
+| **Fase serangan** | 3 fase (windup/active/recover) | **4 sub-fase** yang memang dibaca mata sebagai ayunan: ancang-ancang (bilah ditarik, berat pindah ke kaki belakang), tebasan (melesat, jejak muncul), **ayunan lanjutan** (tubuh terus berputar melewati sasaran), pemulihan. Laju crossfade beda per fase: 45/s saat tebasan, 14/s saat pemulihan |
+| **Kendali saat menyerang** | terkunci: tidak bisa berputar maupun bergerak | Masih **berputar** ke arah joystick (dibatasi 420°/s — bukan seketika; snap akan terlihat lebih buruk daripada terkunci) dan menyimpan **30% kecepatan jalan** selama ancang-ancang |
+| **Langkah maju** | lunge 90 px/s | 130 / 150 / 210 / 250 px/s per ayunan |
+| **Dodge cancel** | hanya setelah bilah lewat | **Di titik mana pun** |
+| **Ketuk vs tahan** | tidak ada | Ketuk = combo ringan (3 ayunan). **Tahan 0,26 s = serangan berat** (damage 7, jangkauan 44, knockback 230, ancang-ancang 0,22 s untuk telegraf). Untuk busur: tahan = menarik, lepas = melesat |
+| **Bidik otomatis** | ada di 2D, **belum tersambung di 3D** | Tersambung: kerucut 55°, jarak 62 px, keduanya bisa disetel |
+| **Umpan balik** | tidak ada musuh di 3D | Hit-stop, knockback, **kedip musuh**, getaran kamera, percikan, jejak tebasan, **suara** |
+| **Angka sebagai data** | konstanta di kode | **39 angka** di menu **"Setelan Combat"** di HP, tersimpan di localStorage |
+
+---
+
+## Prioritas 3 (Batch 3): combat, dua senjata, elemen
+
+- **Elemen**: 15 terdeklarasi sebagai data, **4 implemented** (Api, Air, Es, Petir). Yang belum
+  tidak menerapkan apa pun — ditandai, tidak dipalsukan.
+- **Status**: 16 terdeklarasi, 4 aktif (Burn, Wet, Freeze, Shock) dengan durasi, stack, tick,
+  pengali kecepatan, dan **resistensi per status**. Boss tahan crowd control.
+- **6 reaksi** data-driven, semuanya bisa dicapai saat bermain: Lebur (Api+Es, 2×), Uap
+  (Api+Basah), Padam (Air+Terbakar), Beku (Es+Basah), **Hantar** (Petir+Basah, 1,8× + area
+  listrik radius 46), Pecah (Petir+Es, 2,2×).
+- **Dua senjata**: Pedang dan Busur penuh; 4 kategori lain sebagai data. Busur punya tembakan
+  Cepat / Terisi / **Tembus** (menembus 4 musuh). Ganti cepat tidak bisa memotong frame aktif
+  tebasan tapi bisa memotong pemulihan — jadi ganti senjata bisa jadi bagian dari combo.
+- **Musuh di 3D**: simulasinya `EnemyWorld` **yang sama** dengan versi 2D. Tubuh prosedural
+  dengan siluet yang terbaca dari kamera 3/4, kedip saat kena, dan **cincin telegraf** yang
+  menutup sebelum menyerang.
+- **Suara**: SFX chiptune sintetis dari osilator, nol unduhan, aktif setelah sentuhan pertama.
+
+---
+
+## Cara mengetes di HP
+
+**Urutan yang paling kubutuhkan:**
+
+1. **Uji performa** (Pengaturan → Uji performa → tunggu ~15 dtk → Salin laporan). Ini yang
+   paling berguna: ia memberi tahu kita apa yang benar-benar mahal di HP-mu, bukan dugaanku.
+2. **FPS per preset** di lokasi berat (tabel di bawah). Target: Ultra ≥ 55 fps.
+3. **Pilih AUTO** dan main 1–2 menit di desa saat malam. AUTO harus mengendap di sekitar
+   60 fps dan tidak naik-turun terus. Laporkan di preset/skala berapa ia berhenti.
+4. **Serangan**: ketuk berulang (combo 3), lalu **tahan** (serangan berat), lalu coba
+   membatalkan ayunan dengan **GESER** di tengah-tengah. Apakah masih terasa kaku?
+5. **Busur**: ketuk tombol **BUSUR** untuk menukar, ketuk = tembakan cepat, **tahan** = cincin
+   tarikan mengisi lalu lepas = tembakan tembus.
+6. **Elemen**: belum ada senjata berelemen yang bisa dipilih pemain (itu Batch 4 — equipment),
+   jadi reaksinya belum bisa kamu picu di dalam permainan. Yang bisa kamu lihat sekarang:
+   musuh berkedip, telegraf, hit-stop, dan suara.
+7. **Setelan Combat**: buka, ubah satu angka (misalnya "Tebas 1: langkah maju"), lalu ayun lagi.
+   Kalau ada kombinasi yang terasa jauh lebih enak, sebutkan angkanya dan aku jadikan bawaan.
+
+**Lokasi paling berat untuk FPS:**
+
+| Lokasi | Kenapa |
+| --- | --- |
+| **Plaza Desa Lentera saat malam** | Paling berat sekarang: jendela menyala + lampion + genangan cahaya dipanggang + bloom + kunang-kunang |
+| **Tengah Hutan Bisik saat malam**, sekitar jembatan sungai utama | Pohon terpadat + air + kabut hutan + angin |
+| **Danau hutan** | Permukaan air terluas di satu layar |
+| **Gerombolan kelelawar di Gua Kelam** | Musuh terbanyak sekaligus di layar + kristal + kabut gua |
+| **Arena boss** | Boss besar + pilar + ruang terbuka terbesar |
+
+---
+
 ### Yang belum ada di mode 3D
 
 Musuh & kombat (Batch 3), stats & inventaris (Batch 4), NPC/quest/cutscene/audio/menu (Batch 5),

@@ -137,7 +137,6 @@ test('the weapon element applies its status on hit, and a reaction multiplies th
   // the status bag is internal, but its effect is not: a follow-up lightning hit must conduct
   const hpAfterWet = target.hp;
   hero.element = 'petir';
-  target.invuln = 0;
   target.stun = 0;
   combat.applySwing(hero, swing(hero, { dmg: 4 }));
   const conducted = hpAfterWet - target.hp;
@@ -221,7 +220,6 @@ test('status damage ticks on its own and never knocks the target around', () => 
   const afterHit = target.hp;
 
   // let the burn run without any further hits
-  target.invuln = 0;
   for (let i = 0; i < 120; i++) combat.update(1 / 60, 1 / 60, hero);
   assert.ok(target.hp < afterHit, `burn kept ticking (${afterHit} → ${target.hp})`);
   assert.ok(combat.statusSummary().includes('burn') || target.dead, 'and the report can see it');

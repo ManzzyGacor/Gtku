@@ -59,10 +59,12 @@ src/
   core/              LOGIKA GAME MURNI — dilarang mengimpor phaser/three, dan hanya boleh
                      mengimpor src/core/** + src/config (dijaga tests/core-purity.test.ts)
     world/           tile, worldgen, chunk data, WorldSource, koordinat area, collision grid
-    entities/        HeroCore (gerak/kombo/HP), enemies (AI musuh & boss)
+    entities/        HeroCore (gerak/kombo/senjata/HP), enemies (AI musuh & boss),
+                     combatTuning (39 angka combat yang bisa disetel dari HP)
+    combat/          elements (15 elemen + 16 status + tabel reaksi), weapons (Pedang/Busur)
     systems/         quest, puzzleLogic, daynight, interactables
     state/           GameState (quest, kill, flag, waktu) + serialisasi save
-    (akar)           rng, save, storage, input, display, errors, settings, perf, graphics, anim
+    (akar)           rng, save, storage, input, display, errors, settings, perf, graphics, anim, audio
   art/               PIPELINE SENI MURNI-KODE (tanpa DOM, tanpa renderer): Pixmap, palette,
                      generator sprite/tile/fx/ui/font, bake (chunk → pixmap), greybox (tekstur 3D)
   ui/                OVERLAY UI NETRAL-RENDERER (DOM): menu Pengaturan, penghitung FPS,

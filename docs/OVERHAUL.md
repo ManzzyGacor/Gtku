@@ -133,7 +133,7 @@ chunk streaming, jumlah cahaya dinamis & bayangan dibatasi.
 | --- | --- | --- |
 | **1** | Fase 0 (persiapan), Fase 1 (fondasi 3D), Fase 2 (player 3D) | ✅ selesai |
 | 2 | Lingkungan desa, cahaya & atmosfer, animasi rumput, air, pohon + perbaikan kamera & perluasan dunia | ✅ selesai |
-| 3 | Migrasi combat, dua senjata, sistem elemen (4 elemen) | ⬜ |
+| 3 | Migrasi combat, dua senjata, sistem elemen (4 elemen) | ✅ selesai |
 | 4 | Stats, equipment, Lantern Core, inventaris, progresi | ⬜ |
 | 5 | Cutscene pembuka + sistem cutscene, audio, UI/HUD, menu | ⬜ |
 | 6 | World streaming, Download Manager, grafik AUTO lengkap | ⬜ |
@@ -265,7 +265,7 @@ src/
 
 | Hal | Batch |
 | --- | --- |
-| Musuh, kombat, damage, dua senjata, elemen | 3 |
+| ~~Musuh, kombat, damage, dua senjata, elemen~~ | ~~3~~ ✅ |
 | Stats, equipment, Lantern Core, inventaris | 4 |
 | NPC, dialog, quest, cutscene, audio, menu utama & pause, HUD lengkap | 5 |
 | **Save/load** (mode 3D belum menyimpan posisi; save 2D lama tidak disentuh), world streaming | 6 |
