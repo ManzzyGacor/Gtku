@@ -276,6 +276,10 @@ export class Game3D {
       exp: (amount, x, y) => this.gainExp(amount, x, y),
       loot: (kind, x, y) => this.dropLoot(kind, x, y),
       reward: (reward, x, y) => this.giveReward(reward, x, y),
+      questNote: (text) => {
+        this.hud.popup({ icon: '\u2691', title: 'Quest', sub: text, color: '#ffd98a', seconds: 5 });
+        this.hud.toast(text);
+      },
       spark: (x, y, color, big) => this.environment.spark(u(x), u(y), color, big),
       save: (force) => this.saveNow(force),
       shake: (amount, seconds) => this.camera.shake(amount, seconds),
@@ -319,7 +323,7 @@ export class Game3D {
   }
 
   /** The HUD listens for which weapon is next and how far the bow is drawn. */
-  onWeaponState: (nextWeapon: string, charge: number) => void = () => undefined;
+  onWeaponState: (nextWeapon: string, charge: number, held: { label: string; ranged: boolean }) => void = () => undefined;
 
   private onResize = (): void => this.resize();
 
@@ -437,9 +441,34 @@ export class Game3D {
    */
   applySheet(): void {
     this.applyHeroStats();
+    this.announceElement();
     this.combat.character = this.character;
     this.heroMesh.setLanternRange(this.character.stats.lanternRange / 100);
     this.hud.setLevel(this.character.level, this.character.exp, this.character.expNeeded);
+  }
+
+  /**
+   * Announce an element the first time the hero can use it.
+   *
+   * Elements arrive by equipping a Lantern Core, so "unlocked" means "you now have this" rather
+   * than a separate unlock system. The flag lives in the save, so it is announced once per element
+   * per playthrough and never again — including across a reload.
+   */
+  private announceElement(): void {
+    const element = this.character.coreElement;
+    if (!element) return;
+    const flag = `element_${element}`;
+    if (this.state.flags[flag]) return;
+    this.state.flags[flag] = true;
+    const def = ELEMENTS[element];
+    this.hud.popup({
+      icon: '\u2749',
+      title: `Elemen ${def.name} terbuka`,
+      sub: this.character.passiveLabel ?? 'Seranganmu kini membawa elemen ini',
+      color: `#${def.color.toString(16).padStart(6, '0')}`,
+      seconds: 5,
+    });
+    this.hud.banner(`ELEMEN ${def.name.toUpperCase()}`, 2);
   }
 
   /**
@@ -467,7 +496,13 @@ export class Game3D {
     if (x !== undefined && y !== undefined) this.hud.float(u(x), 1.5, u(y), `+${amount} EXP`, '#a795ff', false);
     if (levels.length) {
       this.applySheet();
-      this.hud.toast(`Level ${this.character.level}!`);
+      this.hud.popup({
+        icon: '\u2b06',
+        title: `Level ${this.character.level}`,
+        sub: `HP maks ${this.hero.maxHp} \u00b7 ATK ${this.character.stats.atk.toFixed(0)}`,
+        color: '#ffd98a',
+        seconds: 4.5,
+      });
       this.hud.banner(`LEVEL ${this.character.level}`, 1.8);
       this.environment.spark(u(this.hero.x), u(this.hero.y), 0xffd98a, true);
       sfx.levelUp();
@@ -492,8 +527,14 @@ export class Game3D {
       if (!def) continue;
       const result = this.character.inventory.add(drop.id, drop.count, drop.rarity);
       if (result.added > 0) {
-        this.hud.toast(`${def.name}${result.added > 1 ? ` x${result.added}` : ''}`);
-        this.hud.float(u(x), 1.2 + lifted * 0.35, u(y), def.name, rarityMeta(drop.rarity).color, false);
+        const rarity = rarityMeta(drop.rarity);
+        this.hud.popup({
+          icon: '\u2727',
+          title: `${def.name}${result.added > 1 ? ` x${result.added}` : ''}`,
+          sub: rarity.label,
+          color: rarity.color,
+        });
+        this.hud.float(u(x), 1.2 + lifted * 0.35, u(y), def.name, rarity.color, false);
         lifted++;
       }
       if (result.overflow > 0) overflowed = true;
@@ -516,7 +557,12 @@ export class Game3D {
       if (!def) continue;
       const result = this.character.inventory.add(entry.id, entry.count ?? 1);
       if (result.added > 0) {
-        this.hud.toast(`Hadiah: ${def.name}${result.added > 1 ? ` x${result.added}` : ''}`);
+        this.hud.popup({
+          icon: '\u2691',
+          title: `${def.name}${result.added > 1 ? ` x${result.added}` : ''}`,
+          sub: 'Hadiah quest',
+          color: rarityMeta(def.rarity).color,
+        });
         this.hud.float(u(x), 1.2 + lifted * 0.35, u(y), def.name, rarityMeta(def.rarity).color, false);
         lifted++;
       }
@@ -809,7 +855,11 @@ export class Game3D {
       this.adaptive.update(dt, settings.get('preset'), settings.get('renderScale'));
     }
     this.heroMesh.update(simDt, dt, this.hero, this.clock);
-    this.onWeaponState(WEAPONS[this.hero.loadout[this.hero.slot === 0 ? 1 : 0]].name.toUpperCase(), this.hero.charge);
+    this.onWeaponState(
+      WEAPONS[this.hero.loadout[this.hero.slot === 0 ? 1 : 0]].name.toUpperCase(),
+      this.hero.charge,
+      { label: this.hero.isRanged ? 'PANAH' : 'TEBAS', ranged: this.hero.isRanged },
+    );
 
     // ── story, puzzle, HUD ──
     const ax = input.axis();

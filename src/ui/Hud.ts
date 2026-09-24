@@ -84,6 +84,27 @@ const CSS = `
   background: rgba(20,16,38,0.8); color: #ffd98a; font: 15px/1 ui-monospace, monospace;
   cursor: pointer; touch-action: manipulation; }
 
+/*
+ * Notifications that slide in from the right: loot, a quest step, a level, an element.
+ *
+ * Stacked rather than replacing each other, because killing a boss can produce three at once and
+ * a single slot would drop two of them. They animate with transform and opacity only -- both are
+ * compositor properties, so a popup never costs a layout pass mid-fight.
+ */
+.lm-pops { position: absolute; right: calc(8px + var(--lm-sar, 0px)); top: calc(96px + var(--lm-sat, 0px));
+  display: flex; flex-direction: column; gap: 5px; align-items: flex-end; max-width: 46vw; }
+.lm-pop { display: flex; align-items: center; gap: 7px; padding: 5px 9px 6px; border-radius: 5px;
+  background: linear-gradient(180deg, rgba(30,24,56,0.92), rgba(14,10,28,0.94));
+  border: 1px solid rgba(154,140,214,0.5); border-left-width: 3px;
+  animation: lm-pop-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  transition: opacity 320ms linear, transform 320ms ease; }
+.lm-pop.out { opacity: 0; transform: translateX(26px); }
+.lm-pop .ic { font-size: 15px; line-height: 1; }
+.lm-pop .tx { min-width: 0; }
+.lm-pop .tx b { display: block; font-weight: normal; color: #fff8e6; }
+.lm-pop .tx small { display: block; color: #a79dc4; font-size: 10px; }
+@keyframes lm-pop-in { from { opacity: 0; transform: translateX(34px); } to { opacity: 1; transform: none; } }
+
 /* floating combat text */
 .lm-float { position: absolute; transform: translate(-50%, -50%); font-weight: bold;
   pointer-events: none; opacity: 0; will-change: transform, opacity; }
@@ -122,6 +143,8 @@ export class Hud {
   private hintEl: HTMLDivElement;
   private fullBtn: HTMLButtonElement;
   private pauseBtn: HTMLButtonElement;
+  private pops: HTMLDivElement;
+  private popList: { node: HTMLDivElement; left: number }[] = [];
   /** Tapped the pause button. Wired by the game to open the pause menu. */
   onPause: () => void = () => undefined;
   private floaters: Floater[] = [];
@@ -175,6 +198,9 @@ export class Hud {
     bars.append(hpBar, enBar, expBar);
     vitals.append(face, bars);
 
+    this.pops = el('div');
+    this.pops.className = 'lm-pops';
+
     this.quest = el('div');
     this.quest.className = 'lm-panel lm-quest';
 
@@ -196,7 +222,7 @@ export class Hud {
     this.hintEl = el('div');
     this.hintEl.className = 'lm-panel lm-hint';
 
-    this.root.append(vitals, this.quest, this.bossBox, this.bannerEl, this.toastEl, this.hintEl);
+    this.root.append(vitals, this.quest, this.bossBox, this.pops, this.bannerEl, this.toastEl, this.hintEl);
 
     for (let i = 0; i < FLOATERS; i++) {
       const node = el('div');
@@ -285,6 +311,45 @@ export class Hud {
     this.toastEl.style.opacity = '1';
   }
 
+  /**
+   * A notification card: loot picked up, a quest step, a level, an element unlocked.
+   *
+   * These stack instead of overwriting one another — beating the boss fires a level, a drop and a
+   * quest step in the same frame, and a single banner would silently eat two of them. The oldest
+   * is retired when the stack gets long, so a fight cannot bury the screen.
+   */
+  popup(spec: { icon: string; title: string; sub?: string; color?: string; seconds?: number }): void {
+    const node = el('div');
+    node.className = 'lm-pop';
+    if (spec.color) node.style.borderLeftColor = spec.color;
+    const ic = el('div', {}, spec.icon);
+    ic.className = 'ic';
+    const tx = el('div');
+    tx.className = 'tx';
+    tx.appendChild(el('b', {}, spec.title));
+    if (spec.sub) tx.appendChild(el('small', {}, spec.sub));
+    node.append(ic, tx);
+    this.pops.appendChild(node);
+    this.popList.push({ node, left: spec.seconds ?? 3.4 });
+    while (this.popList.length > 4) {
+      const oldest = this.popList.shift();
+      oldest?.node.remove();
+    }
+  }
+
+  /** Age the notification stack. Called from the HUD's own update. */
+  private updatePopups(dt: number): void {
+    for (let i = this.popList.length - 1; i >= 0; i--) {
+      const p = this.popList[i];
+      p.left -= dt;
+      if (p.left <= 0.32 && !p.node.classList.contains('out')) p.node.classList.add('out');
+      if (p.left <= 0) {
+        p.node.remove();
+        this.popList.splice(i, 1);
+      }
+    }
+  }
+
   setHint(text: string | null): void {
     if (text) {
       if (this.hintEl.textContent !== text) this.hintEl.textContent = text;
@@ -329,6 +394,7 @@ export class Hud {
   // ───────────────────────── per frame ─────────────────────────
 
   update(dt: number, project: Projector): void {
+    this.updatePopups(dt);
     // HP: the fill snaps, the trail lags behind it so a big hit reads as a big hit
     const ratio = Math.max(0, Math.min(1, this.hp / this.maxHp));
     this.trailHp += (ratio - this.trailHp) * Math.min(1, dt * (ratio < this.trailHp ? 2.4 : 12));

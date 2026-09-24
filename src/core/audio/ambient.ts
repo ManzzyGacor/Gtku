@@ -37,7 +37,14 @@ let fading: Bed[] = [];
 let timer: ReturnType<typeof setInterval> | null = null;
 let wanted = '';
 
+/**
+ * Cached: three seconds of noise is ~144k samples to generate, and switching beds happens on every
+ * area border and at dusk. Every bed filters the same source differently, so one buffer is enough.
+ */
+let cachedNoise: { ctx: AudioContext; buf: AudioBuffer } | null = null;
+
 function noiseBuffer(ctx: AudioContext): AudioBuffer {
+  if (cachedNoise?.ctx === ctx) return cachedNoise.buf;
   const frames = Math.floor(ctx.sampleRate * LOOP_SECONDS);
   const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
   const data = buf.getChannelData(0);
@@ -55,6 +62,7 @@ function noiseBuffer(ctx: AudioContext): AudioBuffer {
     data[i] *= k;
     data[frames - 1 - i] *= k;
   }
+  cachedNoise = { ctx, buf };
   return buf;
 }
 

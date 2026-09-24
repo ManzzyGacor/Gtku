@@ -33,6 +33,15 @@ const CSS = `
   border: 2px solid rgba(242, 226, 194, 0.7); background: rgba(26, 20, 48, 0.55);
   color: #f2e2c2; font: 11px/1 ui-monospace, monospace; letter-spacing: 0.5px; }
 .lm-act.down { background: rgba(255, 184, 46, 0.85); color: #1a1430; }
+/*
+ * The active weapon is highlighted (docs/OVERHAUL.md §4 "UI").
+ *
+ * On the attack button, because that is the button whose behaviour changes: with the sword out it
+ * is a combo, with the bow it is a draw. A warm ring for the sword, a cool one for the bow, so it
+ * reads at a glance in the corner of the eye rather than needing to be looked at.
+ */
+.lm-act.melee { border-color: rgba(255, 209, 90, 0.95); box-shadow: 0 0 0 2px rgba(255, 209, 90, 0.22); }
+.lm-act.ranged { border-color: rgba(124, 196, 255, 0.95); box-shadow: 0 0 0 2px rgba(124, 196, 255, 0.22); }
 /* the bow's draw meter: a ring that fills as the string is pulled */
 .lm-charge { position: absolute; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none;
   border: 3px solid rgba(124, 196, 255, 0.9); opacity: 0; }
@@ -164,11 +173,16 @@ export class TouchControls {
    * Show the state of the weapons: what the swap button will switch to, and how far the bow is
    * drawn. Called every frame by the renderer; the DOM writes are two strings and an opacity.
    */
-  setWeaponState(nextWeapon: string, charge: number): void {
+  setWeaponState(nextWeapon: string, charge: number, held: { label: string; ranged: boolean } | null = null): void {
     const swap = this.buttons.find((b) => b.action === 'swap');
     if (swap && swap.node.textContent !== nextWeapon) swap.node.textContent = nextWeapon;
     const attack = this.buttons.find((b) => b.action === 'attack');
     if (!attack) return;
+    if (held) {
+      if (attack.node.textContent !== held.label) attack.node.textContent = held.label;
+      attack.node.classList.toggle('melee', !held.ranged);
+      attack.node.classList.toggle('ranged', held.ranged);
+    }
     const bs = settings.get('buttonScale');
     const r = (attack.r + 7) * bs * (0.75 + charge * 0.25);
     Object.assign(this.chargeRing.style, {

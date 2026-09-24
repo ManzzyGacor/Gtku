@@ -117,6 +117,7 @@ function makeEnv(state = new GameState()): Env {
       env.rewards.push(reward);
     },
     toast: (t) => env.toasts.push(t),
+    questNote: (t) => env.toasts.push(t),
     banner: (t) => env.banners.push(t),
     hint: (t) => env.hints.push(t),
     float: () => undefined,

@@ -24,7 +24,8 @@ const CSS = `
 .lm-sheet { position: fixed; inset: 0; z-index: 88; display: none; flex-direction: column;
   background: radial-gradient(130% 100% at 50% 0%, rgba(40,32,72,0.97), rgba(10,8,18,0.98));
   color: #e7e0ff; font: 12px/1.4 ui-monospace, monospace; pointer-events: auto; }
-.lm-sheet.on { display: flex; }
+.lm-sheet.on { display: flex; animation: lm-sheet-in 200ms ease both; }
+@keyframes lm-sheet-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
 /* header: tabs on the left, close on the right */
 .lm-sh-top { display: flex; align-items: center; gap: 6px;
@@ -58,6 +59,12 @@ const CSS = `
   border-radius: 4px; cursor: pointer; touch-action: manipulation; text-align: left;
   background: linear-gradient(180deg, rgba(38,31,64,0.92), rgba(19,15,36,0.92));
   border: 1px solid rgba(154,140,214,0.35); color: inherit; font: inherit; }
+.lm-slot:active { transform: scale(0.97); }
+.lm-slot { transition: transform 90ms ease, border-color 120ms ease; }
+.lm-cell:active { transform: scale(0.94); }
+.lm-cell { transition: transform 90ms ease, border-color 120ms ease; }
+.lm-detail.on { animation: lm-detail-in 180ms ease both; }
+@keyframes lm-detail-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .lm-slot .ic { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 3px; font-size: 16px;
   display: flex; align-items: center; justify-content: center;
   background: rgba(10,8,20,0.8); border: 1px solid rgba(154,140,214,0.35); }

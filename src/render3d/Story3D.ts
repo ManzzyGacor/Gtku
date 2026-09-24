@@ -48,6 +48,8 @@ export interface StoryHooks {
   loot(kind: string, x: number, y: number): void;
   /** Hand over a quest stage's reward (EXP and named items). */
   reward(reward: QuestReward, x: number, y: number): void;
+  /** A quest step moved. Shown as its own notification rather than a passing toast. */
+  questNote(text: string): void;
 }
 
 export class Story3D {
@@ -180,7 +182,7 @@ export class Story3D {
   questEvent(ev: QuestEvent): void {
     const r = advanceQuest(this.state, ev);
     if (!r.changed) return;
-    if (r.message) this.hooks.toast(r.message);
+    if (r.message) this.hooks.questNote(r.message);
     if (r.reward) this.hooks.reward(r.reward, this.heroX, this.heroY);
     if (r.lightLantern) this.lightLantern();
     this.refreshMarkers();

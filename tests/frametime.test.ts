@@ -83,6 +83,7 @@ test('quest text and map markers are not rebuilt every frame', () => {
     exp: () => undefined,
     loot: () => undefined,
     reward: () => undefined,
+    questNote: () => undefined,
   });
 
   const marks = story.mapMarks();
