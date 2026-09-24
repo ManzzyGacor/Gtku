@@ -105,6 +105,7 @@ export class Game3D {
     // Baked pools are almost free, so even the bottom preset keeps them — they are what makes
     // the village look lit at night.
     this.scene3d.setLightPools(p.id === 'vlow' ? 1.2 : 1.6);
+    this.scene3d.setGroundDetail(p.id === 'vlow' ? 0 : 1);
     this.environment.setBudget(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.5 : 1);
     this.scene3d.setShadows(p.shadows);
     this.resize();

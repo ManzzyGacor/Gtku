@@ -15,7 +15,7 @@
 import * as THREE from 'three';
 import { CHUNK_PX, CHUNK_TILES } from '../config';
 import { bakeChunk, bakeWaterMask, chunkHasWater } from '../art/bake';
-import { buildGreyboxTextures, type GreyboxTexture } from '../art/greybox';
+import { buildGreyboxTextures, buildGroundDetail, type GreyboxTexture } from '../art/greybox';
 import type { Sheet } from '../art/sheet';
 import { ambientAt, blendAmbient, nightAmount, sunDirection } from '../core/systems/daynight';
 import { AREAS } from '../core/world/areas';
@@ -70,6 +70,27 @@ const SWAY_VERTEX = /* glsl */ `
     transformed.z += lmBend.y / max(aSize.z, 0.001);
   }
 #endif
+`;
+
+/**
+ * The ground's detail layer: one shared grain map tiled at twice the tile density and multiplied
+ * into the baked albedo. Without it the floor is the only surface still at 16 px per tile while
+ * every prop carries 32, and it shows.
+ */
+const GROUND_DETAIL_PARS = /* glsl */ `
+varying vec2 vGroundXz;
+uniform sampler2D tDetail;
+uniform float uDetailStrength;
+`;
+
+const GROUND_DETAIL_FRAGMENT = /* glsl */ `
+  {
+    float grain = texture2D(tDetail, vGroundXz * 0.5).r;
+    float macro = texture2D(tDetail, vGroundXz * 0.0625).r;
+    // 0.5 is neutral, so this darkens and lightens without shifting the hue
+    float d = 1.0 + ((grain - 0.5) * 0.75 + (macro - 0.5) * 0.45) * uDetailStrength;
+    diffuseColor.rgb *= clamp(d, 0.55, 1.45);
+  }
 `;
 
 /** Lantern glass and crystals breathe a little, on their own phase. */
@@ -201,6 +222,8 @@ export class World3D {
   private poolGeometries: THREE.BufferGeometry[] = [];
   private poolMaterials: THREE.Material[] = [];
   private groundGeometry: THREE.PlaneGeometry;
+  private detailTexture: THREE.Texture;
+  private readonly detailStrength = { value: 1 };
   private waterGeometry: THREE.PlaneGeometry;
   readonly waterUniforms: WaterUniforms = makeWaterUniforms();
   private waterEnabled = true;
@@ -250,6 +273,7 @@ export class World3D {
 
     const pix = buildGreyboxTextures();
     for (const [name, pm] of Object.entries(pix)) this.textures[name as GreyboxTexture] = pixmapTexture(pm, { tile: true });
+    this.detailTexture = pixmapTexture(buildGroundDetail(), { tile: true });
 
     this.groundGeometry = new THREE.PlaneGeometry(CHUNK_TILES, CHUNK_TILES);
     this.groundGeometry.rotateX(-Math.PI / 2);
@@ -387,6 +411,7 @@ export class World3D {
     // Pixmap row 0 is north; a flat plane has v = 1 there, so the rows are flipped on upload.
     const texture = pixmapTexture(pm, { flipRows: true });
     const material = new THREE.MeshLambertMaterial({ map: texture });
+    this.patchGroundMaterial(material);
 
     /*
      * Bake the static lights of this chunk *and its neighbours* into a pool map. A lamp two tiles
@@ -428,6 +453,30 @@ export class World3D {
     this.groundFade.set(key, this.clock);
     this.loaded.set(key, { cx, cy, ground, texture, material, lightMap, water, lights: plan.lights });
     this.rebuildLightList();
+  }
+
+  /** Add the shared detail layer to a chunk's ground material. */
+  private patchGroundMaterial(material: THREE.MeshLambertMaterial): void {
+    const detail = this.detailTexture;
+    const strength = this.detailStrength;
+    material.onBeforeCompile = (shader) => {
+      shader.vertexShader = `varying vec2 vGroundXz;\n${shader.vertexShader}`.replace(
+        '#include <project_vertex>',
+        '#include <project_vertex>\n  vGroundXz = (modelMatrix * vec4(transformed, 1.0)).xz;',
+      );
+      shader.fragmentShader = `${GROUND_DETAIL_PARS}${shader.fragmentShader}`.replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>\n${GROUND_DETAIL_FRAGMENT}`,
+      );
+      shader.uniforms.tDetail = { value: detail };
+      shader.uniforms.uDetailStrength = strength;
+    };
+    material.customProgramCacheKey = () => 'lm-ground';
+  }
+
+  /** How strongly the ground grain shows; the bottom preset turns it off. */
+  setGroundDetail(strength: number): void {
+    this.detailStrength.value = Math.max(0, strength);
   }
 
   private byGroup(plan: ChunkPlan): Map<string, typeof plan.shapes> {
@@ -636,6 +685,7 @@ export class World3D {
     this.poolMaterials = [];
     this.groundGeometry.dispose();
     this.waterGeometry.dispose();
+    this.detailTexture.dispose();
     for (const t of Object.values(this.textures)) t?.dispose();
     this.textures = {};
     this.planCache.clear();

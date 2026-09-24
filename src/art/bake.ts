@@ -6,7 +6,8 @@ import { CHUNK_PX, CHUNK_TILES, TILE } from '../config';
 import { hash2 } from '../core/rng';
 import type { Sheet } from './sheet';
 import { VARIANTS, WATER_FRAMES } from './tiles';
-import { Pixmap } from './pixmap';
+import { mix, Pixmap } from './pixmap';
+import { P } from './palette';
 import type { WorldSource } from '../core/world/source';
 import { isGrassy, isWater, T, TILE_INFO } from '../core/world/tiles';
 
@@ -103,7 +104,48 @@ export function bakeChunk(world: WorldSource, sheet: Sheet, cx: number, cy: numb
       }
     }
   }
+  bakeContactShadows(world, out, cx, cy);
   return out;
+}
+
+/**
+ * Darken the ground wherever it meets something solid.
+ *
+ * Contact shadows are what stop a building from looking like a sticker on the floor. They are
+ * baked straight into the chunk texture: the geometry that casts them never moves, so paying for
+ * this at load time is free, and it works even on the presets that switch real shadows off.
+ */
+function bakeContactShadows(world: WorldSource, out: Pixmap, cx: number, cy: number): void {
+  /** How far the shadow reaches from a solid edge, in pixels. */
+  const REACH = 5;
+  const solid = (tx: number, ty: number): boolean => world.solidAt(tx, ty);
+
+  for (let py = 0; py < CHUNK_PX; py++) {
+    const wy = cy * CHUNK_PX + py;
+    const ty = Math.floor(wy / TILE);
+    for (let px = 0; px < CHUNK_PX; px++) {
+      const wx = cx * CHUNK_PX + px;
+      const tx = Math.floor(wx / TILE);
+      if (solid(tx, ty)) continue; // the solid tile itself is hidden under geometry
+
+      // distance to the nearest solid tile's edge, in pixels
+      let best = REACH;
+      for (let oy = -1; oy <= 1; oy++)
+        for (let ox = -1; ox <= 1; ox++) {
+          if (!ox && !oy) continue;
+          if (!solid(tx + ox, ty + oy)) continue;
+          const ex = ox < 0 ? tx * TILE : ox > 0 ? (tx + 1) * TILE - 1 : wx;
+          const ey = oy < 0 ? ty * TILE : oy > 0 ? (ty + 1) * TILE - 1 : wy;
+          best = Math.min(best, Math.hypot(wx - ex, wy - ey));
+        }
+      if (best >= REACH) continue;
+      // strongest right at the wall, gone by REACH; squared so the falloff hugs the edge
+      const k = (1 - best / REACH) ** 2 * 0.55;
+      const [c, a] = out.get(px, py);
+      if (!a) continue;
+      out.set(px, py, mix(c, P.ink0, k), a);
+    }
+  }
 }
 
 

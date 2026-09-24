@@ -368,3 +368,34 @@ export function buildFogNoise(size = 32): Pixmap {
     }
   return pm;
 }
+
+
+/**
+ * A shared detail layer for the ground.
+ *
+ * The ground is baked from the 2D tile art at 16 px per tile, while the props now carry 32 texels
+ * per world unit — so without this the floor is visibly the blurriest thing on screen. Rather than
+ * doubling every chunk texture (which would cost ~1 MB per chunk), the renderer tiles this one
+ * small map over the ground at twice the tile density and multiplies it in: high-frequency grain
+ * and speckle for free, in memory and in bandwidth.
+ *
+ * Values sit around 1.0 (stored as 0..255 where 128 = neutral) so it darkens and lightens rather
+ * than tinting.
+ */
+export function buildGroundDetail(size = 32): Pixmap {
+  const pm = new Pixmap(size, size);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      // fine grain plus a coarser blotch, both tiling
+      const fine = tileNoise(x, y, size, size, 41) - 0.5;
+      const coarse = tileNoise(Math.floor(x / 4), Math.floor(y / 4), size, size, 43) - 0.5;
+      let v = 128 + (fine * 0.55 + coarse * 0.45) * 52;
+      // a sparse scatter of bright grit and dark pits
+      const grit = tileNoise(x, y, size, size, 47);
+      if (grit > 0.985) v += 46;
+      else if (grit < 0.012) v -= 40;
+      const g = Math.max(0, Math.min(255, Math.round(v)));
+      pm.set(x, y, ((g << 16) | (g << 8) | g) >>> 0, 255);
+    }
+  return pm;
+}
