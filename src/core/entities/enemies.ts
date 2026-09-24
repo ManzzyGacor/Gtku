@@ -2,6 +2,7 @@
  * Pure enemy AI (no Phaser): Lendir Lumut (chaser), Pemanah Duri (ranged kiter), Kelelawar Kelam (pack flankers),
  * Kolosus Kelam (boss). The scene renders them and feeds `EnemyEvent`s back into hero damage, particles, camera shake.
  */
+import { TILE } from '../../config';
 import { clamp } from '../rng';
 import type { Collision } from '../world/collision';
 
@@ -97,11 +98,14 @@ export abstract class EnemyCore {
   /** Returns true if the hit landed. */
   hurt(dmg: number, fromX: number, fromY: number, knock: number, stun: number, ctx: { emit: (e: EnemyEvent) => void }): boolean {
     if (this.dead || this.invulnerable) return false;
-    this.hp -= dmg;
+    // Same gate as the hero's: a negative or NaN damage number would heal an enemy or make its HP
+    // NaN, and an enemy with NaN HP is never dead and never killable.
+    this.hp -= Number.isFinite(dmg) ? Math.max(0, dmg) : 0;
     this.flash = 0.11;
-    const a = Math.atan2(this.cy - fromY, this.x - fromX);
-    this.kx = Math.cos(a) * knock * this.knockResist;
-    this.ky = Math.sin(a) * knock * this.knockResist;
+    const a = Number.isFinite(fromX) && Number.isFinite(fromY) ? Math.atan2(this.cy - fromY, this.x - fromX) : 0;
+    const push = Number.isFinite(knock) ? knock : 0;
+    this.kx = Math.cos(a) * push * this.knockResist;
+    this.ky = Math.sin(a) * push * this.knockResist;
     if (stun > 0 && this.knockResist >= 0.5) this.stun = Math.max(this.stun, stun);
     this.aggro = true;
     this.onHurt();
@@ -137,6 +141,7 @@ export abstract class EnemyCore {
     this.ky *= decay;
     if (Math.abs(this.kx) < 1) this.kx = 0;
     if (Math.abs(this.ky) < 1) this.ky = 0;
+    if (this.unstick(ctx, dt)) return;
     if (vx !== 0 || vy !== 0) {
       const r = ctx.col.move(this.x, this.y, this.hw, this.h, vx * dt, vy * dt);
       this.x = r.x;
@@ -144,6 +149,43 @@ export abstract class EnemyCore {
       if (r.hitX) this.kx = 0;
       if (r.hitY) this.ky = 0;
     }
+  }
+
+  /**
+   * Walk out of a tile that has become solid underneath us.
+   *
+   * This is not hypothetical: the boss arena door and the puzzle gate add real collision while the
+   * game is running, so anything standing in the doorway when it shuts is suddenly inside a wall.
+   * `Collision.move` is written for a body that *starts* in free space — from inside a wall its
+   * push-out fallback lets the body slide along the inside of the solid area, and the enemy drifts
+   * across the map through the terrain (measured: 1200 px in ten seconds).
+   *
+   * So: if we are embedded, ignore the AI for this frame and step toward the nearest free tile
+   * centre instead. Returns true when the frame was spent unsticking.
+   */
+  private unstick(ctx: EnemyCtx, dt: number): boolean {
+    if (!ctx.col.boxBlocked(this.x, this.y, this.hw, this.h)) return false;
+    const tx = Math.floor(this.x / TILE);
+    const ty = Math.floor(this.y / TILE);
+    let best: { x: number; y: number; d: number } | null = null;
+    for (let r = 1; r <= 3 && !best; r++)
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const nx = (tx + dx) * TILE + TILE / 2;
+          const ny = (ty + dy) * TILE + TILE - 1;
+          if (ctx.col.boxBlocked(nx, ny, this.hw, this.h)) continue;
+          const d = (dx * dx + dy * dy) as number;
+          if (!best || d < best.d) best = { x: nx, y: ny, d };
+        }
+    this.kx = this.ky = 0;
+    this.wx = this.wy = 0;
+    if (!best) return true; // walled in completely: stand still rather than tunnel
+    const a = Math.atan2(best.y - this.y, best.x - this.x);
+    const step = 60 * dt;
+    this.x += Math.cos(a) * step;
+    this.y += Math.sin(a) * step;
+    return true;
   }
 
   protected abstract think(dt: number, ctx: EnemyCtx): void;

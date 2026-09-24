@@ -249,15 +249,27 @@ export class HeroCore {
   }
 
   heal(n: number): void {
+    // A "heal" that is negative or NaN must never take HP away: healing and damage are separate
+    // doors on purpose, and Batch 4's equipment modifiers will be doing the arithmetic upstream.
+    if (!Number.isFinite(n) || n <= 0) return;
     this.hp = Math.min(this.maxHp, this.hp + n);
   }
 
   takeDamage(dmg: number, fromX: number, fromY: number, knock = 110): boolean {
     if (!this.canBeHit) return false;
-    this.hp = Math.max(0, this.hp - dmg);
-    const a = Math.atan2(this.y - fromY, this.x - fromX);
-    this.vx = Math.cos(a) * knock;
-    this.vy = Math.sin(a) * knock;
+    /*
+     * Damage is clamped into [0, maxHp] before it is applied, for two reasons that are about to
+     * matter a lot more: a defence modifier that overshoots would otherwise *heal* the hero (and
+     * past maxHp at that), and a NaN would make `hp` NaN — after which `hp <= 0` is false and
+     * `hp > 0` is false too, so the hero is neither alive nor dead and the game never recovers.
+     */
+    const amount = Number.isFinite(dmg) ? Math.max(0, dmg) : 0;
+    this.hp = Math.max(0, Math.min(this.maxHp, this.hp - amount));
+    // A knockback from a non-finite source position would poison the velocity the same way.
+    const a = Number.isFinite(fromX) && Number.isFinite(fromY) ? Math.atan2(this.y - fromY, this.x - fromX) : 0;
+    const push = Number.isFinite(knock) ? knock : 0;
+    this.vx = Math.cos(a) * push;
+    this.vy = Math.sin(a) * push;
     this.invuln = HERO_STATS.invulnAfterHit;
     this.queuedAttack = false;
     this.queuedHeavy = false;
@@ -330,6 +342,15 @@ export class HeroCore {
   }
 
   update(dt: number, inp: HeroInput, col: Collision, speedMult = 1): void {
+    /*
+     * One bad frame must not break the hero permanently. A non-finite `dt` or speed multiplier
+     * would turn the velocity into NaN, and from then on `Collision.move` computes NaN sub-steps,
+     * runs zero of them and returns the hero to where they were — forever. The game loop clamps
+     * `dt` already; this is the backstop for everything else that can call in here.
+     */
+    if (!Number.isFinite(dt) || dt <= 0) return;
+    if (!Number.isFinite(speedMult) || speedMult <= 0) speedMult = 1;
+    if (!Number.isFinite(this.vx) || !Number.isFinite(this.vy)) this.vx = this.vy = 0;
     this.bufAtk = inp.attack ? 0.18 : Math.max(0, this.bufAtk - dt);
     this.bufDodge = inp.dodge ? 0.18 : Math.max(0, this.bufDodge - dt);
     this.bufSkill = inp.skill ? 0.18 : Math.max(0, this.bufSkill - dt);
