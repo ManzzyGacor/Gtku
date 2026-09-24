@@ -492,6 +492,37 @@ mode 3D belum menulis apa pun ke save.
 7. **Sistem**: menu pause + pengaturan (volume, tata letak tombol, kualitas), gamepad, multi-slot save, lokalisasi ID/EN.
 8. **Performa & aset**: atlas PNG hasil ekspor + override buatan tangan, `SpriteGPULayer`/`TilemapGPULayer` bila perlu, uji perangkat nyata.
 
+### Save lama dari versi 2D
+
+Save versi 2D disimpan di key `lentera-kelam/save/v1` (nama game waktu itu) dengan bentuk `v: 1`
+yang sama seperti sekarang, jadi isinya bisa dibaca langsung. Yang **tidak** sama adalah dunianya:
+Batch 2 memperbesarnya dari 128x80 menjadi 256x128 petak dan memindahkan semua area, sehingga
+posisi yang dulu halaman desa bisa jadi bagian dalam pohon sekarang. Save yang menaruh hero di
+dalam dinding = game yang terkunci, jadi migrasinya nyata, bukan cuma ganti nama key.
+
+`src/core/saveMigrate.ts` (murni, tanpa renderer) mengerjakan dua hal:
+
+1. **`sanitizeSave`** — memaksa setiap field ke bentuk yang benar: NaN/Infinity ditolak, `hp`
+   dijepit ke 1..maxHp, tahap quest ke 0..4, jumlah kill tidak boleh negatif, `dayTime` dilipat
+   ke satu hari, cap waktu kill yang bukan angka dibuang, dan flag yang bukan `true` diabaikan.
+   Save yang tidak bisa diselamatkan mengembalikan `null` — mulai baru lebih baik daripada game
+   yang crash saat boot. Dipakai `loadGame()`, jadi berlaku untuk semua save, bukan hanya yang lama.
+2. **`placeHero`** — memeriksa posisi simpanan terhadap grid tabrakan dunia *sekarang*, lalu
+   memindahkan hero ke petak bebas terdekat (pencarian cincin, radius 16), atau ke checkpoint yang
+   tersimpan, atau ke titik awal dunia. Checkpoint yang id-nya sudah tidak ada juga diganti.
+
+Setiap perubahan dicatat sebagai `notes` dan muncul di laporan diagnostik sebagai baris
+`migrasi save: ...`, jadi migrasi tidak pernah terjadi diam-diam.
+
+Dijaga `tests/savemigrate.test.ts` (13 tes) dengan dua payload 2D asli — persis apa yang
+`GameState.toJSON` tulis di commit `20b1c2d`, memakai koordinat dunia lama (altar hutan petak
+60,32 dan altar gua petak 97,36): key lama diadopsi lalu dihapus, save baru selalu menang atas
+sisa save lama, hero mendarat di petak yang bisa dipijak **dan benar-benar bisa berjalan lebih
+dari satu petak**, hero yang tersimpan di dalam dinding atau di luar dunia ditarik ke tempat aman,
+progres (quest/puzzle/boss/flag/jam) utuh, save rusak ditolak (10 bentuk: JSON terpotong, `v: 2`,
+hero null, koordinat string), NaN/Infinity tidak pernah sampai ke state, dan localStorage yang
+melempar SecurityError (jendela privat) tidak menjatuhkan game.
+
 ### Angka setelah renderer 2D dihapus
 
 | Yang diukur | Sebelum | Sesudah |

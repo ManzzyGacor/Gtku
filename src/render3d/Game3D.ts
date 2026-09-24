@@ -17,6 +17,7 @@ import { HeroCore, HERO_STATS, type HeroEvent, type HeroInput } from '../core/en
 import { WEAPONS } from '../core/combat/weapons';
 import { GameState } from '../core/state/GameState';
 import { loadGame, saveGame } from '../core/save';
+import { migrateSave } from '../core/saveMigrate';
 import { AREAS, areaAtTile } from '../core/world/areas';
 import { Dialogue } from '../ui/Dialogue';
 import { Hud, type Projector } from '../ui/Hud';
@@ -89,6 +90,8 @@ export class Game3D {
   private frameMs = 16.7;
   private unsubscribe: () => void;
   private disposed = false;
+  /** What the save migration had to change on load, shown in the report so it is never silent. */
+  private saveNotes: string[] = [];
 
   constructor(parent: HTMLElement, options: { continue?: boolean } = {}) {
     this.pixels = new PixelRenderer(parent);
@@ -103,10 +106,14 @@ export class Game3D {
     this.camera.snap(u(start.x), u(start.y));
 
     // ── the save, before anything reads the state ──
-    const save = options.continue ? loadGame() : null;
-    if (save) {
-      this.state.load(save);
-      this.hero.reset(save.hero.x, save.hero.y, Math.max(1, save.hero.hp));
+    const stored = options.continue ? loadGame() : null;
+    // Migration runs here and not in `loadGame` because only this far in does a world exist to
+    // check the saved position against: a 2D-era save can point at a tile that is now solid.
+    const migrated = stored ? migrateSave(stored, this.world, this.hero.maxHp) : null;
+    if (migrated) {
+      this.saveNotes = migrated.notes;
+      this.state.load(migrated.save);
+      this.hero.reset(migrated.save.hero.x, migrated.save.hero.y, migrated.save.hero.hp);
       this.dayTime = this.state.dayTime;
       this.camera.snap(u(this.hero.x), u(this.hero.y));
     }
@@ -583,6 +590,7 @@ export class Game3D {
       `hero: (${Math.round(this.hero.x)}, ${Math.round(this.hero.y)}) hp ${this.hero.hp}/${this.hero.maxHp} state ${this.hero.state}`,
       `senjata: ${this.hero.weapon}${this.hero.isRanged ? ` (charge ${(this.hero.charge * 100).toFixed(0)}%)` : ` (combo ${this.hero.combo})`}`,
       `musuh hidup: ${this.combat.enemyCount}   status aktif: ${this.combat.statusSummary()}   reaksi terdaftar: ${this.combat.reactionCount}`,
+      ...(this.saveNotes.length ? [`migrasi save: ${this.saveNotes.join('; ')}`] : []),
       `area: ${this.world.areaAt(Math.floor(this.hero.x / 16), Math.floor(this.hero.y / 16))}`,
       `kamera: sudut ${this.camera.pitch}\u00b0  zoom ${this.camera.zoom.toFixed(2)}x  ` +
         `target (${this.camera.target.x.toFixed(1)}, ${this.camera.target.z.toFixed(1)})  radius pandang ${this.camera.viewRadius.toFixed(1)} unit`,
