@@ -185,7 +185,8 @@ export function gradeAt(t: number, cave = 0): GradeColors {
   const nightBloom = 0.95;
   const bloom = lerp(lerp(dayBloom, nightBloom, night) + golden * 0.25, 1.05, cave);
 
-  const vignette = lerp(lerp(0.18, 0.34, night), 0.46, cave);
+  // a lighter vignette underground than before: 0.46 swallowed the edges of a room already dark
+  const vignette = lerp(lerp(0.18, 0.34, night), 0.28, cave);
 
   /*
    * Shadows drift toward the night's blue, and toward violet underground. The cave's lift is a

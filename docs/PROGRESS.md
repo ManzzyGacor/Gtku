@@ -1349,3 +1349,18 @@ memastikan yang mana.
 - `input.axis()` tidak lagi membuat objek baru tiap panggilan.
 
 Tes: `tests/perfprobe.test.ts` (8), AUTO (2 baru), worker (2 baru di `tests/areadata.test.ts`).
+
+## Gua lebih terang, dan setelan Kecerahan
+
+Penyebab gua gelap: ambient gua 0,22 dikali intensitas langit 0,55 (matahari 0), vignette paling tebal
+(0,46), dan lentera hero hanya menjangkau ± 3,6 tile. Perbaikan:
+- ambient gua dinaikkan (maks 0,66) + lantai ambient khusus bawah tanah (+0,4 intensitas);
+- vignette gua 0,46 → 0,28 (tidak lebih gelap dari malam biasa);
+- **lentera hero jadi sumber cahaya utama di gua**: jangkauan ×2,1 dan 60% lebih terang, mengikuti
+  seberapa dalam hero di gua. Lentera bukan lampu dinamis, jadi tidak ikut diturunkan AUTO;
+- obor dan kristal sudah punya bagian yang bersinar sendiri + kolam cahaya yang dipanggang di lantai —
+  keduanya tetap terlihat walau AUTO menurunkan lampu dinamis (dijaga tes);
+- **Pengaturan → Tampilan → Kecerahan** (60–180%): menaikkan seluruh gambar dan sedikit mengangkat
+  bayangan.
+
+Tes: `tests/cavelight.test.ts` (4).

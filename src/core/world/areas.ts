@@ -19,7 +19,9 @@ export interface AreaDef {
 export const AREAS: Record<AreaId, AreaDef> = {
   village: { id: 'village', name: 'Ravenhollow', indoor: false, ambient: [1, 1, 1] },
   forest: { id: 'forest', name: 'Hutan Noctis', indoor: false, ambient: [1, 1, 1] },
-  cave: { id: 'cave', name: 'Gua Lumen', indoor: true, ambient: [0.22, 0.2, 0.38] },
+  // Raised after the phone test ("gelap sekali sampai sulit dilihat"): the cave is still the darkest
+  // place, but the floor and walls read without a torch in view.
+  cave: { id: 'cave', name: 'Gua Lumen', indoor: true, ambient: [0.46, 0.43, 0.66] },
 };
 
 /** Area boundaries in tiles (x only; the journey runs west→east). Areas blend seamlessly, no loading. */

@@ -1662,6 +1662,7 @@ export class Game3D {
     this.updateHud(dt, simDt);
     this.stages.lap(2);
     const cave = this.caveWeight();
+    this.heroMesh.setCave(cave);
     this.scene3d.setHeroOcclusion(this.heroMesh.root.position, this.camera.camera, this.hero.alive);
     /*
      * Clamp the fog to what is actually loaded. The report showed fog reaching 155 while only
@@ -1737,13 +1738,18 @@ export class Game3D {
         : null;
     const p = profileOf(settings.get('preset'));
     const allow = settings.get('bloom') && p.bloom && !this.probeOverride.bloomOff ? 1 : 0;
+    const bright = settings.get('brightness');
+    // brighter also lifts the shadows a little, or a dark cave only gets brighter where it was lit
+    const shadowLift = Math.max(0, bright - 1) * 0.035;
+    const lr = g.lift[0] + (tint ? tint[0] : 0) + shadowLift;
+    const lg = g.lift[1] + (tint ? tint[1] : 0) + shadowLift;
+    const lb = g.lift[2] + (tint ? tint[2] : 0) + shadowLift;
     this.pixels.setGrade({
       bloom: g.bloom * allow * this.bloomScale,
       vignette: g.vignette * (p.outline ? 1 : 0.6),
-      lift: tint
-        ? this.gradeLift.setRGB(g.lift[0] + tint[0], g.lift[1] + tint[1], g.lift[2] + tint[2])
-        : this.gradeLift.setRGB(g.lift[0], g.lift[1], g.lift[2]),
-      gain: this.gradeGain.setRGB(g.gain[0], g.gain[1], g.gain[2]),
+      lift: this.gradeLift.setRGB(lr, lg, lb),
+      // the player's brightness (Pengaturan → Tampilan), on top of the time of day
+      gain: this.gradeGain.setRGB(g.gain[0] * bright, g.gain[1] * bright, g.gain[2] * bright),
     });
   }
 

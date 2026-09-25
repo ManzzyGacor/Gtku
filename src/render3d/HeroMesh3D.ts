@@ -63,6 +63,9 @@ function resetPose(p: PoseTarget): void {
   Object.assign(p, blankPose());
 }
 
+/** How much further and brighter the lantern is underground. */
+export const CAVE_LANTERN = { range: 1.1, brightness: 0.6 };
+
 /** Total height in world units (≈ 25 px, matching the 2D sprite). */
 export const HERO_HEIGHT = 1.55;
 
@@ -396,7 +399,7 @@ export class HeroMesh3D {
 
     // the lamp always burns, with a small flicker
     const flicker = 0.9 + Math.sin(time * 9) * 0.06 + Math.sin(time * 23) * 0.04;
-    this.lantern.intensity = core.alive ? 2.4 * flicker : 0;
+    this.lantern.intensity = core.alive ? 2.4 * (1 + CAVE_LANTERN.brightness * this.cave) * flicker : 0;
     (this.lanternBox.material as THREE.MeshBasicMaterial).color.setHex(core.state === 'cast' ? 0xfff6b0 : this.lanternColor);
   }
 
@@ -612,7 +615,24 @@ export class HeroMesh3D {
    */
   setLanternRange(scale: number): void {
     const s = Number.isFinite(scale) ? Math.max(0.2, Math.min(3, scale)) : 1;
-    this.lantern.distance = this.lanternBase * s;
+    this.rangeScale = s;
+    this.lantern.distance = this.lanternBase * s * (1 + CAVE_LANTERN.range * this.cave);
+  }
+
+  private rangeScale = 1;
+  /** 0 outside, 1 deep underground. */
+  private cave = 0;
+
+  /**
+   * Underground the lantern is the light: it reaches much further and burns brighter, so the hero
+   * always sees the floor around them — also when AUTO has turned the dynamic lights down, because
+   * the lantern is not one of them.
+   */
+  setCave(weight: number): void {
+    const w = Math.max(0, Math.min(1, weight));
+    if (Math.abs(w - this.cave) < 0.01) return;
+    this.cave = w;
+    this.lantern.distance = this.lanternBase * this.rangeScale * (1 + CAVE_LANTERN.range * w);
   }
 
   dispose(): void {

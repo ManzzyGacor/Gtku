@@ -235,6 +235,8 @@ const MAX_DYNAMIC_LIGHTS = 3;
 const STREAM_STEP = 2;
 /** How long a chunk may wait for its pre-baked ground to inflate before the phone bakes it itself. */
 const GROUND_WAIT = 0.35;
+/** Extra ambient underground, so a cave reads even where no torch reaches. */
+export const CAVE_AMBIENT_FLOOR = 0.4;
 /** How long a chunk waits for the bake worker before the main thread bakes it itself. */
 const WORKER_WAIT = 1.5;
 
@@ -787,7 +789,8 @@ export class World3D {
     // Inside the cave the sun is irrelevant: torches and crystals do the lighting.
     const night = Math.max(nightAmount(dayTime), cave);
     this.hemi.color.setRGB(amb[0], amb[1], amb[2]);
-    this.hemi.intensity = 0.55 + (1 - night) * 0.5;
+    // underground the sky light is replaced by a floor of ambient: never pitch black
+    this.hemi.intensity = 0.55 + (1 - night) * 0.5 + cave * CAVE_AMBIENT_FLOOR;
 
     // The sun really travels: it rises in the east, so shadows sweep over the day.
     const dir = sunDirection(dayTime);

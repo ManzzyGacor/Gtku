@@ -92,7 +92,9 @@ test('the colour grade makes night bloom and warm, and daylight neutral', async 
   assert.ok(midnight.gain[0] > midnight.gain[2], 'night highlights are warm (lantern light)');
   assert.ok(Math.abs(noon.gain[0] - noon.gain[2]) < 0.02, 'daylight highlights stay neutral');
 
-  assert.ok(midnight.vignette > noon.vignette && cave.vignette > midnight.vignette);
+  assert.ok(midnight.vignette > noon.vignette);
+  // the cave was the heaviest vignette of all and read as black on a phone: it may not darken more than night
+  assert.ok(cave.vignette <= midnight.vignette, `cave ${cave.vignette} vs night ${midnight.vignette}`);
   for (let i = 0; i <= 64; i++) {
     const g = gradeAt(i / 64, (i % 3) / 2);
     assert.ok(g.bloom >= 0 && g.bloom <= 1.2, `bloom out of range at ${i}`);
