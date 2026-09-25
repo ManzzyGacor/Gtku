@@ -16,6 +16,7 @@ import { WEATHER, WEATHER_IDS, type Weather } from '../core/systems/weather';
 import { findStandable } from '../core/saveMigrate';
 import { wipeSave } from '../core/save';
 import { DUMMY_TILE } from '../core/systems/tutorial';
+import { WORLD_EVENT_IDS, WORLD_EVENTS, type WorldEventId } from '../core/systems/worldEvents';
 
 const KIND_LABEL: Record<string, string> = {
   weapon: 'Senjata',
@@ -167,6 +168,13 @@ export function buildDevActions(game: Game3D, reload: () => void): DevActions {
       if (!(id in WEATHER)) return 'Cuaca tidak dikenal.';
       game.setWeather(id as Weather);
       return `Cuaca: ${WEATHER[id as Weather].label}.`;
+    },
+
+    worldEvents: () => WORLD_EVENT_IDS.map((id) => ({ id, label: WORLD_EVENTS[id].name })),
+    activeEvent: () => game.events.active?.id ?? null,
+    startEvent: (id) => {
+      if (id !== null && !(id in WORLD_EVENTS)) return 'Event tidak dikenal.';
+      return game.devEvent(id as WorldEventId | null);
     },
 
     godMode: () => game.hero.invincible,

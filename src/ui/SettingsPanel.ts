@@ -198,7 +198,7 @@ const CSS = `
  * opened from all three. The whole layering, so the next panel does not have to guess:
  *
  *   66 HUD        70 kontrol sentuh   72 dialog      80 tombol sudut (gear/tas/jeda/fullscreen)
- *   86 menu jeda  88 lembar karakter  90 layar judul  91 tombol Layar Penuh  92 data diperlukan
+ *   86 menu jeda  87 lapak pedagang  88 lembar karakter  90 layar judul  91 tombol Layar Penuh  92 data diperlukan
  *   94 overlay cutscene
  *   96 pengaturan (ini)  97 mode pengembang  98 download manager  99 panel error (index.html)
  */

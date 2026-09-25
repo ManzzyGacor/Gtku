@@ -1138,3 +1138,29 @@ lentera). Datang bersama chunk renderer beberapa saat setelah layar judul tampil
 biasa), lalu **dibuang sebelum dunia game dibangun** supaya HP tidak memegang dua konteks WebGL
 sekaligus. Kalau gagal dibuat, layar judul tetap berfungsi dengan gradiennya. Menu keluar dengan fade.
 Tes: `tests/titlebackdrop.test.ts`.
+
+## Batch 7 (1/3): world event
+
+`core/systems/worldEvents.ts` — semuanya data, diterapkan generik oleh game:
+
+| Event | Kapan | Efek |
+| --- | --- | --- |
+| **Invasi Monster** | setelah quest dimulai | 7 monster datang ke alun-alun; kalahkan semua → +80 EXP, +60 koin |
+| **Badai Elemen** | kapan saja | cuaca badai; satu elemen acak (Api/Air/Es/Petir) +40% damage |
+| **Kabut Misterius** | malam | kabut tebal, minimap gelap, peluang loot 2x |
+| **Pedagang Keliling** | siang | NPC baru di alun-alun ("Dagang"), lapak dengan stok & harga koin |
+| **Malam Purnama** | malam | EXP 1,5x |
+
+- **Sutradara**: cek tiap 90 dtk bermain, peluang 40%, tidak di 150 dtk pertama, satu event
+  sekaligus, cooldown per event, event siang/malam berakhir saat waktu berganti. **Tidak pernah**
+  saat tutorial, cutscene, dialog, pertarungan boss, atau hero mati.
+- Status event masuk ke save (dan diperbaiki saat dimuat kalau rusak); event yang berjalan
+  berlanjut setelah muat ulang (pedagang kembali ke alun-alun, penyerbu yang tersisa muncul lagi).
+- Monster invasi memberi EXP/koin dan dihitung untuk quest berburu, tapi tidak masuk tabel respawn.
+- HUD: baris event di bawah objektif ("✷ Invasi Monster: 3/7 (1:42)"), dibangun ulang sekali per detik.
+- Lapak pedagang (`ui/ShopPanel.ts`, lapisan 87): koin dari karakter, stok dari event, barang ke tas
+  sungguhan; tas penuh = stok dikembalikan.
+- **Mode Pengembang → Jam, Cuaca & Event**: mulai event apa pun, atau akhiri yang berjalan.
+- Tes: `tests/worldevents.test.ts` (11) — data valid, sutradara (menunggu, tidak tumpang tindih,
+  siang/malam, cooldown, semua event akhirnya muncul), invasi dimenangkan, pedagang, save rusak
+  diperbaiki, dan tiap event di game sungguhan termasuk simpan & muat ulang.

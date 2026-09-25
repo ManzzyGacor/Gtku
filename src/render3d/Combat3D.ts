@@ -56,6 +56,10 @@ export interface CombatHooks {
   coins?(amount: number): void;
   /** An elemental hit landed (the tutorial listens for the one on the training dummy). */
   elementHit?(kind: string, element: ElementId): void;
+  /** An invasion monster fell (world events). */
+  invaderDown?(): void;
+  /** Extra multiplier for hits of an element (the elemental storm), 1 when nothing applies. */
+  elementMult?(element: ElementId): number;
   /** A reaction fired: `on` is the element whose status was already there. For the on-screen log. */
   reaction?(name: string, incoming: ElementId, on: ElementId | null, x: number, y: number): void;
 }
@@ -167,6 +171,32 @@ export class Combat3D {
 
   private devCounter = 0;
 
+  /**
+   * A monster brought by a world event (the invasion). Tagged `event_`: it gives EXP, coins and
+   * counts for the hunt like any monster, but it is not a world spawn, so it never goes into the
+   * save's respawn table — and the event is told when it falls.
+   */
+  eventSpawn(kind: 'slime' | 'archer' | 'bat', x: number, y: number): EnemyCore[] {
+    const id = `event_${kind}_${++this.devCounter}`;
+    const made =
+      kind === 'slime' ? [this.world.add(new Slime(x, y))] : kind === 'archer' ? [this.world.add(new Archer(x, y))] : this.world.spawnBats(x, y, 2, id);
+    for (const e of made) e.spawnId = id;
+    return made;
+  }
+
+  /** Remove every enemy whose spawn id starts with `prefix` (an event's leftovers). */
+  clearTagged(prefix: string): number {
+    let n = 0;
+    for (let i = this.world.enemies.length - 1; i >= 0; i--) {
+      const e = this.world.enemies[i];
+      if (!e.spawnId.startsWith(prefix)) continue;
+      this.world.remove(e);
+      this.dropMesh(e);
+      n++;
+    }
+    return n;
+  }
+
   /** Remove everything the developer menu spawned (and every extra dummy). */
   devClear(): number {
     let n = 0;
@@ -271,7 +301,9 @@ export class Combat3D {
    * here as the attack multiplier relative to the first light swing (`ATTACKS[0].dmg`). That way the combat tuning panel keeps
    * working exactly as before while equipment and levels decide how much a swing is actually worth.
    */
-  private hit(target: EnemyCore, rawDmg: number, element: ElementId | undefined, reactionMult: number, heavy = false): { amount: number; crit: boolean } {
+  private hit(target: EnemyCore, rawDmg: number, element: ElementId | undefined, rawReaction: number, heavy = false): { amount: number; crit: boolean } {
+    // a world event (the elemental storm) can make one element hit harder
+    const reactionMult = element ? rawReaction * (this.hooks.elementMult?.(element) ?? 1) : rawReaction;
     const c = this.character;
     if (!c) {
       // no sheet (tests, or a renderer built before Batch 4): behave exactly as before
@@ -633,6 +665,12 @@ export class Combat3D {
            * stay dead in the save, or — for a spawned boss — end the story.
            */
           if (ev.enemy.spawnId.startsWith('dev_')) break;
+          // an invader: counts for the hunt and for the event, but is not a world spawn to respawn
+          if (ev.enemy.spawnId.startsWith('event_')) {
+            this.hooks.killed(ev.enemy.kind, ev.enemy.x, ev.enemy.y);
+            this.hooks.invaderDown?.();
+            break;
+          }
           this.state.markKilled(ev.enemy.spawnId || `${ev.enemy.kind}`);
           this.hooks.killed(ev.enemy.kind, ev.enemy.x, ev.enemy.y);
           if (ev.enemy.kind === 'boss') this.hooks.bossDefeated(ev.enemy.x, ev.enemy.cy);

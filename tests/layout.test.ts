@@ -127,6 +127,10 @@ test('the UI layers in the right order, so no panel opens behind another', () =>
   assert.ok(z.get('DevMenu')! > z.get('SettingsPanel')!, 'the developer menu is opened from Settings');
   assert.ok(zOf('.lm-dm') > z.get('SettingsPanel')!, 'the Download Manager is opened from Settings');
   assert.ok(zOf('.lm-dr') > z.get('CharacterPanel')! && zOf('.lm-dr') < z.get('SettingsPanel')!, 'the data prompt covers the game but not Settings');
+  // the merchant's stall: over the pause menu, under the character sheet (to compare gear)
+  const shopCss = /const CSS = `([\s\S]*?)`;/.exec(readFileSync('src/ui/ShopPanel.ts', 'utf8'))?.[1] ?? '';
+  const shopZ = Number(/\.lm-shop\s*\{[^}]*z-index:\s*(\d+)/.exec(shopCss)?.[1] ?? 0);
+  assert.ok(shopZ > z.get('PauseMenu')! && shopZ < z.get('CharacterPanel')!, `shop at ${shopZ}`);
   // the Layar Penuh button has to be tappable on the title screen, and never cover a menu
   const fsCss = /const CSS = `([\s\S]*?)`;/.exec(readFileSync('src/ui/fullscreen.ts', 'utf8'))?.[1] ?? '';
   const fsZ = Number(/\.lm-fsprompt\s*\{[^}]*z-index:\s*(\d+)/.exec(fsCss)?.[1] ?? 0);

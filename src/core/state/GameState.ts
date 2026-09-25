@@ -28,6 +28,8 @@ export interface SaveData {
   character?: CharacterJson | undefined;
   /** Ids of cutscenes already watched, so they never play automatically twice (Batch 5). */
   cutscenesSeen?: string[] | undefined;
+  /** World events: the running one, the cooldowns, the next roll (Batch 7). Repaired on load. */
+  events?: unknown;
 }
 
 /** What `Character.toJSON()` produces; typed here so the save shape is in one file. */
@@ -64,6 +66,8 @@ export class GameState {
    * it is progress, not a preference, and a new game has to start with none of them seen.
    */
   cutscenesSeen: string[] = [];
+  /** The world-event director's state, as it was saved (`WorldEventDirector.load` repairs it). */
+  events: unknown = null;
 
   /** True while a spawn id is on its respawn timer (or permanently dead for the boss). */
   isDead(id: string): boolean {
@@ -90,6 +94,7 @@ export class GameState {
       bossDefeated: this.bossDefeated,
       character,
       cutscenesSeen: [...this.cutscenesSeen],
+      events: this.events ?? undefined,
     };
   }
 
@@ -103,6 +108,7 @@ export class GameState {
     this.bossDefeated = !!d.bossDefeated;
     this.checkpoint = d.checkpoint ?? 'cp_village';
     this.cutscenesSeen = Array.isArray(d.cutscenesSeen) ? d.cutscenesSeen.filter((x) => typeof x === 'string') : [];
+    this.events = d.events ?? null;
   }
 
   hasSeen(id: string): boolean {

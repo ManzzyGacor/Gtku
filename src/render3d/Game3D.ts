@@ -33,7 +33,11 @@ import { PauseMenu, type InfoLine } from '../ui/PauseMenu';
 import { BOW, BOW_SHOTS } from '../core/combat/weapons';
 import { ELEMENTS, type ElementId } from '../core/combat/elements';
 import { KILLS_NEEDED } from '../core/state/GameState';
-import { DUMMY_TILE, settleTutorial } from '../core/systems/tutorial';
+import { DUMMY_TILE, settleTutorial, tutorialStep } from '../core/systems/tutorial';
+import { WORLD_EVENTS, WorldEventDirector, type EventChange, type WorldEventId } from '../core/systems/worldEvents';
+import { ShopPanel } from '../ui/ShopPanel';
+import { findStandable } from '../core/saveMigrate';
+import { makeRng } from '../core/rng';
 import { WEATHER, type Weather } from '../core/systems/weather';
 import { Rain } from './Rain';
 import { AreaData } from './AreaData';
@@ -84,6 +88,9 @@ function vibrate(ms: number): void {
     /* not allowed right now */
   }
 }
+
+/** A number per event id, for the HUD's cheap change key. */
+const WORLD_EVENT_IDS_INDEX: Record<WorldEventId, number> = { invasi: 1, badai: 2, kabut: 3, pedagang: 4, purnama: 5 };
 
 export class Game3D {
   readonly pixels: PixelRenderer;
@@ -296,6 +303,12 @@ export class Game3D {
         if (kind === 'dummy') this.story.tutorialEvent({ type: 'element-hit', element, target: 'dummy' });
       },
       reaction: (name, incoming, on, x, y) => this.onReaction(name, incoming, on, x, y),
+      invaderDown: () => this.applyEventChange(this.events.noteInvaderDown()),
+      elementMult: (el) => {
+        const a = this.events.active;
+        const storm = this.events.effects.element;
+        return a && storm && a.element === el ? storm.mult : 1;
+      },
       heal: (amount) => {
         if (amount <= 0 || this.hero.hp >= this.hero.maxHp) return;
         this.hero.heal(amount);
@@ -332,6 +345,7 @@ export class Game3D {
       spark: (x, y, color, big) => this.environment.spark(u(x), u(y), color, big),
       save: (force) => this.saveNow(force),
       shake: (amount, seconds) => this.camera.shake(amount, seconds),
+      shop: () => this.shop.show(),
     });
     this.story.onRest = () => {
       this.hero.heal(this.hero.maxHp);
@@ -372,6 +386,32 @@ export class Game3D {
     // The tutorial's training dummy stands in the plaza for good: it is also the best place to try
     // out a new element or a reaction, long after the tutorial is done.
     this.combat.addDummy(DUMMY_TILE.tx * 16 + 8, DUMMY_TILE.ty * 16 + 12);
+
+    // ── world events: the stall, and whatever was running when the game was saved ──
+    this.shop = new ShopPanel({
+      title: () => 'Pedagang Keliling',
+      coins: () => this.character.coins,
+      secondsLeft: () => this.events.active?.left ?? 0,
+      rows: () => {
+        const a = this.events.active;
+        const offers = this.events.effects.merchant?.offers ?? [];
+        return offers.map((o, i) => {
+          const def = itemDef(o.item);
+          const r = rarityMeta(o.rarity);
+          return { name: def?.name ?? o.item, note: def?.note ?? '', rarityLabel: r.label, color: r.color, price: o.price, stock: a?.stock?.[i] ?? 0 };
+        });
+      },
+      buy: (i) => this.buyFromMerchant(i),
+    });
+    this.shop.onToggle = (open) => {
+      this.paused = open;
+      input.enabled = !open && !this.dialogue.open;
+      if (open) input.reset();
+      else this.saveNow(true);
+    };
+    this.events.load(this.state.events);
+    const resumed = this.events.active;
+    if (resumed) this.applyEventChange({ type: 'start', event: resumed, def: WORLD_EVENTS[resumed.id] }, true);
 
     this.applyProfile();
     this.resize();
@@ -530,7 +570,7 @@ export class Game3D {
   private updateHud(dt: number, simDt: number): void {
     this.hud.setHp(this.hero.hp, this.hero.maxHp);
     this.hud.setEnergy(1 - this.hero.skillCd / HERO_SKILL_COOLDOWN);
-    const q = this.story.questText();
+    const q = this.eventQuestText() ?? this.story.questText();
     this.hud.setQuest(q.title, q.lines);
 
     const boss = this.combat.bossRef;
@@ -578,6 +618,130 @@ export class Game3D {
     this.combat.character = this.character;
     this.heroMesh.setLanternRange(this.character.stats.lanternRange / 100);
     this.hud.setLevel(this.character.level, this.character.exp, this.character.expNeeded);
+  }
+
+  /** World events (`core/systems/worldEvents.ts`): when, what, and what is running now. */
+  readonly events = new WorldEventDirector(makeRng((Date.now() & 0xffff) ^ 0x5eed));
+  /** The wandering merchant's stall. */
+  shop!: ShopPanel;
+  /** What the weather was before an event changed it, to put back afterwards. */
+  private weatherBeforeEvent: Weather | null = null;
+  private eventHudKey = -1;
+  private eventQuest: { title: string; lines: string[] } | null = null;
+
+  /** One frame of the director. Nothing starts during the tutorial, a cutscene or a boss fight. */
+  private updateEvents(dt: number): void {
+    const boss = this.combat.bossRef;
+    const busy =
+      !this.hero.alive || this.cutscene.active || tutorialStep(this.state) !== 'done' || (!!boss && boss.awake && !boss.dead) || this.dialogue.open;
+    this.applyEventChange(this.events.update(dt, { night: nightAmount(this.dayTime) > 0.5, questStage: this.state.quest.stage, busy }));
+  }
+
+  /** Start / end an event in the world, from nothing but its data. `resumed` = loaded from a save. */
+  applyEventChange(change: EventChange | null, resumed = false): void {
+    if (!change) return;
+    const { def, event } = change;
+    const fx = def.effects;
+    if (change.type === 'start') {
+      if (fx.weather) {
+        this.weatherBeforeEvent ??= this.weather;
+        this.setWeather(fx.weather);
+      }
+      if (fx.hideMinimap) this.minimap.setVisible(false);
+      if (fx.merchant) {
+        const m = this.world.markers.lantern;
+        const spot = findStandable(this.world, m.x + 40, m.y + 20) ?? { x: m.x + 40, y: m.y + 20 };
+        this.story.setMerchant(spot);
+      }
+      if (fx.invasion) {
+        // they come from the edges of the plaza, toward the lantern
+        const left = (event.total ?? fx.invasion.count) - (event.defeated ?? 0);
+        const m = this.world.markers.lantern;
+        for (let i = 0; i < left; i++) {
+          const a = (i / Math.max(1, left)) * Math.PI * 2;
+          const spot = findStandable(this.world, m.x + Math.cos(a) * 120, m.y + Math.sin(a) * 90);
+          if (spot) this.combat.eventSpawn(fx.invasion.kinds[i % fx.invasion.kinds.length], spot.x, spot.y);
+        }
+      }
+      if (!resumed) {
+        const extra = event.element ? ` Elemen ${ELEMENTS[event.element].name} kini ${Math.round(((fx.element?.mult ?? 1) - 1) * 100)}% lebih kuat.` : '';
+        this.hud.banner(def.name.toUpperCase(), 2.6);
+        this.hud.popup({ icon: '✷', title: def.name, sub: `${def.intro}${extra}`, color: '#ffb04a', seconds: 6 });
+        sfx.reaction();
+      }
+    } else {
+      if (fx.weather && this.weatherBeforeEvent) {
+        this.setWeather(this.weatherBeforeEvent);
+        this.weatherBeforeEvent = null;
+      }
+      if (fx.hideMinimap) this.minimap.setVisible(true);
+      if (fx.merchant) {
+        this.story.setMerchant(null);
+        this.shop.hide();
+      }
+      if (fx.invasion) this.combat.clearTagged('event_');
+      if (change.cleared && fx.invasion) {
+        this.hud.popup({ icon: '✔', title: `${def.name}: berhasil!`, sub: `+${fx.invasion.reward.exp} EXP · +${fx.invasion.reward.coins} koin`, color: '#7cf07c', seconds: 5 });
+        this.gainExp(fx.invasion.reward.exp, this.hero.x, this.hero.y);
+        this.character.addCoins(fx.invasion.reward.coins);
+        sfx.levelUp();
+      } else {
+        this.hud.toast(def.outro, 3);
+      }
+      this.saveNow();
+    }
+    this.eventHudKey = -1;
+  }
+
+  /** The event's line under the quest: name, time left, invasion progress. Rebuilt once a second. */
+  private eventQuestText(): { title: string; lines: string[] } | null {
+    const a = this.events.active;
+    if (!a) return null;
+    const secs = Math.max(0, Math.ceil(a.left));
+    const key = secs + (a.defeated ?? 0) * 10000 + WORLD_EVENT_IDS_INDEX[a.id] * 1e6;
+    if (key === this.eventHudKey && this.eventQuest) return this.eventQuest;
+    this.eventHudKey = key;
+    const q = this.story.questText();
+    const def = WORLD_EVENTS[a.id];
+    const time = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    const line =
+      a.total !== undefined
+        ? `✷ ${def.name}: ${a.defeated ?? 0}/${a.total} (${time})`
+        : a.element
+          ? `✷ ${def.name} — ${ELEMENTS[a.element].name} (${time})`
+          : `✷ ${def.name} (${time})`;
+    this.eventQuest = { title: q.title, lines: [...q.lines, line] };
+    return this.eventQuest;
+  }
+
+  /** A purchase from the merchant: stock from the event, coins from the character, item into the bag. */
+  private buyFromMerchant(index: number): string {
+    const res = this.events.buy(index, this.character.coins);
+    if (!res.ok) return res.reason === 'koin' ? 'Koinmu tidak cukup.' : res.reason === 'habis' ? 'Sudah habis terjual.' : 'Pedagang sudah pergi.';
+    const added = this.character.inventory.add(res.offer.item, 1, res.offer.rarity);
+    if (added.added <= 0) {
+      // put the stock back: nothing was taken
+      const a = this.events.active;
+      if (a?.stock) a.stock[index]++;
+      return 'Tas penuh! Buang sesuatu dulu.';
+    }
+    this.character.addCoins(-res.offer.price);
+    sfx.pickup();
+    this.saveNow(true);
+    return `${itemDef(res.offer.item)?.name ?? res.offer.item} masuk tas.`;
+  }
+
+  /** Developer menu: start any event now, or end the running one. */
+  devEvent(id: WorldEventId | null): string {
+    if (id === null) {
+      const change = this.events.end(false);
+      this.applyEventChange(change);
+      return change ? `${change.def.name} diakhiri.` : 'Tidak ada event berjalan.';
+    }
+    const running = this.events.active;
+    if (running) this.applyEventChange(this.events.end(false));
+    this.applyEventChange(this.events.start(id));
+    return `${WORLD_EVENTS[id].name} dimulai.`;
   }
 
   /** The Karakter panel's portrait, made on first use (see `Portrait3D` for what it costs). */
@@ -643,8 +807,10 @@ export class Game3D {
    * EXP from a kill, a discovery or a quest stage. Levels are announced, because a number quietly
    * going up in a menu nobody has open is not a reward.
    */
-  gainExp(amount: number, x?: number, y?: number): void {
-    if (amount <= 0) return;
+  gainExp(rawAmount: number, x?: number, y?: number): void {
+    // the full moon (and any other event with an EXP multiplier)
+    const amount = Math.round(rawAmount * (this.events.effects.expMult ?? 1));
+    if (!(amount > 0)) return;
     const levels = this.character.addExp(amount);
     if (x !== undefined && y !== undefined) this.hud.float(u(x), 1.5, u(y), `+${amount} EXP`, '#a795ff', false);
     if (levels.length) {
@@ -673,6 +839,9 @@ export class Game3D {
     // A kill gives at most one thing — a stream of pickups turns a fight into paperwork — while a
     // chest is the reward for exploring and rolls its whole table.
     const drops = rollDrops(kind, Math.random, kind === 'chest' ? Infinity : 1);
+    // the mysterious fog: kills roll their table again (a 2x multiplier = one extra roll)
+    const extra = kind === 'chest' ? 0 : (this.events.effects.dropMult ?? 1) - 1;
+    if (extra > 0 && Math.random() < extra) drops.push(...rollDrops(kind, Math.random, 1));
     let overflowed = false;
     let lifted = 0;
     for (const drop of drops) {
@@ -862,7 +1031,7 @@ export class Game3D {
 
   /** The developer menu holds the world still while it is open, like the pause menu. */
   setDevPaused(on: boolean): void {
-    this.paused = on || this.pause.isOpen || this.sheet.isOpen;
+    this.paused = on || this.pause.isOpen || this.sheet.isOpen || this.shop.isOpen;
     input.enabled = !this.paused && !this.dialogue.open;
     if (on) input.reset();
     this.hud.setVisible(!on);
@@ -1155,6 +1324,7 @@ export class Game3D {
     if (!this.hero.alive) return;
     if (!force && boss && boss.awake && !boss.dead) return;
     this.state.dayTime = this.dayTime;
+    this.state.events = this.events.toJSON();
     saveGame(this.state.toJSON({ x: this.hero.x, y: this.hero.y, hp: this.hero.hp }, this.character.toJSON()));
   }
 
@@ -1181,6 +1351,7 @@ export class Game3D {
     if (!this.paused && dt > 0) {
       this.dayTime = (this.dayTime + simDt / DAY_SECONDS) % 1;
       this.updateHero(simDt);
+      this.updateEvents(simDt);
       this.enforceAreaGate(dt);
       this.combat.update(simDt, dt, this.hero);
       this.camera.follow(u(this.hero.x), u(this.hero.y), dt);
@@ -1507,6 +1678,7 @@ export class Game3D {
     this.csOverlay.destroy();
     this.pause.destroy();
     this.sheet.destroy();
+    this.shop.destroy();
     this.dialogue.destroy();
     this.hud.destroy();
     this.combat.dispose();

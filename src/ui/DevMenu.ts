@@ -86,6 +86,10 @@ export interface DevActions {
   weathers(): DevOption[];
   weather(): string;
   setWeather(id: string): string;
+  /** World events: every one by id, which is running, and start / end. */
+  worldEvents(): DevOption[];
+  activeEvent(): string | null;
+  startEvent(id: string | null): string;
 
   godMode(): boolean;
   setGodMode(on: boolean): string;
@@ -102,7 +106,7 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: 'level', label: 'Level & EXP' },
   { id: 'musuh', label: 'Musuh & Boneka' },
   { id: 'teleport', label: 'Teleport' },
-  { id: 'dunia', label: 'Jam & Cuaca' },
+  { id: 'dunia', label: 'Jam, Cuaca & Event' },
   { id: 'lain', label: 'Lainnya' },
 ];
 
@@ -343,7 +347,15 @@ export class DevMenu {
           b.classList.toggle('on', w.id === now);
           return b;
         })));
-        this.main.appendChild(this.note('Cuaca baru bisa diatur dari sini; belum ada sistem cuaca yang berubah sendiri.'));
+        this.main.appendChild(this.note('Cuaca juga berubah sendiri saat event Badai, Kabut, atau Purnama berjalan.'));
+        this.main.appendChild(this.h('EVENT DUNIA'));
+        const running = a.activeEvent();
+        this.main.appendChild(this.row(...a.worldEvents().map((w) => {
+          const b = this.btn(w.label, () => a.startEvent(w.id));
+          b.classList.toggle('on', w.id === running);
+          return b;
+        }), this.btn('Akhiri event', () => a.startEvent(null))));
+        this.main.appendChild(this.note('Event juga muncul sendiri setelah tutorial: dicek tiap 90 detik bermain, peluang 40%.'));
         break;
       }
       case 'lain': {

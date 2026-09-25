@@ -86,6 +86,10 @@ export class NpcMesh3D {
       this.box(0.46 * small, torsoH, 0.3 * small, look.tunic[1], legLen + torsoH / 2);
       this.box(0.48 * small, 0.08, 0.32 * small, look.trim, legLen + 0.08);
     }
+    if (look.pack) {
+      this.box(0.4 * small, 0.5 * small, 0.24, look.pack, legLen + torsoH * 0.62, -0.26 * small);
+      this.box(0.44 * small, 0.08, 0.28, shade(look.pack, -0.25), legLen + torsoH * 0.95, -0.26 * small);
+    }
     if (look.apron) this.box(0.4 * small, torsoH * 0.7, 0.06, look.apron, legLen + torsoH * 0.45, 0.16 * small);
 
     const shoulder = legLen + torsoH;

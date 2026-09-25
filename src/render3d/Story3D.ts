@@ -53,6 +53,8 @@ export interface StoryHooks {
   questNote(text: string): void;
   /** The tutorial hands over its Lantern Core: add it, equip it, apply the sheet. */
   grantCore?(itemId: string): void;
+  /** The wandering merchant was spoken to: open the shop. */
+  shop?(): void;
 }
 
 export class Story3D {
@@ -220,9 +222,48 @@ export class Story3D {
     if (ev.type !== 'kill' || r.message) this.hooks.save();
   }
 
+  /** The wandering merchant of the world event, while one is in town. */
+  private merchant: NpcMesh3D | null = null;
+
+  /**
+   * Put the merchant in the plaza (`at` in px), or send them on their way (`null`).
+   *
+   * An ordinary villager body and an ordinary interactable — "Dagang" instead of "Bicara" — that
+   * only answers while the event lasts, so the contextual button and the marker work unchanged.
+   */
+  setMerchant(at: { x: number; y: number } | null): void {
+    if (this.merchant) {
+      const i = this.npcs.indexOf(this.merchant);
+      if (i >= 0) this.npcs.splice(i, 1);
+      this.merchant.dispose();
+      this.merchant = null;
+      this.marksCache = null;
+    }
+    this.interactables = this.interactables.filter((it) => it.id !== 'pedagang');
+    if (!at) return;
+    this.merchant = new NpcMesh3D(this.scene, { id: 'pedagang', name: 'Pedagang Keliling', look: 'merchant', x: at.x, y: at.y });
+    this.merchant.setMarker('quest');
+    this.npcs.push(this.merchant);
+    this.marksCache = null;
+    this.interactables.push({
+      id: 'pedagang',
+      x: at.x,
+      y: at.y,
+      range: 44,
+      label: () => (this.merchant ? 'Dagang' : null),
+      interact: () => this.hooks.shop?.(),
+      markerLift: 2.2,
+    });
+  }
+
+  get merchantHere(): boolean {
+    return this.merchant !== null;
+  }
+
   private refreshMarkers(): void {
     const stage = this.state.quest.stage;
     for (const npc of this.npcs) {
+      if (npc.def.id === 'pedagang') continue;
       if (npc.def.id !== 'wulan') {
         npc.setMarker(null);
         continue;

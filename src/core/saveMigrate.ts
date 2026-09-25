@@ -124,6 +124,8 @@ export function sanitizeSave(value: unknown, maxHp = Infinity, notes: string[] =
     // Left as-is; `Character.load` does its own validation because it owns the item catalogue.
     character: isObj(value.character) ? (value.character as unknown as CharacterJson) : undefined,
     cutscenesSeen: Array.isArray(value.cutscenesSeen) ? value.cutscenesSeen.filter((x): x is string => typeof x === 'string') : [],
+    // passed through as-is: `WorldEventDirector.load` checks every field of it
+    events: isObj(value.events) ? value.events : undefined,
   };
 }
 

@@ -13,7 +13,7 @@ export interface SpawnDef {
   count?: number | undefined;
 }
 
-export type NpcLook = 'elder' | 'smith' | 'kid' | 'guard';
+export type NpcLook = 'elder' | 'smith' | 'kid' | 'guard' | 'merchant';
 
 export interface NpcDef {
   id: string;

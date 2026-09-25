@@ -26,6 +26,8 @@ export interface Look {
   sword?: boolean;
   staff?: boolean;
   apron?: Color;
+  /** A travelling pack on the back (the wandering merchant). */
+  pack?: Color;
 }
 
 export interface Pose {
@@ -523,6 +525,18 @@ export const NPC_LOOKS: Record<string, Look> = {
     pants: P.s1,
     boots: P.o1,
     beard: P.o1,
+  },
+  /** The wandering merchant of the world event: a deep blue travelling coat and a big pack. */
+  merchant: {
+    skin: [P.h0, P.h1, P.h2],
+    hair: [P.s3, P.s4, P.s5],
+    hairStyle: 'cap',
+    tunic: [P.b0, P.b1, P.b2],
+    trim: P.d4,
+    pants: P.o1,
+    boots: P.o0,
+    scarf: [P.r1, P.r2],
+    pack: P.d2,
   },
 };
 
