@@ -127,6 +127,10 @@ test('the UI layers in the right order, so no panel opens behind another', () =>
   assert.ok(z.get('DevMenu')! > z.get('SettingsPanel')!, 'the developer menu is opened from Settings');
   assert.ok(zOf('.lm-dm') > z.get('SettingsPanel')!, 'the Download Manager is opened from Settings');
   assert.ok(zOf('.lm-dr') > z.get('CharacterPanel')! && zOf('.lm-dr') < z.get('SettingsPanel')!, 'the data prompt covers the game but not Settings');
+  // the Layar Penuh button has to be tappable on the title screen, and never cover a menu
+  const fsCss = /const CSS = `([\s\S]*?)`;/.exec(readFileSync('src/ui/fullscreen.ts', 'utf8'))?.[1] ?? '';
+  const fsZ = Number(/\.lm-fsprompt\s*\{[^}]*z-index:\s*(\d+)/.exec(fsCss)?.[1] ?? 0);
+  assert.ok(fsZ > z.get('TitleScreen')! && fsZ < z.get('PauseMenu')! + 10 && fsZ < z.get('SettingsPanel')!, `fullscreen prompt at ${fsZ}`);
 
   // and the error panel in index.html stays on top of all of it
   const html = readFileSync('index.html', 'utf8');

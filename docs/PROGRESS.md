@@ -1100,3 +1100,33 @@ Tes: `tests/arrows.test.ts` (10) dan dua tambahan di `tests/combat3d.test.ts`.
 - Tes: `tests/portrait.test.ts` (3) — warna dari rarity, helm/pelindung bahu muncul/hilang, potret
   masuk ke panel, 10 gambar/dtk saat tampil, nol saat tertutup, satu gambar saat gear berganti.
   (Piksel sungguhan hanya bisa dicek di HP: stub GL tidak bisa mengompilasi shader.)
+
+## Layar judul, akun wajib, layar penuh
+
+**Alur baru:** logo (lentera bercahaya) → **"Sentuh untuk memulai"** → **Masuk / Daftar** → menu
+(Lanjutkan, Main Baru, Pengaturan, Akun, Kredit). Ketukan pertama itu adalah satu-satunya gestur
+pengguna yang pasti ada, jadi di situlah musik tema (`title`, "Lentera Malam") mulai dan layar penuh
+diminta. Tidak ada opsi "Main sebagai Tamu".
+
+**Akun (lokal dulu, `core/account/`):**
+- `AuthAdapter` = antarmuka yang nanti diganti adapter server (Batch 7). Sekarang `LocalAuth`.
+- Kata sandi **tidak pernah disimpan**: hanya hash PBKDF2-SHA-256 (Web Crypto, 310 000 iterasi,
+  salt acak 16 byte per akun). Tes mencari kata sandi di seluruh isi storage dan tidak menemukannya.
+  Perbandingan konstan-waktu; salah 5 kali → jeda bertahap (5 dtk, 10 dtk, … maks 5 menit).
+- Nama akun 3–20 huruf kecil/angka/_; kata sandi minimal 8 karakter.
+- **Peringatan di form Daftar**, sebelum kata sandi dibuat: akun hanya tersimpan di perangkat ini,
+  hilang kalau data browser dibersihkan, tidak bisa dipakai di HP lain, dan jangan pakai kata sandi
+  yang sama dengan akun penting. Tidak ada kata "aman".
+- Browser tanpa Web Crypto (halaman http://) tidak diberi akun lemah: layar menjelaskan perlu HTTPS.
+- **Save per akun** (`save/v1@<akun>`): dua orang di satu HP tidak saling menimpa. Akun pertama yang
+  masuk di HP yang sudah punya progres **mengadopsi** save lama itu.
+- **Jalur pengembang:** tombol "LEWATI LOGIN (MODE PENGEMBANG)" hanya di build dev/staging; teks dan
+  tombolnya tidak ada di bundle rilis (dicek).
+
+**Layar penuh (`ui/fullscreen.ts`):** diputar ke landscape → coba masuk layar penuh; kalau browser
+menolak (butuh ketukan), muncul tombol **⛶ Layar Penuh** di atas tengah (bisa ditutup ×, muncul
+lagi setelah HP diputar). Setelah masuk, orientasi dikunci ke landscape kalau didukung (iOS tidak).
+Masuk/keluar layar penuh memicu resize dua kali (langsung dan setelah 350 ms) supaya ukuran render
+tidak salah. Tombol ⛶ di HUD memakai aturan yang sama.
+
+Tes: `account` (7), `title` (7), `fullscreen` (4), plus lapisan z tombol Layar Penuh di `layout`.

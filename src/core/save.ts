@@ -10,9 +10,37 @@ import { readRaw, removeRaw, writeRaw } from './storage';
  * `LEGACY_SAVE_KEY` and are adopted by `readRaw`; `migrateSave` (which needs the world) then makes
  * sure the position they hold still exists — see `saveMigrate.ts`.
  */
+/**
+ * Whose save this is. Every account has its own (`lentera-malam/save/v1@<akun>`), so two people on
+ * one phone never overwrite each other. Empty = the unscoped key, which is what the developer
+ * skip-login path and the tests use, and what every save written before accounts existed is under.
+ */
+let scope = '';
+
+const keyOf = (): string => (scope ? `${SAVE_KEY}@${scope}` : SAVE_KEY);
+
+/**
+ * File saves under an account from now on.
+ *
+ * The first account to log in on a phone that already has progress **adopts** it: the unscoped
+ * save moves under that account instead of the player starting over because accounts arrived.
+ * Only when that account has no save of its own — nothing is ever overwritten.
+ */
+export function setSaveScope(account: string | null): void {
+  scope = account ?? '';
+  if (!scope || readRaw(keyOf()) !== null) return;
+  const legacy = readRaw(SAVE_KEY, LEGACY_SAVE_KEY);
+  if (legacy === null) return;
+  if (writeRaw(keyOf(), legacy)) removeRaw(SAVE_KEY);
+}
+
+export function saveScope(): string {
+  return scope;
+}
+
 export function saveGame(data: SaveData): boolean {
   if (wiped) return false;
-  return writeRaw(SAVE_KEY, JSON.stringify(data));
+  return writeRaw(keyOf(), JSON.stringify(data));
 }
 
 /** Set by `wipeSave`: nothing may write a save again until the page reloads. */
@@ -20,7 +48,7 @@ let wiped = false;
 
 export function loadGame(): SaveData | null {
   try {
-    const raw = readRaw(SAVE_KEY, LEGACY_SAVE_KEY);
+    const raw = scope ? readRaw(keyOf()) : readRaw(SAVE_KEY, LEGACY_SAVE_KEY);
     if (!raw) return null;
     return sanitizeSave(JSON.parse(raw));
   } catch {
@@ -33,7 +61,8 @@ export function hasSave(): boolean {
 }
 
 export function clearSave(): void {
-  removeRaw(SAVE_KEY, LEGACY_SAVE_KEY);
+  if (scope) removeRaw(keyOf());
+  else removeRaw(SAVE_KEY, LEGACY_SAVE_KEY);
 }
 
 /**

@@ -129,6 +129,24 @@ export const TRACKS: Record<string, TrackDef> = {
     gain: 1,
   },
 
+  /**
+   * The title theme. The village's melody slowed down and lifted an octave over a held pad: the
+   * first thing the player hears is the tune they will later walk around Ravenhollow to, heard
+   * from far away at night.
+   */
+  title: {
+    id: 'title',
+    name: 'Lentera Malam',
+    bpm: 64,
+    root: 45,
+    scale: DORIAN,
+    chords: [[0, 3, 7], [-4, 0, 3], [-2, 2, 5], [0, 3, 7], [0, 3, 7], [-4, 0, 3], [-5, -1, 2], [-5, -1, 2]],
+    lead: { pattern: [4, -1, -1, 3, 2, -1, -1, -1, 0, -1, 2, -1, 3, -1, -1, -1], type: 'triangle', gain: 0.06, octave: 1, length: 1.4 },
+    bass: { pattern: [0, -1, -1, -1, -1, -1, -1, -1, 4, -1, -1, -1, -1, -1, -1, -1], type: 'sine', gain: 0.07, octave: -2, length: 3.2 },
+    pad: { type: 'sine', gain: 0.05 },
+    gain: 0.85,
+  },
+
   /** The prologue: no pulse at all, just two notes and the rain. */
   intro: {
     id: 'intro',

@@ -40,12 +40,16 @@ void CharacterPanel;
 // every overlay that injects a stylesheet, so the cascade below sees all of them at once
 const debug = new DebugUi(doc.body as unknown as HTMLElement);
 let titleOpened = 0;
+const session = { id: 'uji', name: 'uji', kind: 'local' as const, since: 0 };
 const title = new TitleScreen(doc.body as unknown as HTMLElement, {
   settings: () => {
     titleOpened++;
     debug.openSettings();
   },
+  // a remembered account, so the first tap goes straight to the main menu
+  auth: { kind: 'local', current: () => session, login: async () => ({ ok: true, session }), register: async () => ({ ok: true, session }), logout: async () => undefined },
 });
+title.start();
 // built only for their stylesheets
 const others = [new Hud(doc.body as unknown as HTMLElement), new Dialogue(doc.body as unknown as HTMLElement)];
 const pause = new PauseMenu(

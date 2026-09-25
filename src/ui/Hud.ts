@@ -9,6 +9,7 @@
  * Nothing here is interactive except the fullscreen button, so the whole layer is
  * `pointer-events: none` and taps fall straight through to the game.
  */
+import { fullscreen } from './fullscreen';
 import { el, injectStyle, onTap } from './dom';
 import { settings } from '../core/settings';
 
@@ -481,18 +482,10 @@ export class Hud {
     }
   }
 
+  /** The corner button: the same policy as everywhere else (`ui/fullscreen.ts`). */
   private async toggleFullscreen(): Promise<void> {
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-        return;
-      }
-      await document.documentElement.requestFullscreen();
-      const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
-      await o?.lock?.('landscape').catch(() => undefined);
-    } catch {
-      /* a browser that refuses fullscreen is not an error worth showing */
-    }
+    if (typeof document === 'undefined') return;
+    await fullscreen().toggle();
   }
 
   destroy(): void {

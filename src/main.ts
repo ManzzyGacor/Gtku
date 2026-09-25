@@ -18,6 +18,8 @@ import { installErrorOverlay, recordError } from './core/errors';
 import { safeInsets } from './ui/safearea';
 import { ensureDebugUi } from './ui/DebugUi';
 import { TitleScreen } from './ui/TitleScreen';
+import { fullscreen } from './ui/fullscreen';
+import { browserAuthDeps, LocalAuth } from './core/account/local';
 
 installErrorOverlay();
 // Resolve the notch/rounded-corner insets once, up front: every panel's CSS reads the custom
@@ -39,7 +41,24 @@ const host = document.getElementById('game') ?? document.body;
 
 async function boot(): Promise<void> {
   document.getElementById('boot-msg')?.remove();
-  const title = new TitleScreen(document.body, { settings: () => debug.openSettings() });
+  // turning the phone to landscape asks for fullscreen; a refusal shows the Layar Penuh button
+  fullscreen().install();
+  const deps = browserAuthDeps();
+  const title = new TitleScreen(document.body, {
+    settings: () => debug.openSettings(),
+    auth: deps ? new LocalAuth(deps) : null,
+    // the first tap is the gesture both of these need
+    started: () => {
+      void fullscreen().enter();
+      void import('./core/audio').then(({ bus }) => bus.music('title', 2.5));
+    },
+    /*
+     * A way past the login for testing, in developer builds only. Written as the literal
+     * import.meta.env expression (not a helper call) so a release build compiles this to
+     * undefined and the button's text never reaches the bundle — tests/devmode.test.ts checks.
+     */
+    devSkip: import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1' ? { label: 'LEWATI LOGIN (MODE PENGEMBANG)' } : undefined,
+  });
   // Start the download now, not after the tap: by the time anyone reads the menu it is usually in.
   const loading = import('./render3d/boot3d');
   const choice = await title.choice();

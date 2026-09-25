@@ -17,6 +17,7 @@ import { el, injectStyle, onTap } from '../ui/dom';
 import { recordError } from '../core/errors';
 import type { DebugUi } from '../ui/DebugUi';
 import { TouchControls } from '../ui/TouchControls';
+import { fullscreen } from '../ui/fullscreen';
 
 export interface Booted3D {
   game: Game3D;
@@ -143,11 +144,19 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
     { canvas: game.pixels.canvas },
   ).install();
 
+  // entering or leaving fullscreen resizes the viewport, sometimes only after a beat
+  const offFullscreen = fullscreen().onChange(() => {
+    invalidateInsets();
+    game.resize();
+    controls.layout();
+  });
+
   return {
     game,
     controls,
     dispose: () => {
       dev.dispose();
+      offFullscreen();
       lifecycle.dispose();
       notice(null);
       controls.destroy();
