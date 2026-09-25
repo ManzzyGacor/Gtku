@@ -29,13 +29,18 @@ export interface PixelPlan {
 /**
  * @param pixelHeight rows in the art grid (the "pixel size" dial)
  * @param renderScale fraction of that actually rendered (the performance dial)
+ * @param canvasScale fraction of the device's resolution the *canvas* gets (the browser stretches
+ *   it to the screen). The canvas is the one cost no other dial touches: the final upscale pass
+ *   and the browser's compositing both run once per device pixel — 2.6 million on the tester's
+ *   phone — whatever the render scale.
  */
-export function planPixelBuffers(cssW: number, cssH: number, dpr: number, pixelHeight: number, renderScale: number): PixelPlan {
+export function planPixelBuffers(cssW: number, cssH: number, dpr: number, pixelHeight: number, renderScale: number, canvasScale = 1): PixelPlan {
   const safeDpr = dpr > 0 ? dpr : 1;
   const wantW = Math.max(1, Math.round(cssW * safeDpr));
   const wantH = Math.max(1, Math.round(cssH * safeDpr));
   // Guard against absurd buffers on huge screens — by shrinking the buffer, never by cropping.
-  const shrink = Math.min(1, Math.sqrt(MAX_CANVAS_PIXELS / (wantW * wantH)));
+  const cs = Math.max(0.35, Math.min(1, Number.isFinite(canvasScale) ? canvasScale : 1));
+  const shrink = Math.min(cs, Math.sqrt(MAX_CANVAS_PIXELS / (wantW * wantH)));
   const canvasW = Math.max(1, Math.round(wantW * shrink));
   const canvasH = Math.max(1, Math.round(wantH * shrink));
   const aspect = canvasW / canvasH;

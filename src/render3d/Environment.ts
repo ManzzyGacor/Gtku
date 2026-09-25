@@ -257,6 +257,10 @@ export class Environment {
     this.budget = Math.max(0, Math.min(1, v));
   }
 
+  get currentBudget(): number {
+    return this.budget;
+  }
+
   /**
    * @param realDt  seconds since the last frame
    * @param focus   where the camera is looking, in world units

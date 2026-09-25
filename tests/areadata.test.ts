@@ -129,6 +129,46 @@ test('a teleport never waits for an inflate', () => {
   w3d.dispose();
 });
 
+test('without a pack, a chunk is baked by the worker — not on the frame', () => {
+  const w3d = new World3D(new THREE.Scene(), world, sheet);
+  w3d.setRenderDistance(1);
+  const pending = new Set<string>();
+  const ready = new Map<string, Pixmap>();
+  const fake = {
+    available: true,
+    ground: (cx: number, cy: number) => {
+      const k = `${cx},${cy}`;
+      const pm = ready.get(k);
+      if (pm) return pm;
+      pending.add(k);
+      return 'pending' as const;
+    },
+    prefetch: (cx: number, cy: number) => void pending.add(`${cx},${cy}`),
+    trim: () => undefined,
+  };
+  w3d.baker = fake as never;
+  const focus = new THREE.Vector3(120, 0, 60);
+  for (let i = 0; i < 5; i++) w3d.update(0.5, focus, 0, 1, 1 / 60);
+  assert.equal(w3d.groundStats.baked, 0, 'nothing baked on the main thread while the worker works');
+  assert.ok(pending.size > 0, 'the worker was asked');
+  // the worker answers
+  for (const k of pending) ready.set(k, new Pixmap(256, 256));
+  for (let i = 0; i < 40; i++) w3d.update(0.5, focus, 0, 1, 1 / 60);
+  assert.ok(w3d.groundStats.worker > 0, `from the worker: ${JSON.stringify(w3d.groundStats)}`);
+  assert.equal(w3d.groundStats.baked, 0);
+  w3d.dispose();
+});
+
+test('a worker that never answers is not a hole in the world: the main thread bakes after the wait', () => {
+  const w3d = new World3D(new THREE.Scene(), world, sheet);
+  w3d.setRenderDistance(1);
+  w3d.baker = { available: true, ground: () => 'pending', prefetch: () => undefined, trim: () => undefined } as never;
+  const focus = new THREE.Vector3(120, 0, 60);
+  for (let i = 0; i < 150; i++) w3d.update(0.5, focus, 0, 1, 1 / 60);
+  assert.ok(w3d.stats().chunks > 0 && w3d.groundStats.baked > 0);
+  w3d.dispose();
+});
+
 // ───────────────────────────── the gate, on the real game ─────────────────────────────
 
 let env: GameHarness;

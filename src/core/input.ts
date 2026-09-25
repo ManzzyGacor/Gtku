@@ -94,8 +94,15 @@ export class InputHub {
   }
 
   /** Movement vector, length ≤ 1. Keyboard is digital (normalised), touch is analog. */
+  /** Reused by `axis()`: it is read several times a frame, and a fresh object each time is garbage. */
+  private readonly axisOut = { x: 0, y: 0 };
+
+  /** The movement direction. The returned object is reused — read it, do not keep it. */
   axis(): { x: number; y: number } {
-    if (!this.enabled) return { x: 0, y: 0 };
+    const out = this.axisOut;
+    out.x = 0;
+    out.y = 0;
+    if (!this.enabled) return out;
     let x = 0;
     let y = 0;
     for (const k of this.keys) {
@@ -107,9 +114,13 @@ export class InputHub {
     }
     if (x !== 0 || y !== 0) {
       const l = Math.hypot(x, y);
-      return { x: x / l, y: y / l };
+      out.x = x / l;
+      out.y = y / l;
+      return out;
     }
-    return { x: this.stick.x, y: this.stick.y };
+    out.x = this.stick.x;
+    out.y = this.stick.y;
+    return out;
   }
 
   press(a: Action): void {

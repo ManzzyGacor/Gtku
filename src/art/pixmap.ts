@@ -41,6 +41,13 @@ export class Pixmap {
     this.data = new Uint8ClampedArray(w * h * 4);
   }
 
+  /** A pixmap over existing bytes (a worker's result, transferred without copying). */
+  static wrap(w: number, h: number, data: Uint8ClampedArray): Pixmap {
+    const p = Object.create(Pixmap.prototype) as Pixmap;
+    Object.assign(p, { w, h, data });
+    return p;
+  }
+
   clone(): Pixmap {
     const p = new Pixmap(this.w, this.h);
     p.data.set(this.data);

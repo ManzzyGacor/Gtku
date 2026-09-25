@@ -63,6 +63,7 @@ export const ROWS: Row[] = [
   { kind: 'header', label: 'Grafik', id: 'grafik' },
   { kind: 'choice', label: 'Preset', key: 'preset', hint: 'AUTO menyesuaikan sendiri dari FPS' },
   { kind: 'number', label: 'Skala render', key: 'renderScale', fmt: pct, hint: 'Lebih rendah = lebih ringan, pixel tetap sama' },
+  { kind: 'number', label: 'Resolusi kanvas', key: 'canvasScale', fmt: pct, hint: 'Ukuran gambar akhir di layar; turunkan bila berat di layar besar' },
   { kind: 'toggle', label: 'Bloom', key: 'bloom', hint: 'Cahaya mekar' },
   { kind: 'number', label: 'Partikel', key: 'gfxParticles', fmt: off(pct), hint: 'Kunang-kunang dan kabut melayang' },
   { kind: 'number', label: 'Angin rumput', key: 'gfxWind', fmt: off(pct), hint: 'Rumput dan daun bergoyang' },
@@ -76,7 +77,14 @@ export const ROWS: Row[] = [
     label: 'Kembalikan grafik',
     button: 'Reset',
     note: () => 'Semua komponen kembali mengikuti preset',
-    run: () => settings.reset([...GFX_KEYS, 'bloom', 'renderScale']),
+    run: () => settings.reset([...GFX_KEYS, 'bloom', 'renderScale', 'canvasScale']),
+  },
+  {
+    kind: 'action',
+    label: 'Reset AUTO',
+    button: 'Reset',
+    note: () => 'Kembalikan semua efek yang diturunkan AUTO',
+    run: (p) => p.resetAuto(),
   },
 
   { kind: 'header', label: 'Kamera', id: 'kamera' },
@@ -106,6 +114,7 @@ export const ROWS: Row[] = [
   { kind: 'header', label: 'Tampilan', id: 'tampilan' },
   { kind: 'number', label: 'Ukuran teks', key: 'textScale', fmt: (v) => `${v}x` },
   { kind: 'number', label: 'Kecepatan teks dialog', key: 'textSpeed', fmt: (v) => `${v}/dtk` },
+  { kind: 'number', label: 'Kecerahan', key: 'brightness', fmt: pct, hint: 'Terangkan bila layar HP atau gua terasa gelap' },
   {
     kind: 'action',
     label: 'Nama karakter',
@@ -439,6 +448,12 @@ export class SettingsPanel {
     }
   }
 
+  /** "Reset AUTO": the game gives back every effect AUTO took. */
+  resetAuto(): void {
+    const src = this.source();
+    this.showDump(src.resetAuto ? src.resetAuto() : 'AUTO tersedia setelah dunia dimuat.');
+  }
+
   /** Bring a group's header to the top of the list. */
   jumpTo(id: string): void {
     const h = this.heads.get(id);
@@ -611,6 +626,8 @@ export class SettingsPanel {
       this.showDump('Renderer ini tidak punya uji performa (mode 2D).');
       return;
     }
+    // measured on the running game: this panel pauses it, so it closes first
+    this.setOpen(false);
     src.startPerfProbe();
     if (this.probeTimer !== null) clearInterval(this.probeTimer);
     this.probeTimer = setInterval(() => {

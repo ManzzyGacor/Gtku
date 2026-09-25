@@ -17,7 +17,8 @@ interface Run {
   tuner: AutoTuner;
   meter: PerfMeter;
   presetMoves: string[];
-  run(fps: number, seconds: number, canDrop?: boolean, canRaise?: boolean): void;
+  /** `fps` may depend on the tuner: a phone where lowering helps gets faster as the rung rises. */
+  run(fps: number | ((t: AutoTuner) => number), seconds: number, canDrop?: boolean, canRaise?: boolean): void;
 }
 
 function harness(): Run {
@@ -29,9 +30,12 @@ function harness(): Run {
     meter,
     presetMoves,
     run(fps, seconds, canDrop = true, canRaise = true) {
-      for (let i = 0; i < Math.round(fps * seconds); i++) {
-        meter.push(1 / fps);
-        const r = tuner.update(1 / fps, canDrop, canRaise, 'Tinggi');
+      let t = 0;
+      while (t < seconds) {
+        const f = typeof fps === 'function' ? fps(tuner) : fps;
+        t += 1 / f;
+        meter.push(1 / f);
+        const r = tuner.update(1 / f, canDrop, canRaise, 'Tinggi');
         if (r?.preset) presetMoves.push(r.preset);
       }
     },
@@ -79,24 +83,31 @@ test('a healthy phone below the top climbs a preset, and the new one starts from
   assert.equal(h.tuner.rung, AUTO_PATH.length);
 });
 
+/** A phone where every step down buys 3 fps, starting at 25: lowering really helps, slowly. */
+const helpful = (t: AutoTuner): number => Math.min(47, 25 + t.rung * 3);
+
 test('a bad frame rate turns one dial, waits out the cooldown, then turns the next', () => {
   const h = harness();
-  h.run(25, 10);
+  h.run(helpful, 10);
   assert.equal(h.tuner.rung, 1, `one step, then a cooldown (at rung ${h.tuner.rung})`);
   assert.equal(h.tuner.decisions[0].dir, 'drop');
-  assert.ok(h.tuner.decisions[0].what.startsWith('partikel'), h.tuner.decisions[0].what);
+  assert.ok(h.tuner.decisions[0].what.startsWith('resolusi kanvas'), h.tuner.decisions[0].what);
   assert.ok(h.tuner.decisions[0].fps < FPS_FLOOR, 'the decision records the frame rate that caused it');
 
-  h.run(25, 60);
-  assert.ok(h.tuner.rung >= 4, `still bad: keeps stepping (rung ${h.tuner.rung})`);
+  h.run(helpful, 60);
+  assert.ok(h.tuner.rung >= 4, `still bad but improving: keeps stepping (rung ${h.tuner.rung})`);
+  assert.equal(h.tuner.stalled, null);
   assert.equal(h.presetMoves.length, 0, 'the preset is left alone while dials remain');
   for (const d of h.tuner.decisions) assert.equal(d.dir, 'drop', 'never raises while the frame rate is bad');
 });
 
 test('only when every dial is down does the preset itself drop', () => {
   const h = harness();
-  h.run(20, 600);
-  assert.ok(h.presetMoves.includes('drop'), 'eventually the pixel grid shrinks');
+  // one dial left; the last steps each helped, but it is still too slow
+  h.tuner.rung = AUTO_PATH.length - 1;
+  h.run((t) => (t.rung >= AUTO_PATH.length ? 30 + h.presetMoves.length * 10 : 26), 60);
+  assert.equal(h.tuner.decisions[0].what.includes('outline'), true, h.tuner.decisions[0]?.what);
+  assert.ok(h.presetMoves.includes('drop'), 'with every dial down, the pixel grid shrinks');
   const firstPresetDrop = h.tuner.decisions.findIndex((d) => d.what.startsWith('preset'));
   const dialDrops = h.tuner.decisions.slice(0, firstPresetDrop).length;
   // the history is capped, so check the invariant directly instead of counting from zero
@@ -170,7 +181,7 @@ test("the player's graphics caps only ever take away, and default to taking noth
   const mine = playerLevels({ ...DEFAULTS, gfxOutline: 0, gfxLights: 1, bloom: false });
   const out = { ...FULL };
   // AUTO has dropped particles; the player has dropped outline, lights and bloom — both apply
-  minLevels(levelsAt(1), mine, out);
+  minLevels(levelsAt(2), mine, out);
   assert.equal(out.particles, 0.5, 'AUTO still trims');
   assert.equal(out.outline, 0, 'the player turned the outline off');
   assert.equal(out.lights, 1);
@@ -179,4 +190,29 @@ test("the player's graphics caps only ever take away, and default to taking noth
   // a player cap can never lift something AUTO lowered
   minLevels(levelsAt(AUTO_PATH.length), playerLevels(DEFAULTS), out);
   assert.deepEqual(out, levelsAt(AUTO_PATH.length));
+});
+
+test('drops that do not raise the frame rate stop AUTO, and their effects come back', () => {
+  // the tester's phone: 44 fps whatever AUTO turns off
+  const h = harness();
+  h.run(44, 120);
+  assert.ok(h.tuner.stalled, 'AUTO concluded that graphics are not the cause');
+  assert.equal(h.tuner.rung, 0, 'every effect it took is back');
+  const stop = h.tuner.decisions.find((d) => d.dir === 'stop');
+  assert.ok(stop, JSON.stringify(h.tuner.decisions));
+  const drops = h.tuner.decisions.filter((d) => d.dir === 'drop').length;
+  assert.ok(drops <= 2, `it gave up after ${drops} useless drops, not twelve`);
+  // and it stays put
+  h.run(44, 300);
+  assert.equal(h.tuner.rung, 0);
+  assert.equal(h.presetMoves.length, 0);
+});
+
+test('Reset AUTO clears the verdict so AUTO watches again', () => {
+  const h = harness();
+  h.run(44, 120);
+  assert.ok(h.tuner.stalled);
+  h.tuner.reset();
+  assert.equal(h.tuner.stalled, null);
+  assert.equal(h.tuner.rung, 0);
 });

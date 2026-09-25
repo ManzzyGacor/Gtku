@@ -272,8 +272,8 @@ export class PixelRenderer {
    * @param pixelHeight rows in the art grid (the "pixel size" dial)
    * @param renderScale fraction of that actually rendered (the performance dial)
    */
-  resize(cssW: number, cssH: number, dpr: number, pixelHeight: number, renderScale: number): PixelPlan {
-    const plan = planPixelBuffers(cssW, cssH, dpr, pixelHeight, renderScale);
+  resize(cssW: number, cssH: number, dpr: number, pixelHeight: number, renderScale: number, canvasScale = 1): PixelPlan {
+    const plan = planPixelBuffers(cssW, cssH, dpr, pixelHeight, renderScale, canvasScale);
     const { canvasW, canvasH, renderW, renderH } = plan;
     this.plan = plan;
 
@@ -306,6 +306,10 @@ export class PixelRenderer {
     this.quadMaterial.uniforms.uOutline.value = on && this.canOutline ? 1 : 0;
   }
 
+  get outlineOn(): boolean {
+    return this.quadMaterial.uniforms.uOutline.value === 1;
+  }
+
   /** Bloom strength, vignette depth and the colour grade, all driven by time of day. */
   setGrade(g: GradeSettings): void {
     this.bloomEnabled = g.bloom > 0.001;
@@ -315,10 +319,32 @@ export class PixelRenderer {
     (this.quadMaterial.uniforms.uGradeGain.value as THREE.Color).copy(g.gain);
   }
 
+  /**
+   * What the last frame cost, read *after* all of its passes.
+   *
+   * `renderer.info` resets itself at the start of every `render()` call by default, and a frame
+   * here is four or five calls (scene, bloom ×2, composite, blit). The report read it after the
+   * last one — the blit quad — and printed "1 draw call, 0k triangles" for a full 3D scene. Now it
+   * is reset once per frame, and the scene pass's own numbers are kept separately.
+   */
+  readonly frameStats = { sceneCalls: 0, sceneTriangles: 0, calls: 0, triangles: 0, sceneMs: 0, postMs: 0, gpuSceneMs: -1, gpuPostMs: -1 };
+  private gpu: GpuTimer | null = null;
+
   render(camera: THREE.Camera): void {
+    const info = this.renderer.info;
+    info.autoReset = false;
+    info.reset();
+    this.gpu ??= GpuTimer.create(this.renderer.getContext());
+    const t0 = now();
+    this.gpu?.begin(0);
     this.renderer.setRenderTarget(this.target);
     this.renderer.clear();
     this.renderer.render(this.scene, camera);
+    this.gpu?.end();
+    const t1 = now();
+    this.frameStats.sceneCalls = info.render.calls;
+    this.frameStats.sceneTriangles = info.render.triangles;
+    this.gpu?.begin(1);
 
     if (this.bloomEnabled) {
       // bright pass + horizontal blur, then vertical blur
@@ -340,11 +366,32 @@ export class PixelRenderer {
     this.renderer.render(this.quadScene, this.quadCamera);
     this.renderer.setRenderTarget(null);
     this.renderer.render(this.blitScene, this.quadCamera);
+    this.gpu?.end();
+    const fs = this.frameStats;
+    fs.sceneMs = t1 - t0;
+    fs.postMs = now() - t1;
+    fs.calls = info.render.calls;
+    fs.triangles = info.render.triangles;
+    if (this.gpu) {
+      this.gpu.poll();
+      fs.gpuSceneMs = this.gpu.ms[0];
+      fs.gpuPostMs = this.gpu.ms[1];
+    }
   }
 
-  /** Live draw calls, for the report. */
+  /** Whether a GPU timer is available on this device (EXT_disjoint_timer_query_webgl2). */
+  get gpuTiming(): boolean {
+    return !!this.gpu;
+  }
+
+  /** Whether bloom passes run this frame (for the probe's check that "no bloom" really is none). */
+  get bloomOn(): boolean {
+    return this.bloomEnabled;
+  }
+
+  /** Draw calls of the whole last frame, for the report. */
   get drawCalls(): number {
-    return this.renderer.info.render.calls;
+    return this.frameStats.calls;
   }
 
   dispose(): void {
@@ -358,5 +405,70 @@ export class PixelRenderer {
     this.blurMaterial.dispose();
     this.renderer.dispose();
     this.canvas.remove();
+  }
+}
+
+const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+type TimerExt = { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number };
+
+/**
+ * GPU time of the scene pass and of the post passes, where the phone offers
+ * `EXT_disjoint_timer_query_webgl2` (many Android GPUs do; iOS does not).
+ *
+ * CPU laps only say how long JavaScript took to *submit* the draw calls; the GPU works on them
+ * later. This is the one way to know whether the graphics card itself is the bottleneck. Queries
+ * finish a few frames late, so there is a small ring of them, polled each frame, averaged.
+ */
+class GpuTimer {
+  readonly ms = new Float64Array(2).fill(-1);
+  private readonly ring: { q: WebGLQuery; slot: number }[] = [];
+  private active: { q: WebGLQuery; slot: number } | null = null;
+
+  private constructor(
+    private readonly gl: WebGL2RenderingContext,
+    private readonly ext: TimerExt,
+  ) {}
+
+  static create(gl: WebGLRenderingContext | WebGL2RenderingContext): GpuTimer | null {
+    try {
+      const g2 = gl as WebGL2RenderingContext;
+      if (typeof g2.createQuery !== 'function') return null;
+      const ext = g2.getExtension('EXT_disjoint_timer_query_webgl2') as TimerExt | null;
+      return ext && typeof ext.TIME_ELAPSED_EXT === 'number' ? new GpuTimer(g2, ext) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  begin(slot: number): void {
+    // at most a handful in flight: a slow GPU simply gets fewer samples
+    if (this.active || this.ring.length > 8) return;
+    const q = this.gl.createQuery();
+    if (!q) return;
+    this.gl.beginQuery(this.ext.TIME_ELAPSED_EXT, q);
+    this.active = { q, slot };
+  }
+
+  end(): void {
+    if (!this.active) return;
+    this.gl.endQuery(this.ext.TIME_ELAPSED_EXT);
+    this.ring.push(this.active);
+    this.active = null;
+  }
+
+  poll(): void {
+    const gl = this.gl;
+    const disjoint = gl.getParameter(this.ext.GPU_DISJOINT_EXT) as boolean;
+    while (this.ring.length) {
+      const head = this.ring[0];
+      if (!gl.getQueryParameter(head.q, gl.QUERY_RESULT_AVAILABLE)) break;
+      this.ring.shift();
+      if (!disjoint) {
+        const ms = (gl.getQueryParameter(head.q, gl.QUERY_RESULT) as number) / 1e6;
+        this.ms[head.slot] = this.ms[head.slot] < 0 ? ms : this.ms[head.slot] + (ms - this.ms[head.slot]) * 0.1;
+      }
+      gl.deleteQuery(head.q);
+    }
   }
 }

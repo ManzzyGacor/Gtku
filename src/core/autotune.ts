@@ -45,6 +45,8 @@ export interface ComponentLevels {
   outline: number;
   /** Render-scale multiplier on top of the preset's. */
   resolution: number;
+  /** Canvas size as a fraction of the device's resolution (the upscale + compositing cost). */
+  canvas: number;
 }
 
 export type ComponentId = keyof ComponentLevels;
@@ -59,6 +61,7 @@ export const COMPONENT_LABEL: Record<ComponentId, string> = {
   distance: 'jarak pandang',
   outline: 'outline',
   resolution: 'resolusi',
+  canvas: 'resolusi kanvas',
 };
 
 export const FULL: ComponentLevels = {
@@ -71,6 +74,7 @@ export const FULL: ComponentLevels = {
   distance: 1,
   outline: 1,
   resolution: 1,
+  canvas: 1,
 };
 
 /** The player's own caps from Pengaturan → Grafik, as dials. Resolution stays with "Skala render". */
@@ -85,6 +89,7 @@ export function playerLevels(s: Readonly<Settings>): ComponentLevels {
     distance: s.gfxDistance,
     outline: s.gfxOutline,
     resolution: 1,
+    canvas: s.canvasScale,
   };
 }
 
@@ -105,6 +110,9 @@ export interface PathStep {
  * Read top to bottom: this is the order AUTO gives things up in.
  */
 export const AUTO_PATH: PathStep[] = [
+  // first: the canvas — a fixed per-device-pixel cost no other dial touches, and on a high-DPI
+  // phone 80% of it is hard to tell from 100%
+  { c: 'canvas', value: 0.8 },
   { c: 'particles', value: 0.5 },
   { c: 'wind', value: 0.6 },
   { c: 'detail', value: 0 },
@@ -115,6 +123,7 @@ export const AUTO_PATH: PathStep[] = [
   { c: 'wind', value: 0 },
   { c: 'lights', value: 1 },
   { c: 'resolution', value: 0.85 },
+  { c: 'canvas', value: 0.65 },
   { c: 'water', value: 0 },
   { c: 'distance', value: 0 },
   { c: 'resolution', value: 0.7 },
@@ -131,7 +140,18 @@ export function levelsAt(rung: number): ComponentLevels {
   return out;
 }
 
-export type AutoDirection = 'drop' | 'raise';
+export type AutoDirection = 'drop' | 'raise' | 'stop';
+
+/**
+ * A drop must earn its keep: after this many drops in a row that each raised the average by less
+ * than `MIN_GAIN_FPS`, AUTO stops, gives those effects back, and says the bottleneck is elsewhere.
+ *
+ * The first AUTO walked twelve steps down — particles, wind, bloom, water, distance, resolution,
+ * lights — on a phone that stayed at 44 fps the whole way: the effects were not what was slow, and
+ * the player lost them for nothing.
+ */
+export const INEFFECTIVE_LIMIT = 2;
+export const MIN_GAIN_FPS = 2;
 
 /** A decision, for the test report. */
 export interface AutoDecision {
@@ -163,6 +183,15 @@ export class AutoTuner {
   private raiseHold = RAISE_HOLD;
   private cooldown = 4;
   private clock = 0;
+  /** The last drop: the FPS before it, and whether it was a dial (revertable) or the preset. */
+  private lastDrop: { fps: number; dial: boolean } | null = null;
+  /** Drops in a row that did not help, newest last. */
+  private ineffective = 0;
+  /**
+   * Set when AUTO concluded that lowering quality does not help on this device: no more drops until
+   * the player presses "Reset AUTO" or picks a preset.
+   */
+  stalled: string | null = null;
 
   constructor(private readonly meter: Pick<PerfMeter, 'avg' | 'low' | 'ready' | 'reset'>) {}
 
@@ -177,6 +206,9 @@ export class AutoTuner {
     this.good = 0;
     this.raiseHold = RAISE_HOLD;
     this.cooldown = 4;
+    this.lastDrop = null;
+    this.ineffective = 0;
+    this.stalled = null;
   }
 
   /**
@@ -196,8 +228,15 @@ export class AutoTuner {
 
     if (this.meter.avg < FPS_FLOOR) {
       this.good = 0;
+      if (this.stalled) return null;
       this.bad += dt;
       if (this.bad < DROP_HOLD) return null;
+      // did the previous drop help? judged now, after its cooldown and a fresh measurement
+      if (this.lastDrop) {
+        const gain = this.meter.avg - this.lastDrop.fps;
+        this.ineffective = gain < MIN_GAIN_FPS ? this.ineffective + 1 : 0;
+        if (this.ineffective >= INEFFECTIVE_LIMIT) return this.giveUp();
+      }
       return this.drop(canDropPreset, presetLabel);
     }
     this.bad = 0;
@@ -217,15 +256,35 @@ export class AutoTuner {
     this.bad = 0;
     this.good = 0;
     this.cooldown = COOLDOWN;
+    if (dir === 'raise') {
+      this.lastDrop = null;
+      this.ineffective = 0;
+    }
     // each drop makes the next raise harder to earn, so the picture settles instead of flapping
     if (dir === 'drop') this.raiseHold = Math.min(MAX_RAISE_HOLD, this.raiseHold * 2);
     this.meter.reset();
+  }
+
+  /**
+   * Lowering does not help: stop, and give back the drops that bought nothing (the dial steps; a
+   * preset change is left alone, since undoing it would rebuild the pixel buffers again).
+   */
+  private giveUp(): AutoResult {
+    const fps = Math.round(this.meter.avg);
+    const revert = this.lastDrop?.dial ? Math.min(this.ineffective, this.rung) : 0;
+    this.rung -= revert;
+    this.stalled = `${this.ineffective} penurunan terakhir tidak menaikkan FPS (tetap ± ${fps}): penyebab lambat ada di luar efek grafik. AUTO berhenti menurunkan dan mengembalikan ${revert} efek.`;
+    this.settle('stop', `berhenti: ${revert} efek dikembalikan, penyebab bukan grafik`);
+    this.lastDrop = null;
+    this.ineffective = 0;
+    return { levels: this.levels };
   }
 
   private drop(canDropPreset: boolean, presetLabel: string): AutoResult | null {
     if (this.rung < AUTO_PATH.length) {
       const step = AUTO_PATH[this.rung];
       const before = levelsAt(this.rung)[step.c];
+      this.lastDrop = { fps: this.meter.avg, dial: true };
       this.rung++;
       this.settle('drop', `${COMPONENT_LABEL[step.c]} ${before} → ${step.value}`);
       return { levels: this.levels };
@@ -235,6 +294,7 @@ export class AutoTuner {
       return null;
     }
     // every dial is down and it is still too slow: the pixel grid itself has to shrink
+    this.lastDrop = { fps: this.meter.avg, dial: false };
     this.rung = 0;
     this.settle('drop', `preset ${presetLabel} turun (semua komponen sudah minimum)`);
     return { preset: 'drop', levels: this.levels };

@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import { CHUNK_PX, CHUNK_TILES } from '../config';
 import { bakeChunk, bakeWaterMask } from '../art/bake';
+import type { BakeWorker } from './BakeWorker';
 import type { Pixmap } from '../art/pixmap';
 import { buildGreyboxTextures, buildGroundDetail, type GreyboxTexture } from '../art/greybox';
 import type { Sheet } from '../art/sheet';
@@ -234,6 +235,8 @@ const MAX_DYNAMIC_LIGHTS = 3;
 const STREAM_STEP = 2;
 /** How long a chunk may wait for its pre-baked ground to inflate before the phone bakes it itself. */
 const GROUND_WAIT = 0.35;
+/** How long a chunk waits for the bake worker before the main thread bakes it itself. */
+const WORKER_WAIT = 1.5;
 
 const keyOf = (cx: number, cy: number): number => cy * 1000 + cx;
 
@@ -489,8 +492,9 @@ export class World3D {
     for (const c of want) {
       if (this.loaded.has(keyOf(c.cx, c.cy))) continue;
       this.queue.push(c);
-      // start inflating its pre-baked ground now, so it is ready when the queue gets to it
-      this.groundSource?.(c.cx, c.cy);
+      // start inflating its pre-baked ground now, so it is ready when the queue gets to it —
+      // or, without a pack, start the worker baking it
+      if ((this.groundSource?.(c.cx, c.cy) ?? null) === null) this.baker?.prefetch(c.cx, c.cy);
     }
     if (changed) this.rebuildLightList();
   }
@@ -499,38 +503,58 @@ export class World3D {
   step(budget = 1, noWait = false): void {
     for (let i = 0; i < budget && this.queue.length; i++) {
       const t = this.queue.shift()!;
-      if (this.loaded.has(keyOf(t.cx, t.cy))) continue;
-      const pre = this.groundSource?.(t.cx, t.cy) ?? null;
-      // a teleport or the first frame cannot wait for an inflate: the ground has to be there now
+      const key = keyOf(t.cx, t.cy);
+      if (this.loaded.has(key)) continue;
+      /*
+       * Where this chunk's ground comes from, cheapest first: a pre-baked pack; else the bake
+       * worker, off the main thread; and only as a last resort, baked here — which is the hitch
+       * the other two exist to avoid.
+       */
+      let pre: Pixmap | 'pending' | null = this.packGaveUp.has(key) ? null : (this.groundSource?.(t.cx, t.cy) ?? null);
+      const fromPack = pre !== null;
+      if (pre === null && this.baker) pre = this.baker.ground(t.cx, t.cy);
+      // a teleport or the first frame cannot wait: the ground has to be there now
       if (pre === 'pending' && noWait) {
         this.loadChunk(t.cx, t.cy, null);
         continue;
       }
       if (pre === 'pending') {
         /*
-         * Its pre-baked ground is still inflating. Wait rather than baking it here — baking is the
-         * very cost the pack exists to avoid — but not for long: after GROUND_WAIT seconds the
-         * phone bakes it anyway, so a slow inflate can never leave a hole in the world.
+         * Wait for it rather than baking here — but not for long: after the wait the next source
+         * is tried (the worker after a slow pack), and finally the phone bakes it itself, so a slow
+         * inflate or a busy worker can never leave a hole in the world.
          *
          * The limit is in *time*, not in queue visits. A first version counted visits, and with
          * fifteen chunks queued and one loaded per frame each chunk was only visited every
          * fifteenth frame — so "twenty visits" meant five seconds of missing ground.
          */
-        const key = keyOf(t.cx, t.cy);
         const since = this.groundWaits.get(key);
         if (since === undefined) this.groundWaits.set(key, this.clock);
-        if (since === undefined || this.clock - since < GROUND_WAIT) {
+        const limit = fromPack ? GROUND_WAIT : WORKER_WAIT;
+        if (since === undefined || this.clock - since < limit) {
           this.queue.push(t);
           continue;
         }
         this.groundWaits.delete(key);
+        if (fromPack && this.baker?.available) {
+          // the pack is slow: let the worker have it instead of baking here
+          this.packGaveUp.add(key);
+          this.queue.push(t);
+          continue;
+        }
         this.loadChunk(t.cx, t.cy, null);
         continue;
       }
-      this.groundWaits.delete(keyOf(t.cx, t.cy));
-      this.loadChunk(t.cx, t.cy, pre);
+      this.groundWaits.delete(key);
+      this.packGaveUp.delete(key);
+      this.loadChunk(t.cx, t.cy, pre, fromPack ? 'pack' : pre ? 'worker' : 'here');
     }
+    this.baker?.trim(24);
   }
+
+  /** The off-main-thread baker (browser only; null in tests and where workers are unavailable). */
+  baker: BakeWorker | null = null;
+  private readonly packGaveUp = new Set<number>();
 
   /**
    * Where pre-baked chunk ground comes from (the area data packs), or null to always bake.
@@ -539,7 +563,7 @@ export class World3D {
   groundSource: ((cx: number, cy: number) => Pixmap | 'pending' | null) | null = null;
   private readonly groundWaits = new Map<number, number>();
   /** How many chunks came from packs vs were baked on the device, for the report. */
-  readonly groundStats = { fromPack: 0, baked: 0 };
+  readonly groundStats = { fromPack: 0, worker: 0, baked: 0 };
 
   /**
    * Load what is around `focus` right now (first frame, teleports).
@@ -559,11 +583,12 @@ export class World3D {
     if (radius !== undefined) this.lastStreamX = Infinity;
   }
 
-  private loadChunk(cx: number, cy: number, prebaked: Pixmap | null = null): void {
+  private loadChunk(cx: number, cy: number, prebaked: Pixmap | null = null, source: 'pack' | 'worker' | 'here' = prebaked ? 'pack' : 'here'): void {
     const plan = this.chunkPlan(cx, cy);
     // from a downloaded pack if there is one; otherwise baked here, as it always was
     const pm = prebaked ?? bakeChunk(this.world, this.tileSheet, cx, cy, 0);
-    if (prebaked) this.groundStats.fromPack++;
+    if (source === 'pack') this.groundStats.fromPack++;
+    else if (source === 'worker') this.groundStats.worker++;
     else this.groundStats.baked++;
     // Pixmap row 0 is north; a flat plane has v = 1 there, so the rows are flipped on upload.
     const texture = pixmapTexture(pm, { flipRows: true });
@@ -711,6 +736,11 @@ export class World3D {
   /** How lively the vegetation is. The `vlow` preset stands still to save vertex work. */
   setWind(strength: number): void {
     this.windStrength = Math.max(0, strength);
+  }
+
+  /** The knobs as they are right now (the performance probe checks its switches really took). */
+  get knobs(): { wind: number; rim: number; detail: number; water: boolean; lights: number } {
+    return { wind: this.windStrength, rim: this.rimScale, detail: this.detailStrength.value, water: this.waterEnabled, lights: this.lightBudget };
   }
 
   /** Rim-light multiplier; the bottom preset drops it. */

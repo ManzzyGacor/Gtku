@@ -1301,3 +1301,51 @@ Detail lengkap: `docs/MULTIPLAYER.md`.
 - Tes: simulasi (8, termasuk satu pertarungan penuh dimainkan bot), room (9, termasuk soket sungguhan),
   end-to-end dua klien (3), **dua game sungguhan di satu room** (2), panel (4). Tampilan dan rasa hanya
   bisa dicek di HP.
+
+## Alat ukur performa diperbaiki, AUTO tidak lagi menurunkan tanpa hasil
+
+**Kenapa laporan lama salah:**
+- *draw call 1, triangle 0k:* `renderer.info` di-reset otomatis setiap `render()`, dan satu frame di sini
+  adalah 4–5 panggilan (scene, bloom ×2, composite, blit). Yang terbaca hanya quad blit terakhir.
+  Sekarang di-reset sekali per frame, dan angka pass scene disimpan terpisah.
+- *semua uji performa 16,7 ms / hemat 0,0:* uji dimulai dari Pengaturan, yang **menjeda game** selama
+  terbuka — yang diukur adalah frame game yang berhenti. Ditambah: median interval frame yang terkunci
+  vsync (16,7/33,3 ms) selalu 16,7. Ditambah: bloom dan radius chunk dinyalakan lagi tiap frame oleh
+  kode frame, jadi "tanpa bloom" tidak pernah tanpa bloom.
+- *frame 16,7 ms di samping 44,7 fps:* dua pengukuran berbeda — frame termasuk saat dijeda, fps hanya saat
+  bermain.
+
+**Sekarang:**
+- Pengaturan menutup diri sebelum uji; frame yang dijeda tidak dihitung; hero diam, AUTO ditahan.
+- Tiap skenario: tunggu 20 frame & ≥ 0,5 dtk, lalu ukur 90 frame: rata-rata, p90, CPU per frame, GPU
+  per frame (bila HP mendukung `EXT_disjoint_timer_query_webgl2`).
+- Tiap skenario punya pemeriksaan "fitur benar-benar mati"; bila tidak → "⚠ TIDAK BERUBAH".
+- **Pemeriksaan kewajaran:** bila tidak ada satu pun fitur yang mengubah frame/CPU/GPU → "hasil: TIDAK
+  VALID", bukan "normal".
+- Frame (ms) dan fps dari satu pengukuran (hanya frame saat bermain).
+- **Rincian waktu per tahap:** logika, dunia, HUD, lingkungan, render scene, render post (CPU), plus
+  GPU scene/post, dan kesimpulan otomatis "yang membatasi: CPU / GPU / belum jelas".
+- Skenario baru **kanvas 50%**, karena kanvas digambar di resolusi penuh layar (2387×1078 = 2,6 juta
+  pixel per frame) — satu-satunya biaya yang tidak disentuh dial mana pun.
+
+**Mencari penyebab FPS 44 (yang bisa diukur dari VPS):** game sungguhan dijalankan di Node (render
+dimatikan) di desa jam 19:00 sambil berjalan (`npx tsx --expose-gc scripts/frame-bench.ts`): seluruh
+logika JavaScript **0,66 ms per frame** (p95 3,3 ms), tulisan style DOM 1,2 per frame, alokasi 5,3 KB
+per frame. **Puncak 9,9 ms** di tahap "dunia" = pemanggangan tanah chunk. Jadi FPS 44 yang stabil
+**bukan** karena logika game atau DOM, dan **bukan** karena efek visual (AUTO mematikan semuanya tanpa
+hasil). Pola 44,7 rata-rata / 32,9 terendah cocok dengan frame yang sedikit melebihi 16,7 ms sehingga
+vsync menjatuhkan sebagian frame ke 33 ms. Tersangka yang tersisa adalah biaya tetap yang tidak
+disentuh setelan: kanvas resolusi penuh (blit + komposisi browser), overhead driver WebGL, dan
+pemanggangan chunk saat berjalan. Laporan berikutnya (CPU/GPU per tahap + uji kanvas 50%) akan
+memastikan yang mana.
+
+**Perbaikan yang sudah dipasang:**
+- **Pemanggangan chunk pindah ke Web Worker** (`bake.worker.ts`): thread utama tidak memanggang lagi,
+  kecuali saat teleport/frame pertama atau bila worker tidak menjawab dalam 1,5 dtk.
+- **Dial kanvas** (Pengaturan → Grafik → Resolusi kanvas) dan langkah AUTO pertama "resolusi kanvas 0,8".
+- **AUTO:** setelah 2 penurunan berturut-turut yang tidak menaikkan FPS ≥ 2, AUTO **berhenti**,
+  **mengembalikan** efek yang diturunkan tanpa hasil, dan mencatat "penyebab di luar efek grafik".
+- **Reset AUTO** di Pengaturan → Grafik.
+- `input.axis()` tidak lagi membuat objek baru tiap panggilan.
+
+Tes: `tests/perfprobe.test.ts` (8), AUTO (2 baru), worker (2 baru di `tests/areadata.test.ts`).

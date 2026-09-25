@@ -12,7 +12,7 @@ import { AUTO_PATH, AutoTuner, COMPONENT_LABEL, FULL, minLevels, playerLevels, t
 
 const AUTO_STEPS = AUTO_PATH.length;
 import { input } from '../core/input';
-import { PerfMeter } from '../core/perf';
+import { PerfMeter, StageTimer, STAGES } from '../core/perf';
 import { settings } from '../core/settings';
 import { DAY_SECONDS, gradeAt, nightAmount, smooth, timeLabel } from '../core/systems/daynight';
 import { CAVE_X0, FOREST_X0 } from '../core/world/areas';
@@ -29,6 +29,7 @@ import { Minimap } from '../ui/Minimap';
 import { CharacterPanel } from '../ui/CharacterPanel';
 import { Portrait3D } from './Portrait3D';
 import { Coop3D } from './Coop3D';
+import { BakeWorker } from './BakeWorker';
 import { CoopPanel, type CoopView } from '../ui/CoopPanel';
 import { CoopClient, type CoopStatus, type Result, type RoomView, type SocketLike } from '../core/coop/client';
 import { BTN_ATTACK, BTN_DODGE, BTN_SKILL, type ClientMsg, type CoopError, type SnapEvent } from '../../shared/coop/protocol';
@@ -200,7 +201,8 @@ export class Game3D {
   private gradeGain = new THREE.Color();
   private probe = new PerfProbe();
   /** Frame times for the report, in ms. */
-  private frameMs = 16.7;
+  /** CPU milliseconds per frame, stage by stage (the report's "rincian waktu"). */
+  readonly stages = new StageTimer();
   private unsubscribe: () => void;
   private disposed = false;
   /** What the save migration had to change on load, shown in the report so it is never silent. */
@@ -430,6 +432,7 @@ export class Game3D {
         this.applyProfile();
       }
       if (key !== null && key.startsWith('gfx')) this.applyProfile();
+      if (key === 'canvasScale') this.resize();
       if (key === 'preset' || key === 'renderScale') {
         // a preset the *player* picked starts from full dials; one AUTO picked keeps AUTO's
         if (key === 'preset' && !this.autoMovingPreset) this.autoTuner.reset();
@@ -484,6 +487,8 @@ export class Game3D {
     this.lastSafe.y = this.hero.y;
     this.lastSafe.area = areaAtTile(Math.floor(this.hero.x / 16));
     this.scene3d.groundSource = (cx, cy) => this.areaData.ground(cx, cy);
+    // chunks without a pack are baked in a worker, not on the frame (browser only)
+    if (typeof Worker !== 'undefined') this.scene3d.baker = new BakeWorker();
     void this.areaData.init().then(() => {
       const core = this.areaData.manifest?.core;
       if (!core) return;
@@ -506,6 +511,7 @@ export class Game3D {
       window.devicePixelRatio || 1,
       p.pixelHeight,
       p.renderScale * settings.get('renderScale') * (this.autoTuner.auto ? this.autoTuner.levels.resolution : 1),
+      this.probeOverride.canvas || Math.min(settings.get('canvasScale'), this.autoTuner.auto ? this.autoTuner.levels.canvas : 1),
     );
     this.camera.setAspect(plan.pixelW / plan.pixelH);
   }
@@ -552,10 +558,11 @@ export class Game3D {
       const lowered = (Object.keys(FULL) as ComponentId[]).filter((c) => lvl[c] !== FULL[c]);
       lines.push(`  diturunkan: ${lowered.length ? lowered.map((c) => `${COMPONENT_LABEL[c]} ${lvl[c]}`).join(', ') : 'tidak ada (semua sesuai preset)'}`);
     }
+    if (t.stalled) lines.push(`  ⚠ ${t.stalled}`);
     if (t.decisions.length) {
       lines.push('  keputusan terakhir (detik sejak mulai, arah, apa, fps rata-rata/terendah):');
       for (const d of [...t.decisions].reverse()) {
-        lines.push(`   ${String(d.at).padStart(5)}s  ${d.dir === 'drop' ? 'TURUN' : 'NAIK '}  ${d.what}   (${d.fps}/${d.low} fps)`);
+        lines.push(`   ${String(d.at).padStart(5)}s  ${d.dir === 'drop' ? 'TURUN' : d.dir === 'stop' ? 'STOP ' : 'NAIK '}  ${d.what}   (${d.fps}/${d.low} fps)`);
       }
     } else {
       lines.push('  belum ada keputusan');
@@ -563,8 +570,26 @@ export class Game3D {
     return lines;
   }
 
+  /**
+   * "Reset AUTO": every effect AUTO took away comes back, and the preset returns to what this phone
+   * starts with. AUTO then watches again from scratch.
+   */
+  resetAuto(): string {
+    this.autoTuner.reset();
+    this.perf.reset();
+    if (settings.get('presetAuto') && !settings.isLocked('preset')) {
+      this.autoMovingPreset = true;
+      settings.set('preset', suggestPreset(probeDevice()));
+      this.autoMovingPreset = false;
+    }
+    this.applyProfile();
+    return `AUTO direset: semua efek kembali, preset ${PROFILES[settings.get('preset')].name}.`;
+  }
+
   /** One frame of AUTO: turn a dial, or — with every dial down — move the preset. */
   private updateAuto(dt: number): void {
+    // the probe changes knobs on purpose; AUTO must not "correct" them mid-measurement
+    if (this.probe.running) return;
     const preset = settings.get('preset');
     const result = this.autoTuner.update(dt, lowerPreset(preset) !== null, higherPreset(preset) !== null, PROFILES[preset].name);
     if (!result) return;
@@ -587,6 +612,7 @@ export class Game3D {
    * on a weak phone cannot ask for a hundred ground textures at once.
    */
   private chunkRadius(): number {
+    if (this.probeOverride.radius > 0) return this.probeOverride.radius;
     // AUTO's "jarak pandang" dial drops the preset's extra margin, never the visible chunks themselves
     const auto = this.autoTuner.auto && this.autoTuner.levels.distance === 0;
     const margin = auto || settings.get('gfxDistance') === 0 ? 0 : profileOf(settings.get('preset')).chunkMargin;
@@ -1582,8 +1608,13 @@ export class Game3D {
   /** One frame. Exposed so a test can drive the simulation without a browser. */
   step(dt: number): void {
     if (this.disposed) return;
-    if (dt > 0) this.frameMs += (dt * 1000 - this.frameMs) * 0.1;
-    this.probe.update(dt);
+    this.stages.begin();
+    this.probe.update(dt, !this.paused);
+    // the probe measures a hero standing still: no input while it runs
+    if (this.probe.running) input.enabled = false;
+    else if (this.probeWasRunning) input.enabled = !this.paused && !this.dialogue.open;
+    if (this.probeWasRunning && !this.probe.running) this.hud.toast('Uji performa selesai — buka Pengaturan → Salin laporan', 5);
+    this.probeWasRunning = this.probe.running;
     this.clock += dt;
     // hit-stop freezes the simulation, never the rendering
     let simDt = this.paused ? 0 : dt;
@@ -1621,6 +1652,7 @@ export class Game3D {
     );
     // The contextual interact button: the world decides the word, the controls draw it.
     this.onInteractPrompt(this.paused || this.dialogue.open ? null : this.story.interactPrompt);
+    this.stages.lap(0);
 
     // ── story, puzzle, HUD ──
     const ax = input.axis();
@@ -1628,6 +1660,7 @@ export class Game3D {
     this.story.update(simDt, dt, this.hero, this.camera.yawRadians, this.dialogue.open);
     this.dialogue.update(dt);
     this.updateHud(dt, simDt);
+    this.stages.lap(2);
     const cave = this.caveWeight();
     this.scene3d.setHeroOcclusion(this.heroMesh.root.position, this.camera.camera, this.hero.alive);
     /*
@@ -1653,10 +1686,15 @@ export class Game3D {
     this.scene3d.waterUniforms.uSky.value.copy(this.sky.haze);
     this.scene3d.waterUniforms.uFogColor.value.copy(this.sky.haze);
     this.scene3d.waterUniforms.uFogRange.value.set(this.sky.fog.near, this.sky.fog.far);
+    this.stages.lap(1);
     this.environment.update(dt, this.camera.target, nightAmount(this.dayTime), cave, this.forestWeight(), this.sky.haze);
     // no rain underground, whatever the sky is doing
     this.rain?.update(dt, this.camera.target, this.camera.yawRadians, WEATHER[this.weather].rain * (1 - cave));
+    this.stages.lap(3);
     this.pixels.render(this.camera.camera);
+    this.stages.add(4, this.pixels.frameStats.sceneMs);
+    this.stages.add(5, this.pixels.frameStats.postMs);
+    this.stages.end();
   }
 
   /**
@@ -1698,7 +1736,7 @@ export class Game3D {
         ? w
         : null;
     const p = profileOf(settings.get('preset'));
-    const allow = settings.get('bloom') && p.bloom ? 1 : 0;
+    const allow = settings.get('bloom') && p.bloom && !this.probeOverride.bloomOff ? 1 : 0;
     this.pixels.setGrade({
       bloom: g.bloom * allow * this.bloomScale,
       vignette: g.vignette * (p.outline ? 1 : 0.6),
@@ -1803,47 +1841,87 @@ export class Game3D {
    * The scenarios worth measuring, in the order they are most likely to be the problem.
    * Each one is applied on top of the player's *own* settings, one change at a time.
    */
+  /**
+   * Switches the probe holds while a scenario is measured. Bloom and the chunk radius are
+   * re-applied every frame by the frame code itself, which is what silently undid the first
+   * probe's "no bloom" and "radius −1": they now read these.
+   */
+  private readonly probeOverride = { bloomOff: false, radius: 0, canvas: 0 };
+  private probeWasRunning = false;
+  private probeBase = { renderW: 0, radius: 1, canvasW: 0 };
+
   private probeScenarios(): ProbeScenario[] {
+    const k = () => this.scene3d.knobs;
+    const plan = () => this.pixels.plan;
+    const resize = (height: number, scale: number) => () => {
+      const p = profileOf(settings.get('preset'));
+      this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, height || p.pixelHeight, scale);
+      this.camera.setAspect(this.pixels.plan.pixelW / this.pixels.plan.pixelH);
+    };
     return [
       { id: 'base', label: 'semua menyala', apply: () => undefined },
-      { id: 'lights', label: 'tanpa lampu dinamis', apply: () => this.scene3d.setLightBudget(0) },
-      { id: 'shadows', label: 'tanpa bayangan', apply: () => this.scene3d.setShadows('off') },
-      { id: 'water', label: 'tanpa air beriak', apply: () => this.scene3d.setWater(false) },
-      { id: 'bloom', label: 'tanpa bloom', apply: () => this.pixels.setGrade({ bloom: 0, vignette: 0, lift: this.gradeLift, gain: this.gradeGain }) },
-      { id: 'grass', label: 'tanpa angin', apply: () => this.scene3d.setWind(0) },
-      { id: 'detail', label: 'tanpa grain tanah', apply: () => this.scene3d.setGroundDetail(0) },
-      { id: 'rim', label: 'tanpa rim light', apply: () => this.scene3d.setRim(0) },
-      { id: 'env', label: 'tanpa kunang/kabut', apply: () => this.environment.setBudget(0) },
-      { id: 'outline', label: 'tanpa outline', apply: () => this.pixels.setOutline(false) },
+      { id: 'lights', label: 'tanpa lampu dinamis', apply: () => this.scene3d.setLightBudget(0), verify: () => k().lights === 0 },
+      { id: 'water', label: 'tanpa air beriak', apply: () => this.scene3d.setWater(false), verify: () => !k().water },
       {
-        id: 'half',
-        label: 'skala render 60%',
-        apply: () => this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, profileOf(settings.get('preset')).pixelHeight, 0.6),
+        id: 'bloom',
+        label: 'tanpa bloom',
+        apply: () => {
+          this.probeOverride.bloomOff = true;
+        },
+        verify: () => !this.pixels.bloomOn,
+      },
+      { id: 'grass', label: 'tanpa angin', apply: () => this.scene3d.setWind(0), verify: () => k().wind === 0 },
+      { id: 'detail', label: 'tanpa grain tanah', apply: () => this.scene3d.setGroundDetail(0), verify: () => k().detail === 0 },
+      { id: 'rim', label: 'tanpa rim light', apply: () => this.scene3d.setRim(0), verify: () => k().rim === 0 },
+      { id: 'env', label: 'tanpa kunang/kabut', apply: () => this.environment.setBudget(0), verify: () => this.environment.currentBudget === 0 },
+      { id: 'outline', label: 'tanpa outline', apply: () => this.pixels.setOutline(false), verify: () => !this.pixels.outlineOn },
+      { id: 'half', label: 'skala render 60%', apply: resize(0, 0.6), verify: () => plan().renderW < this.probeBase.renderW * 0.8 },
+      { id: 'px360', label: 'grid pixel 360', apply: resize(360, 1), verify: () => plan().pixelH === 360 },
+      { id: 'px270', label: 'grid pixel 270', apply: resize(270, 1), verify: () => plan().pixelH === 270 },
+      {
+        // the one cost no quality dial reaches: one upscale + browser compositing per device pixel
+        id: 'canvas',
+        label: 'kanvas 50%',
+        apply: () => {
+          this.probeOverride.canvas = 0.5;
+          this.resize();
+        },
+        verify: () => plan().canvasW < this.probeBase.canvasW * 0.6,
       },
       {
-        id: 'px360',
-        label: 'grid pixel 360',
-        apply: () => this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, 360, 1),
+        id: 'radius',
+        label: 'radius chunk -1',
+        apply: () => {
+          this.probeOverride.radius = Math.max(1, this.probeBase.radius - 1);
+        },
+        verify: () => this.chunkRadius() === Math.max(1, this.probeBase.radius - 1),
       },
-      {
-        id: 'px270',
-        label: 'grid pixel 270',
-        apply: () => this.pixels.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1, 270, 1),
-      },
-      { id: 'radius', label: 'radius chunk -1', apply: () => this.scene3d.setRenderDistance(Math.max(1, this.chunkRadius() - 1)) },
     ];
   }
 
+  /**
+   * Run the probe on the running game: AUTO held, the hero held still (no input), the world not
+   * paused — a paused world is exactly what the first probe measured by mistake.
+   */
   startPerfProbe(): void {
+    this.probeBase = { renderW: this.pixels.plan.renderW, radius: this.chunkRadius(), canvasW: this.pixels.plan.canvasW };
+    this.paused = false;
     this.probe.start(
       this.probeScenarios(),
       () => {
         // put every knob back to whatever the player's settings say
+        this.probeOverride.bloomOff = false;
+        this.probeOverride.radius = 0;
+        this.probeOverride.canvas = 0;
         this.applyProfile();
         this.applyGrade(this.caveWeight());
       },
-      () => ({ calls: this.pixels.renderer.info.render.calls, triangles: this.pixels.renderer.info.render.triangles }),
+      () => {
+        const fs = this.pixels.frameStats;
+        return { cpuMs: this.stages.total, gpuMs: fs.gpuSceneMs >= 0 ? fs.gpuSceneMs + fs.gpuPostMs : -1, calls: fs.calls, triangles: fs.triangles };
+      },
     );
+    this.hud.toast('Uji performa berjalan ± 30 detik — jangan sentuh layar', 4);
   }
 
   // ───────────────────────── diagnostics ─────────────────────────
@@ -1864,6 +1942,7 @@ export class Game3D {
       },
       report: () => this.extraReport(),
       startPerfProbe: () => this.startPerfProbe(),
+      resetAuto: () => this.resetAuto(),
       cutsceneSeen: (id) => this.state.hasSeen(id),
       openDownloads: () => this.downloads.show(),
       playCutscene: (id) => {
@@ -1878,15 +1957,41 @@ export class Game3D {
     };
   }
 
+  /**
+   * Where the frame goes: CPU per stage (smoothed, and the worst recent frame), and the GPU's own
+   * time where the phone can measure it. Read as: if CPU total ≈ the frame, JavaScript is the limit;
+   * if GPU ≈ the frame, graphics is.
+   */
+  private stageReport(): string[] {
+    const st = this.stages;
+    const fs = this.pixels.frameStats;
+    const parts: string[] = [];
+    for (let i = 0; i < STAGES.length; i++) parts.push(`${STAGES[i]} ${st.ms[i].toFixed(1)} (puncak ${st.peak[i].toFixed(0)})`);
+    const gpu = fs.gpuSceneMs >= 0 ? `scene ${fs.gpuSceneMs.toFixed(1)} ms + post ${fs.gpuPostMs.toFixed(1)} ms` : 'tidak bisa diukur di perangkat ini';
+    const cpu = st.total;
+    const frame = this.perf.avgMs;
+    const verdict =
+      fs.gpuSceneMs >= 0 && fs.gpuSceneMs + fs.gpuPostMs > frame * 0.7
+        ? 'GPU yang membatasi'
+        : cpu > frame * 0.6
+          ? 'JavaScript (CPU) yang membatasi'
+          : frame > 20
+            ? 'belum jelas: CPU & GPU terukur ringan (lihat puncak — kemungkinan hitch/GC)'
+            : 'lancar';
+    return [`CPU per frame (ms): ${parts.join(', ')} — total ${cpu.toFixed(1)}`, `GPU per frame: ${gpu}`, `penyebab lambat: ${verdict}`];
+  }
+
   /** Extra lines for the "Salin laporan" report. */
   private extraReport(): string[] {
     const s = this.scene3d.stats();
     const plan = this.pixels.plan;
-    const info = this.pixels.renderer.info.render;
+    const fs = this.pixels.frameStats;
     const probe = this.probe.lines();
     return [
-      `frame: ${this.frameMs.toFixed(1)} ms (${(1000 / Math.max(0.01, this.frameMs)).toFixed(1)} fps)`,
-      `draw call: ${info.calls}   triangle: ${(info.triangles / 1000).toFixed(0)}k   program: ${this.pixels.renderer.info.programs?.length ?? 0}`,
+      // one measurement: frames of actual play (a menu pauses the game and is not counted)
+      `frame: ${this.perf.avgMs.toFixed(1)} ms rata-rata (${this.perf.avg.toFixed(1)} fps), terendah ${this.perf.low.toFixed(1)} fps — hanya frame saat bermain`,
+      `draw call: ${fs.calls} (scene ${fs.sceneCalls})   triangle: ${(fs.triangles / 1000).toFixed(1)}k (scene ${(fs.sceneTriangles / 1000).toFixed(1)}k)   program: ${this.pixels.renderer.info.programs?.length ?? 0}`,
+      ...this.stageReport(),
       `kanvas: ${plan.canvasW}x${plan.canvasH} px perangkat (layar ${Math.round(window.innerWidth * (window.devicePixelRatio || 1))}x${Math.round(window.innerHeight * (window.devicePixelRatio || 1))})`,
       `grid pixel: ${plan.pixelW}x${plan.pixelH}   render target: ${plan.renderW}x${plan.renderH}   skala ${plan.scale.toFixed(2)}x`,
       `chunk dimuat: ${s.chunks} (radius ${this.chunkRadius()}, antre ${s.queued})   instance: ${s.instances}   ` +
@@ -1908,7 +2013,7 @@ export class Game3D {
       `kabut: ${this.sky.fog.near.toFixed(0)} - ${this.sky.fog.far.toFixed(0)} (gua ${(this.caveWeight() * 100).toFixed(0)}%)`,
       ...this.autoReport(),
       this.areaData.describe(),
-      `tanah chunk: ${this.scene3d.groundStats.fromPack} dari paket, ${this.scene3d.groundStats.baked} dipanggang di HP`,
+      `tanah chunk: ${this.scene3d.groundStats.fromPack} dari paket, ${this.scene3d.groundStats.worker} dipanggang di worker (di luar frame), ${this.scene3d.groundStats.baked} dipanggang di thread utama${this.scene3d.baker ? (this.scene3d.baker.available ? '' : ' (worker gagal dimulai)') : ' (worker tidak tersedia)'}`,
       ...(probe.length ? ['', '[UJI PERFORMA] (baseline = setelanmu sendiri, satu fitur dimatikan per baris)', ...probe] : []),
     ];
   }
@@ -1940,6 +2045,7 @@ export class Game3D {
     this.environment.dispose();
     this.heroMesh.dispose();
     this.portrait?.dispose();
+    this.scene3d.baker?.dispose();
     this.scene3d.dispose();
     this.pixels.dispose();
   }

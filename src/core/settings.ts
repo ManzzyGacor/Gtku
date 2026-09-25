@@ -62,6 +62,14 @@ export interface Settings {
   gfxWater: number;
   gfxDistance: number;
   gfxOutline: number;
+  /**
+   * Fraction of the device's resolution the canvas gets (the browser stretches it to the screen).
+   * The one cost no other dial reaches: the final upscale and the browser's compositing run once
+   * per *device* pixel.
+   */
+  canvasScale: number;
+  /** Overall brightness of the picture — phones and eyes differ, caves are dark. */
+  brightness: number;
   /** Set once the intro cutscene has been watched (or skipped) to the end. */
   cutsceneSeen: boolean;
   /**
@@ -102,6 +110,8 @@ export const DEFAULTS: Settings = {
   gfxWater: 1,
   gfxDistance: 1,
   gfxOutline: 1,
+  canvasScale: 1,
+  brightness: 1,
   cutsceneSeen: false,
 };
 
@@ -131,6 +141,8 @@ export const RANGES = {
   gfxWater: { min: 0, max: 1, step: 1 },
   gfxDistance: { min: 0, max: 1, step: 1 },
   gfxOutline: { min: 0, max: 1, step: 1 },
+  canvasScale: { min: 0.5, max: 1, step: 0.05 },
+  brightness: { min: 0.6, max: 1.8, step: 0.1 },
 } as const;
 
 export type NumericKey = keyof typeof RANGES;
