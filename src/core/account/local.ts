@@ -38,6 +38,11 @@ export interface LocalAuthDeps {
   remove(key: string): void;
   /** Iterations for new accounts; tests lower it. Existing accounts keep their own. */
   iterations?: number | undefined;
+  /**
+   * The name that gets the developer role — only passed by developer builds, where there is no
+   * server to decide. With a server, the role always comes from the server.
+   */
+  devName?: string | undefined;
 }
 
 export function browserAuthDeps(): LocalAuthDeps | null {
@@ -89,8 +94,18 @@ export class LocalAuth implements AuthAdapter {
     return new Uint8Array(bits);
   }
 
+  private roleOf(id: string): 'dev' | 'player' {
+    return this.deps.devName && id === this.deps.devName ? 'dev' : 'player';
+  }
+
+  async checkUsername(username: string): Promise<{ available: boolean; message: string }> {
+    const id = normalizeUsername(username);
+    if (!validUsername(id)) return { available: false, message: USERNAME_RULE };
+    return this.accounts()[id] ? { available: false, message: 'Nama itu sudah terdaftar di HP ini.' } : { available: true, message: 'Nama tersedia.' };
+  }
+
   private startSession(id: string, name: string): AccountSession {
-    const session: AccountSession = { id, name, kind: 'local', since: this.deps.now() };
+    const session: AccountSession = { id, name, kind: 'local', role: this.roleOf(id), since: this.deps.now() };
     this.deps.write(SESSION_KEY, JSON.stringify(session));
     return session;
   }
@@ -139,7 +154,7 @@ export class LocalAuth implements AuthAdapter {
       if (!raw) return null;
       const s = JSON.parse(raw) as Partial<AccountSession>;
       if (typeof s.id !== 'string' || typeof s.name !== 'string' || !this.accounts()[s.id]) return null;
-      return { id: s.id, name: s.name, kind: 'local', since: typeof s.since === 'number' ? s.since : 0 };
+      return { id: s.id, name: s.name, kind: 'local', role: this.roleOf(s.id), since: typeof s.since === 'number' ? s.since : 0 };
     } catch {
       return null;
     }

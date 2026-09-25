@@ -238,3 +238,34 @@ test('a reaction on the dummy is written to the log as "Es + Api"-style text', a
   assert.equal(lines[0], 'Api + Es → Lebur');
   game.dispose();
 });
+
+test('developer mode opens only for a session the server called "dev"', async () => {
+  const { startWorld } = await import('../src/render3d/boot3d');
+  const { DebugUi } = await import('../src/ui/DebugUi');
+  const settle = () => new Promise((r) => setTimeout(r, 50));
+  const devButtons = () => {
+    const out: unknown[] = [];
+    const walk = (n: { classes?: Set<string>; childNodes: unknown[] }) => {
+      if (n.classes?.has('lm-devbtn')) out.push(n);
+      for (const c of n.childNodes) walk(c as typeof n);
+    };
+    walk(env.doc.body as never);
+    return out.length;
+  };
+
+  // a player: five taps on the version number, even ?debug=1-style unlock, give an answer, not a menu
+  const debug = new DebugUi(env.doc.body as unknown as HTMLElement);
+  const player = startWorld(env.doc.body as unknown as HTMLElement, debug, false, { devAllowed: false });
+  (debug as unknown as { panel: { onDevUnlock(): void } }).panel.onDevUnlock();
+  await settle();
+  assert.equal(devButtons(), 0, 'no DEV button for a player');
+  player.dispose();
+
+  // the developer account
+  const debug2 = new DebugUi(env.doc.body as unknown as HTMLElement);
+  const dev = startWorld(env.doc.body as unknown as HTMLElement, debug2, false, { devAllowed: true });
+  (debug2 as unknown as { panel: { onDevUnlock(): void } }).panel.onDevUnlock();
+  await settle();
+  assert.equal(devButtons(), 1, 'the DEV button for the developer');
+  dev.dispose();
+});

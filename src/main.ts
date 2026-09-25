@@ -20,61 +20,84 @@ import { ensureDebugUi } from './ui/DebugUi';
 import { TitleScreen } from './ui/TitleScreen';
 import { fullscreen } from './ui/fullscreen';
 import { browserAuthDeps, LocalAuth } from './core/account/local';
-import { RemoteAuth } from './core/account/remote';
+import { RemoteAuth, type HttpFetch } from './core/account/remote';
 import type { AccountSession, AuthAdapter } from './core/account/auth';
 import { adoptSave, loadGame, setSaveMirror } from './core/save';
 import { readRaw, writeRaw, removeRaw } from './core/storage';
+import { connectCloud } from './cloud';
 
 /**
- * Where accounts live. With `VITE_API_URL` set at build time, on the server (docs/BACKEND.md);
- * without it, on this phone only, and the screens say so. The URL is the only thing the client
- * knows about the server — no key, no secret: the session is an HttpOnly cookie.
+ * Where accounts live: the Lentera Malam server (`server/`, docs/BACKEND.md) at api.varesa.mom.
+ * `VITE_API_URL` points a build elsewhere; `VITE_API_URL=local` keeps accounts on the phone (for
+ * testing without a server — the register form then says so). The URL is all the client knows
+ * about the server: no key, no secret.
  */
-const API_URL: string = import.meta.env.VITE_API_URL ?? '';
+const API_URL: string = import.meta.env.VITE_API_URL ?? 'https://api.varesa.mom';
+const DEV_BUILD: boolean = import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1';
+
+const browserFetch: HttpFetch = (url, init) =>
+  fetch(url, { method: init.method, headers: init.headers ?? {}, body: init.body ?? null, credentials: init.credentials, signal: init.signal ?? null });
+
+let remote: RemoteAuth | null = null;
 
 function makeAuth(): AuthAdapter | null {
-  if (API_URL) {
-    return new RemoteAuth({
+  if (API_URL !== 'local') {
+    remote = new RemoteAuth({
       base: API_URL.replace(/\/$/, ''),
-      fetch: (url, init) => fetch(url, init),
+      fetch: browserFetch,
       now: () => Date.now(),
       read: (k) => readRaw(k),
       write: (k, v) => writeRaw(k, v),
       remove: (k) => removeRaw(k),
     });
+    return remote;
   }
   const deps = browserAuthDeps();
-  return deps ? new LocalAuth(deps) : null;
+  // with no server to decide, a developer build lets the local "manzzy" have developer mode
+  return deps ? new LocalAuth(DEV_BUILD ? { ...deps, devName: 'manzzy' } : deps) : null;
 }
 
 /**
- * A remote account: fetch the server's save and settle it against this phone's before the menu
- * shows, then mirror every local save up in the background. A local account does none of this.
+ * Whether this session may open developer mode. For a server account: only what the server said
+ * *in this session* (role "dev") — a cached role from storage does not count, so being offline
+ * never grants it. For a local account (developer builds only), the local rule above.
  */
-async function connectCloud(session: AccountSession | null): Promise<void> {
+let devAllowed = false;
+
+async function onAccount(session: AccountSession | null): Promise<void | string> {
   setSaveMirror(null);
-  if (!session || session.kind !== 'remote' || !API_URL) return;
-  const { RemoteSaveStore, SaveSync } = await import('./core/sync/saveSync');
-  const sync = new SaveSync(new RemoteSaveStore(API_URL.replace(/\/$/, ''), (url, init) => fetch(url, init)), {
-    backup: (data) => void writeRaw(`lentera-malam/save-backup@${session.id}`, JSON.stringify(data)),
-    remoteWon: () => cloudNotice('Progres dari perangkat lain lebih jauh. Muat ulang untuk memakainya.'),
-    loggedOut: () => cloudNotice('Sesi akun berakhir. Muat ulang dan masuk lagi supaya progres tersinkron.'),
+  devAllowed = false;
+  if (!session) return undefined;
+  if (session.kind === 'local' || !remote) {
+    devAllowed = session.role === 'dev';
+    return undefined;
+  }
+  const result = await connectCloud(remote, session, {
+    loadLocal: () => loadGame(),
+    adopt: (data) => void adoptSave(data),
+    mirror: (fn) => setSaveMirror(fn),
+    backup: (id, data) => void writeRaw(`lentera-malam/save-backup@${id}`, JSON.stringify(data)),
+    notice: (text) => cloudNotice(text),
+    every: (ms, fn) => {
+      const id = setInterval(fn, ms);
+      return () => clearInterval(id);
+    },
+    onOnline: (fn) => window.addEventListener('online', fn),
+    onHide: (fn) => window.addEventListener('pagehide', fn),
+    now: () => Date.now(),
   });
-  const newer = await sync.reconcile(loadGame());
-  if (newer) adoptSave(newer);
-  setSaveMirror((data) => sync.queue(data));
-  setInterval(() => void sync.tick(performance.now() / 1000), 5000);
-  window.addEventListener('pagehide', () => void sync.tick(performance.now() / 1000, true));
+  devAllowed = result.role === 'dev';
+  return result.relogin;
 }
 
-/** A line at the top of the screen for the two things sync cannot fix by itself. */
+/** A line at the top of the screen for what sync cannot fix by itself. */
 function cloudNotice(text: string): void {
   const box = document.createElement('div');
   box.textContent = text;
   Object.assign(box.style, {
     position: 'fixed', left: '50%', top: 'calc(46px + var(--lm-sat, 0px))', transform: 'translateX(-50%)', zIndex: '95',
     padding: '8px 12px', borderRadius: '6px', background: 'rgba(70,44,10,0.92)', color: '#ffe0a8', font: '12px ui-monospace, monospace',
-    border: '1px solid rgba(255,176,74,0.6)', maxWidth: '86vw', textAlign: 'center',
+    border: '1px solid rgba(255,176,74,0.6)', maxWidth: '86vw', textAlign: 'center', pointerEvents: 'none',
   });
   document.body.appendChild(box);
   setTimeout(() => box.remove(), 9000);
@@ -105,8 +128,8 @@ async function boot(): Promise<void> {
   const title = new TitleScreen(document.body, {
     settings: () => debug.openSettings(),
     auth: makeAuth(),
-    // only a remote account has anything to wait for; a local one goes straight to the menu
-    account: (session) => (session?.kind === 'remote' ? connectCloud(session) : setSaveMirror(null)),
+    // a server account connects (bounded by a timeout) before the menu; a local one goes straight there
+    account: (session) => (session?.kind === 'remote' ? onAccount(session) : void onAccount(session)),
     // the first tap is the gesture both of these need
     started: () => {
       void fullscreen().enter();
@@ -117,7 +140,7 @@ async function boot(): Promise<void> {
      * import.meta.env expression (not a helper call) so a release build compiles this to
      * undefined and the button's text never reaches the bundle — tests/devmode.test.ts checks.
      */
-    devSkip: import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1' ? { label: 'LEWATI LOGIN (MODE PENGEMBANG)' } : undefined,
+    devSkip: import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1' ? { label: 'LEWATI LOGIN (TES, MODE PENGEMBANG)' } : undefined,
   });
   // Start the download now, not after the tap: by the time anyone reads the menu it is usually in.
   const loading = import('./render3d/boot3d');
@@ -142,7 +165,7 @@ async function boot(): Promise<void> {
     title.setBackdrop(false);
     (backdrop as { dispose(): void } | null)?.dispose();
     backdrop = null;
-    (window as unknown as { __game3d: unknown }).__game3d = startWorld(host, debug, choice.continueGame);
+    (window as unknown as { __game3d: unknown }).__game3d = startWorld(host, debug, choice.continueGame, { devAllowed });
   } catch (e) {
     /*
      * Show what actually failed.

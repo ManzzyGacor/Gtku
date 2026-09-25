@@ -1203,3 +1203,30 @@ folder baru, aturan nama class CSS, aturan akun), `docs/GAME_DESIGN.md` (ditulis
 
 **Semua batch 0–7 selesai.** Yang secara jujur belum ada: server akun/sinkronisasi (dirancang dan
 klien siap, belum dibangun), lupa sandi lewat email, dan override PNG untuk tekstur 3D.
+
+## Backend akun (server/) — dibangun
+
+Fastify + TypeScript + MongoDB di `server/`, `127.0.0.1:3000`, dibuka lewat Cloudflare Tunnel sebagai
+`https://api.varesa.mom`. Kontrak bersama di `shared/api.ts`. Detail: `docs/BACKEND.md`.
+
+- **Rahasia:** `.env` diabaikan git (commit tersendiri **sebelum** file apa pun dibuat);
+  `server/.env.example` hanya nama variabel. `MONGODB_URI` hanya dibaca dari `process.env`; pesan
+  error menyebut nama variabel, log melewati `redact()`. Diuji: server dijalankan dengan URI palsu
+  berisi kata sandi → kata sandi itu tidak muncul sekali pun di output.
+- **Akun:** argon2id; username 3–16 `[A-Za-z0-9_]`, unik tanpa beda huruf besar-kecil (unique index
+  `usernameLower`), cek ketersediaan; email opsional; validasi skema ketat; rate limit login (per IP
+  dan per IP+akun) dan register; jawaban login yang sama untuk nama salah/sandi salah.
+- **Token:** access token JWT 15 menit (game menyimpannya di memori saja), refresh token 30 hari
+  sebagai cookie HttpOnly/Secure/SameSite=Strict, disimpan sebagai hash, dirotasi, token lama yang
+  dipakai lagi mencabut seluruh sesi.
+- **Peran:** `manzzy` = `dev`, diputuskan server (nama dicadangkan: perlu `DEV_SETUP_CODE` atau
+  `npm run set-role`); game membuka Mode Pengembang hanya bila server menjawab `dev` di sesi itu.
+- **Save:** koleksi `characters` (satu dokumen per karakter, `saveVersion`, `rev`), `PUT /save`
+  atomik dengan `baseRev` → 409 + salinan server; game memutuskan konflik dengan progres lalu waktu.
+  Save lokal dulu; offline tetap main, sinkron saat online; semua langkah jaringan dibatasi waktu.
+- **Tes:** `server/tests/api.test.ts` (15: register, validasi, username duplikat, login, rate limit,
+  peran, rotasi & pencabutan token, origin, CORS, save + konflik + validasi, galat tanpa bocoran,
+  konfigurasi) dan `tests/backend.test.ts` (12: adapter game melawan app server sungguhan —
+  register, login, duplikat, sinkron dua HP, offline, refresh otomatis, sesi berakhir, timeout).
+- **Belum:** server berjalan di VPS menunggu `server/.env` diisi (MONGODB_URI, JWT_SECRET) dan
+  hostname `api.varesa.mom` di Cloudflare Tunnel.

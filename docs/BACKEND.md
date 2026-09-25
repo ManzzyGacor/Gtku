@@ -1,141 +1,195 @@
-# Backend — akun & sinkronisasi save
+# Backend — akun & save Lentera Malam
 
-Status: **dirancang, belum dibangun.** Sisi klien sudah siap dan dites terhadap tiruan API ini
-(`tests/backend.test.ts`). Selama server belum ada, game memakai akun **lokal** (`LocalAuth`), dan
-layar Daftar mengatakan dengan jelas bahwa akun hanya tersimpan di perangkat ini.
+Server akun dan sinkronisasi save untuk game. **Node.js + TypeScript + Fastify + MongoDB**, di
+folder `server/`, berjalan di VPS ini pada `127.0.0.1:3000` dan dibuka ke internet hanya lewat
+Cloudflare Tunnel sebagai **`https://api.varesa.mom`**. Tipe data yang dipakai bersama game dan
+server ada di `shared/api.ts`.
 
-## 1. Prinsip
+## 1. Menjalankan
 
-1. **Klien tidak menyimpan rahasia apa pun.** Tidak ada API key di bundle. Yang diketahui klien
-   hanya alamat API (`VITE_API_URL`). Sesi = cookie `HttpOnly; Secure; SameSite=Strict` yang tidak
-   bisa dibaca JavaScript. Yang disimpan klien di `localStorage` hanya *siapa* yang masuk
-   (`id`, `name`) untuk ditampilkan di menu.
-2. **Save lokal lebih dulu, selalu.** Game tetap menulis save ke HP seperti sekarang; sinkronisasi
-   hanya cermin di belakangnya. Bermain offline tidak kehilangan apa pun.
-3. **Revisi, bukan jam.** Setiap save di server punya nomor revisi. Konflik diputuskan berdasarkan
-   **progres** (boss → tahap quest → level → EXP → waktu main), bukan waktu tulis, karena jam HP
-   bisa salah. Salinan yang kalah **tidak dibuang**: disimpan sebagai cadangan.
-4. **Adapter bisa diganti.** Semua akses akun lewat `AuthAdapter` (`src/core/account/auth.ts`) dan
-   semua akses save server lewat `SaveStore` (`src/core/sync/saveSync.ts`). Mengganti lokal → server
-   adalah satu variabel build, bukan perubahan di layar.
+```bash
+cd server
+npm install                      # sekali saja
+cp .env.example .env             # lalu isi nilainya (lihat §2) — file ini tidak pernah di-commit
+chmod 600 .env
+npm start                        # atau: npm run dev (memuat ulang saat kode berubah)
+```
 
-## 2. Yang sudah ada di klien
+Jalankan di sesi tmux bernama **`api`**, sama seperti dev server game di sesi `game`:
 
-| File | Isi |
-| --- | --- |
-| `src/core/account/auth.ts` | `AuthAdapter`, aturan nama akun & kata sandi |
-| `src/core/account/local.ts` | `LocalAuth`: PBKDF2-SHA-256 310 000 iterasi, salt per akun, tanpa plaintext |
-| `src/core/account/remote.ts` | `RemoteAuth`: API di bawah, cookie sesi, pesan galat berbahasa Indonesia |
-| `src/core/sync/saveSync.ts` | `RemoteSaveStore`, `SaveSync` (antrian, jeda 20 dtk, offline, konflik), `resolveConflict` |
-| `src/core/save.ts` | save per akun (`save/v1@<akun>`), `setSaveMirror`, `adoptSave` |
-| `src/main.ts` | memilih adapter: `VITE_API_URL` ada → server, tidak ada → lokal |
+```bash
+tmux new-session -d -s api -c /home/dev/projects/Gtku/server "npm start"
+tmux capture-pane -t api -p | tail        # lihat log
+curl -s http://127.0.0.1:3000/health      # {"ok":true,"db":"ok"}
+```
 
-Menyalakan server nanti: build dengan `VITE_API_URL=https://game.varesa.mom/api npm run build`.
+Kalau ada yang salah, server berhenti dengan pesan yang menyebut **nama** masalahnya, tidak pernah
+isinya: `Variabel MONGODB_URI belum diisi di server/.env`, atau `Tidak bisa terhubung ke MongoDB
+(MongoServerSelectionError). Periksa MONGODB_URI…`.
 
-## 3. API
+Tes (tanpa database, tanpa jaringan): `npm test` di akar repo menjalankan `server/tests/` (API
+lewat `app.inject()` dengan penyimpanan di memori) dan `tests/backend.test.ts` (adapter game
+melawan app server yang sama). Typecheck server: `cd server && npm run typecheck`.
 
-Semua di bawah `/api/v1`, JSON, `credentials: include`. **Satu origin dengan game**
-(`https://game.varesa.mom/api/...`), jadi tidak perlu CORS sama sekali.
+## 2. Variabel `.env`
 
-### Akun
+Semua rahasia **hanya** ada di `server/.env` di VPS. `.gitignore` mengabaikan `.env` dan `.env.*`
+(kecuali `.env.example`, yang hanya berisi nama variabel tanpa nilai).
 
-| Metode & jalur | Body | Jawaban |
+| Variabel | Wajib | Isi |
 | --- | --- | --- |
-| `POST /v1/auth/register` | `{ username, password, email? }` | `201 { user: { id, name } }` + `Set-Cookie` |
-| `POST /v1/auth/login` | `{ username, password }` | `200 { user: { id, name } }` + `Set-Cookie` |
-| `POST /v1/auth/logout` | — | `204`, cookie dihapus |
-| `GET /v1/auth/me` | — | `200 { user }` atau `401` |
-| `DELETE /v1/account` | `{ password }` | `204` — hapus akun **dan** save-nya |
+| `MONGODB_URI` | ya | Connection string MongoDB. Server hanya membacanya dari `process.env` dan tidak pernah menulisnya ke log, pesan error, atau dokumen. |
+| `JWT_SECRET` | ya | Rahasia penanda access token (HS256), **minimal 32 karakter acak**. Buat dengan `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Mengganti nilainya membuat semua access token lama tidak berlaku (pemain cukup di-refresh otomatis). |
+| `MONGODB_DB` | tidak | Nama database (bawaan `lentera_malam`). |
+| `CORS_ORIGIN` | tidak | Origin game yang boleh memanggil API (bawaan `https://game.varesa.mom`). |
+| `DEV_SETUP_CODE` | tidak | Kode untuk mendaftarkan akun pengembang `manzzy` lewat API (§5). Kosong = nama itu tidak bisa didaftarkan lewat API. Hapus lagi setelah dipakai. |
 
-- `username`: 3–20 karakter `[a-z0-9_]` (klien sudah menormalkan ke huruf kecil).
-- `password`: 8–256 karakter. Tidak ada aturan komposisi.
-- `email`: opsional, hanya untuk lupa sandi. Tidak ditampilkan ke siapa pun.
+## 3. Endpoint
 
-### Save
+Semua JSON. Galat selalu berbentuk `{ "error": "<kode>" }` — tidak pernah stack trace atau pesan
+driver. Kode-kodenya ada di `shared/api.ts` (`ApiErrorCode`) beserta teks bahasa Indonesianya.
 
-| Metode & jalur | Body | Jawaban |
-| --- | --- | --- |
-| `GET /v1/save` | — | `200 { data, rev, updatedAt }`, `204` bila belum ada, `401` |
-| `PUT /v1/save` | `{ data, baseRev }` | `200 { rev }`; `409 { error: "conflict", current: { data, rev, updatedAt } }` bila `baseRev` ≠ revisi server; `413` bila > 256 KB; `422` bila `data` tidak lolos validasi |
+| Metode & jalur | Autentikasi | Body | Jawaban |
+| --- | --- | --- | --- |
+| `GET /health` | — | — | `{ ok, db: "ok" \| "down" }` |
+| `GET /auth/check-username?username=` | — | — | `{ available: true }` atau `{ available: false, reason }` |
+| `POST /auth/register` | — | `{ username, password, email? }` | `201 { accessToken, expiresIn, user }` + cookie refresh |
+| `POST /auth/login` | — | `{ username, password }` | `200 { accessToken, expiresIn, user }` + cookie refresh |
+| `POST /auth/refresh` | cookie | — | `200 { accessToken, expiresIn, user }` + cookie baru (rotasi) |
+| `POST /auth/logout` | cookie | — | `204`, sesi dicabut, cookie dihapus |
+| `GET /auth/me` | Bearer | — | `{ username, role }` |
+| `GET /save` | Bearer | — | `200 { data, saveVersion, rev, updatedAt }` atau `204` |
+| `PUT /save` | Bearer | `{ data, baseRev, clientUpdatedAt? }` | `200 { rev, updatedAt }` · `409 { error: "conflict", current }` · `413` · `422` |
 
-`data` adalah `SaveData` yang sama dengan save lokal. Server **memvalidasi** dengan aturan
-`sanitizeSave` yang sama (dipindah ke paket bersama, lihat §6) dan menolak yang tidak masuk akal.
+`user` = `{ username, role }`, `role` = `"player"` atau `"dev"`.
 
-### Galat
+### Aturan input
 
-`{ "error": "<kode>" }`. Kode yang dikenal klien: `username_taken`, `invalid_username`,
-`weak_password`, `invalid_credentials`, `rate_limited`, `unauthorized`, `conflict`, `not_found`.
-Kode lain ditampilkan sebagai "Server menolak permintaan (kode N)".
+- **username:** 3–16 karakter, hanya huruf, angka, dan `_`. Unik tanpa membedakan huruf besar-kecil
+  (`Pemain` dan `pemain` adalah nama yang sama) — dijaga **unique index** pada `usernameLower`.
+- **password:** 8–128 karakter. **email:** opsional, format email wajar, ≤ 254.
+- Setiap body divalidasi skema **ketat**: field yang tidak dikenal ditolak (bukan dibuang diam-diam),
+  tipe tidak dikonversi otomatis. Body maksimal ± 272 KB.
 
 ## 4. Keamanan
 
-- **Hash kata sandi:** Argon2id (m = 19 MiB, t = 2, p = 1 — rekomendasi OWASP), per akun salt acak.
-  Akun lokal yang dibuat sebelum server ada **tidak dipindahkan** (hash PBKDF2 lokal tidak dikirim ke
-  mana-mana); pemain mendaftar ulang, lalu progres HP-nya otomatis naik sebagai save pertama
-  (`SaveSync.reconcile`).
-- **Cookie sesi:** `HttpOnly; Secure; SameSite=Strict; Path=/api`, ID acak 256 bit, disimpan di
-  server sebagai hash SHA-256, berlaku 30 hari, diperbarui saat dipakai. Logout menghapusnya di server.
-- **CSRF:** SameSite=Strict + satu origin + server menolak permintaan yang header `Origin`-nya bukan
-  `https://game.varesa.mom`.
-- **Batas laju:** login 5 kali/menit per nama akun dan 20 kali/menit per IP; register 5 kali/jam per
-  IP; `PUT /v1/save` 12 kali/menit per akun (klien mengirim paling sering tiap 20 dtk).
-- **Batas ukuran:** body maksimal 256 KB. Save sekarang ± 5–15 KB.
-- **Tidak ada yang dipercaya dari klien:** revisi dihitung server, `id` pengguna dari sesi (bukan
-  dari body), save divalidasi.
-- **Privasi:** email opsional; `DELETE /v1/account` menghapus semuanya; tidak ada pelacakan.
-- **Yang tidak dijanjikan:** keamanan akun lokal. Ia hanya menjaga kata sandi tidak tersimpan dalam
-  bentuk asli; siapa pun yang memegang HP bisa menghapus atau mengubah data browser.
+**Password.** Di-hash dengan **argon2id** (19 MiB, 2 iterasi, 1 lajur — batas bawah rekomendasi
+OWASP), salt acak per akun di dalam hash. Tidak pernah disimpan atau dikirim balik; jawaban API
+tidak pernah memuat hash. Login untuk nama yang tidak ada tetap memverifikasi hash tiruan, jadi
+waktu jawabannya tidak membocorkan nama mana yang terdaftar, dan pesannya sama.
 
-## 5. Model data (SQLite)
+**Token.**
+- **Access token** (JWT HS256, 15 menit) dikirim di JSON dan disimpan game **di memori saja** —
+  tidak pernah di `localStorage`.
+- **Refresh token** (acak 256 bit, 30 hari) hanya sebagai cookie
+  `lm_refresh; HttpOnly; Secure; SameSite=Strict; Path=/auth` — JavaScript tidak bisa membacanya.
+  Di database hanya **hash SHA-256**-nya. Setiap `/auth/refresh` **merotasi** token; memakai token
+  lama yang sudah dirotasi mencabut seluruh sesi login itu (tanda token disalin).
+- `game.varesa.mom` dan `api.varesa.mom` satu *site* (`varesa.mom`), jadi cookie SameSite=Strict tetap
+  terkirim dari game ke API.
+- Yang disimpan game di `localStorage` hanya **siapa** yang masuk (nama, peran terakhir) supaya layar
+  judul bisa langsung ke menu dan game bisa dimainkan offline.
 
-```sql
-CREATE TABLE users (
-  id            TEXT PRIMARY KEY,          -- = username (huruf kecil)
-  pass_hash     TEXT NOT NULL,             -- argon2id encoded
-  email         TEXT,
-  created_at    INTEGER NOT NULL
-);
-CREATE TABLE sessions (
-  token_hash    TEXT PRIMARY KEY,          -- sha256(cookie)
-  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  expires_at    INTEGER NOT NULL
-);
-CREATE TABLE saves (
-  user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  rev           INTEGER NOT NULL,
-  data          TEXT NOT NULL,             -- JSON SaveData
-  updated_at    INTEGER NOT NULL
-);
-CREATE TABLE save_history (                -- 10 revisi terakhir per akun, untuk pemulihan
-  user_id TEXT, rev INTEGER, data TEXT, updated_at INTEGER, PRIMARY KEY (user_id, rev)
-);
-```
+**CORS & CSRF.** CORS hanya mengizinkan `https://game.varesa.mom` (dengan kredensial). Endpoint
+yang memakai cookie (`/auth/refresh`, `/auth/logout`) juga menolak header `Origin` lain.
 
-`PUT /v1/save` = satu transaksi: `UPDATE saves SET … WHERE user_id = ? AND rev = ?`; nol baris
-berubah → 409 dengan salinan saat ini.
+**Batas laju** (per IP asli dari header `CF-Connecting-IP`, karena di belakang tunnel semua koneksi
+datang dari 127.0.0.1):
+- login: 20/menit per IP, dan **5/menit per (IP, akun)**;
+- register: 5 per 10 menit per IP; cek nama: 30/menit; refresh: 60/menit; `PUT /save`: 12/menit.
 
-## 6. Rencana penerapan
+**Tidak ada rahasia di klien.** Bundle game hanya tahu alamat API. `MONGODB_URI` hanya dibaca dari
+`process.env`; pesan error dan log melewati `redact()` yang menghapus apa pun yang berbentuk
+connection string MongoDB. Log Fastify menyamarkan header `Authorization`, `Cookie`, `Set-Cookie`.
 
-VPS yang sama (RAM 4 GB, tanpa GPU), di belakang Cloudflare Tunnel yang sudah ada.
+**Bind 127.0.0.1.** Server tidak mendengarkan antarmuka publik; satu-satunya jalan masuk adalah
+Cloudflare Tunnel.
 
-1. **Paket bersama.** Pindahkan `sanitizeSave`, aturan nama/sandi, dan tipe `SaveData` ke modul yang
-   bisa diimpor klien *dan* server (sudah murni, tanpa DOM).
-2. **Server** `server/` di repo ini: Node 22 + **Hono** (kecil, tanpa dependensi berat) +
-   **better-sqlite3** + **argon2**. Satu proses, ± 40 MB RAM. Tes Vitest memakai tiruan yang sama
-   dengan `tests/backend.test.ts` — dokumen ini, tiruan itu, dan server harus sepakat.
-3. **Satu origin.** Dev: `vite.config.ts` mem-proxy `/api` → `127.0.0.1:8787`. Produksi: server yang
-   sama menyajikan `dist/` dan `/api`, jadi Cloudflare Tunnel tetap menunjuk satu port.
-4. **Jalankan** di sesi tmux `api` (seperti `game`), lalu systemd user service bila sudah stabil.
-5. **Cadangan:** salinan harian file SQLite (`sqlite3 .backup`) ke folder di luar direktori kerja,
-   simpan 14 hari.
-6. **Nyalakan di klien:** build dengan `VITE_API_URL`. Layar Daftar otomatis mengganti peringatan
-   "hanya di perangkat ini" dan menampilkan kolom email opsional.
-7. **Uji di HP:** daftar → main → buka di browser lain / HP lain → masuk → progres sama; mode
-   pesawat saat main → kembali online → tersinkron; dua HP main bersamaan → yang progresnya lebih
-   jauh menang, yang lain muncul pemberitahuan "muat ulang".
+## 5. Peran & Mode Pengembang
 
-## 7. Belum diputuskan / belum ada
+Mode Pengembang hanya untuk akun **`manzzy`**, disimpan sebagai `role: "dev"` di database. **Server
+yang memutuskan**:
 
-- Lupa sandi lewat email (butuh layanan kirim email; email opsional sudah disiapkan di API).
-- Menampilkan cadangan save (`save-backup@<akun>`) di menu Akun untuk dipulihkan manual.
-- Mengganti nama karakter lewat Profile tersinkron (sekarang nama karakter adalah setelan per HP).
+- Mendaftar dengan nama `manzzy` ditolak (`username_reserved`) kecuali body menyertakan
+  `devSetupCode` yang sama dengan `DEV_SETUP_CODE` di `.env`. Tanpa ini, orang pertama yang kebetulan
+  mendaftar "manzzy" akan mendapat mode pengembang.
+- Cara lain (tanpa kode): daftarkan akun biasa, lalu di VPS: `cd server && npm run set-role -- manzzy dev`
+  (butuh akses shell ke server — itulah kuncinya).
+- Game hanya membuka Mode Pengembang bila **server** menjawab `role: "dev"` di sesi itu
+  (`/auth/me` setelah masuk). Peran yang tersimpan di `localStorage` tidak dihitung, jadi mengedit
+  storage atau bermain offline tidak membukanya. Build rilis tetap tidak membawa kode menunya sama
+  sekali (`tests/devmode.test.ts`).
+- Batas yang jujur: isi save dibuat oleh game di HP pemain, jadi server tidak bisa membuktikan item
+  di dalamnya "sah". Yang dijaga server: siapa yang boleh membaca/menulis save mana, bentuk dan
+  ukuran save, versi, dan peran. Untuk ekonomi yang tidak bisa dicurangi, logika itu harus pindah
+  ke server (belum).
+
+## 6. Data (MongoDB)
+
+**`users`** — `username` (tampilan), `usernameLower` (**unique index** `username_unik`),
+`passwordHash` (argon2id), `email` (opsional), `role` (`player`/`dev`), `createdAt`, `lastLogin`.
+
+**`sessions`** — `tokenHash` (unique), `userId`, `family`, `expiresAt` (**TTL index**: sesi kedaluwarsa
+terhapus sendiri), `revokedAt`, `createdAt`.
+
+**`characters`** — satu dokumen per karakter, unique `(userId, slot)` (sekarang slot 0):
+`data` (save lengkap game: posisi, level & EXP, stats, tas, perlengkapan, elemen, quest, flag
+dunia, event, cutscene), `saveVersion` (= `data.v`), `rev`, `level` (disalin untuk kueri),
+`updatedAt` (waktu server), `clientUpdatedAt` (waktu HP, hanya informasi), `createdAt`.
+
+Index dibuat otomatis saat server mulai (`ensureIndexes`).
+
+## 7. Sinkronisasi save
+
+- **Lokal dulu, selalu.** Game tetap menulis save ke HP. Setiap save juga masuk antrean dan dikirim
+  paling sering tiap 20 detik, saat kembali online (`online`), dan saat halaman disembunyikan.
+- **Versi:** `PUT /save` membawa `baseRev`. Server menulis hanya bila revisinya masih `baseRev`
+  (operasi atomik `findOneAndUpdate`), lalu `rev + 1`. Kalau tidak → `409` dengan salinan server.
+- **Konflik** diputuskan game (`resolveConflict`): **progres** dulu (boss → tahap quest → level →
+  EXP), lalu **waktu** sebagai pemecah seri (waktu tulis HP vs `updatedAt` server). Salinan yang kalah
+  disimpan sebagai cadangan (`lentera-malam/save-backup@<akun>`). Kalau salinan server menang saat
+  bermain, game berhenti mengirim dan meminta muat ulang.
+- **Setelah masuk:** game mengambil save server; kalau lebih jauh, dipakai; kalau save HP lebih jauh,
+  dikirim. Semuanya dibatasi waktu (8 detik) — menu selalu muncul.
+- **Offline:** game main dari save di HP, menampilkan pemberitahuan, dan menyinkronkan otomatis nanti.
+  Server tidak bisa dihubungi saat login → pesan "Server tidak bisa dihubungi…", form tetap bisa dipakai.
+- **Sesi berakhir** (logout di tempat lain, token dicabut) → kembali ke form masuk dengan pesan.
+
+## 8. Integrasi game
+
+| File | Isi |
+| --- | --- |
+| `shared/api.ts` | tipe, aturan nama/sandi, kode & teks galat — dipakai game **dan** server |
+| `src/core/account/auth.ts` | `AuthAdapter` (tidak berubah bentuknya) |
+| `src/core/account/remote.ts` | `RemoteAuth`: token di memori, refresh lewat cookie, timeout 10 dtk, cek nama |
+| `src/core/account/local.ts` | `LocalAuth` untuk tes tanpa server (`VITE_API_URL=local`) |
+| `src/core/sync/saveSync.ts` | `RemoteSaveStore` + `SaveSync` |
+| `src/cloud.ts` | menyambungkan akun setelah login: peran, save, antrean sinkron (dibatasi waktu) |
+| `src/main.ts` | memilih adapter: bawaan `https://api.varesa.mom`; `VITE_API_URL=local` = akun di HP |
+
+## 9. Yang harus dilakukan di VPS & Cloudflare
+
+1. **MongoDB:** buat database (mis. MongoDB Atlas, tier gratis cukup). Buat user database khusus
+   aplikasi dengan hak `readWrite` hanya pada database `lentera_malam`. Di Network Access Atlas,
+   izinkan IP publik VPS ini saja.
+2. **`server/.env`:** `cp server/.env.example server/.env`, isi `MONGODB_URI` dan `JWT_SECRET`
+   (perintah pembuatnya di §2), `chmod 600 server/.env`.
+3. **Akun pengembang:** isi `DEV_SETUP_CODE` sementara, daftar sebagai `manzzy` dengan kode itu
+   (atau daftar biasa lalu `npm run set-role -- manzzy dev`), lalu kosongkan lagi kodenya.
+4. **Jalankan:** `tmux new-session -d -s api -c /home/dev/projects/Gtku/server "npm start"`,
+   cek `curl -s http://127.0.0.1:3000/health`.
+5. **Cloudflare Tunnel:** tambahkan public hostname **`api.varesa.mom` → `http://127.0.0.1:3000`**
+   pada tunnel yang sama dengan `game.varesa.mom` (Zero Trust → Networks → Tunnels → tunnel →
+   Public Hostname → Add; atau `ingress` di `config.yml` cloudflared lalu restart cloudflared).
+   DNS CNAME dibuat otomatis oleh dashboard.
+6. **Cloudflare, disarankan:** SSL/TLS mode *Full*; *Always Use HTTPS*; jangan aktifkan cache untuk
+   `api.varesa.mom` (semua jawaban API memang tidak boleh di-cache). Rate limiting rule opsional di
+   Cloudflare sebagai lapis kedua untuk `/auth/login` dan `/auth/register`.
+7. **Uji di HP:** buka game → Daftar → main → buka di browser lain → Masuk → progres sama.
+
+## 10. Belum ada
+
+- Lupa sandi lewat email (email opsional sudah disimpan; butuh layanan kirim email).
+- Ganti kata sandi, hapus akun, dan daftar sesi aktif.
+- Menampilkan cadangan save di menu Akun untuk dipulihkan manual.
+- Validasi isi save yang lebih dalam di server (lihat batas jujur di §5).

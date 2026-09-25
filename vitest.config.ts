@@ -10,7 +10,8 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
-    include: ['tests/**/*.test.ts'],
+    // the game's tests, and the server's (server/tests: the API on in-memory storage)
+    include: ['tests/**/*.test.ts', 'server/tests/**/*.test.ts'],
     environment: 'node',
     // Each file gets a fresh module registry: several tests install browser globals of their own.
     isolate: true,

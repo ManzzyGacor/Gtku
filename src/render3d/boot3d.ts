@@ -57,7 +57,7 @@ function notice(text: string | null): void {
  * Build the world. The choice (continue or start over) is made *before* construction, which is
  * what lets a loaded save place the hero and the clock on the very first frame.
  */
-export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: boolean): Booted3D {
+export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: boolean, access: { devAllowed: boolean } = { devAllowed: false }): Booted3D {
   // Whatever the player tuned in the combat panel on a previous run, applied before anything reads
   // an attack's numbers. It lives here rather than in the entry so the title screen does not have
   // to wait for the combat model to download.
@@ -98,7 +98,7 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
   if (!continueGame) game.playCutscene('intro', { auto: true });
 
   // ── Mode Pengembang ──
-  const dev = installDevMode(() => game, debug);
+  const dev = installDevMode(() => game, debug, access.devAllowed);
 
   /**
    * Rebuild everything that lived on the GPU.
@@ -198,8 +198,17 @@ const DEV_KEY = 'lentera-malam/dev';
 const DEV_TOOLS: boolean = import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1';
 
 /** The developer menu, if this build is allowed one (see `DEV_TOOLS`). */
-function installDevMode(getGame: () => Game3D, debug: DebugUi): { dispose(): void } {
+function installDevMode(getGame: () => Game3D, debug: DebugUi, allowed: boolean): { dispose(): void } {
   if (!DEV_TOOLS) return { dispose: () => undefined };
+  /*
+   * Two locks. The build (above): a release build does not contain the menu at all. And the
+   * account: only a session whose role the *server* reported as "dev" in this session (the
+   * account "manzzy"). Everyone else gets a plain answer instead of a menu.
+   */
+  if (!allowed) {
+    debug.onDevUnlock = () => getGame().hud.toast('Mode Pengembang hanya untuk akun pengembang.', 3);
+    return { dispose: () => undefined };
+  }
 
   let menu: import('../ui/DevMenu').DevMenu | null = null;
   let button: HTMLButtonElement | null = null;

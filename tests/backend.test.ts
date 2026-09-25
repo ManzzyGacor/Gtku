@@ -1,211 +1,261 @@
 /**
- * The server adapters (`core/account/remote.ts`, `core/sync/saveSync.ts`) against an in-memory fake
- * of the API documented in docs/BACKEND.md. The fake is the contract: if the document and this file
- * disagree, one of them is wrong.
+ * The game's account and save adapters against the **real server app** (`server/src/app.ts`) on
+ * in-memory storage. No mock of the API: `fetch` is `app.inject()` plus a cookie jar per "phone",
+ * behaving like a browser does with an HttpOnly cookie scoped to /auth.
  *
- * The session is a cookie the fake keeps in its own jar — like a browser keeps an HttpOnly cookie —
- * and the tests check that the client never stores it, or anything else secret.
+ * Covered, as asked: register, login, duplicate usernames, save sync (including two phones and
+ * offline) — plus that the client never stores a token and never hangs when the server is gone.
  */
 import assert from 'node:assert/strict';
-import { test } from 'vitest';
-import { RemoteAuth, REMOTE_SESSION_KEY, type HttpFetch } from '../src/core/account/remote';
+import { beforeEach, test } from 'vitest';
+import { buildApp } from '../server/src/app';
+import { loadConfig } from '../server/src/config';
+import { memoryRepos } from '../server/src/repo';
+import { RemoteAuth, REMOTE_SESSION_KEY, UNREACHABLE, type HttpFetch } from '../src/core/account/remote';
 import { progressScore, RemoteSaveStore, resolveConflict, SaveSync } from '../src/core/sync/saveSync';
+import { connectCloud, type CloudDeps } from '../src/cloud';
 
-interface FakeServer {
-  fetch: HttpFetch;
-  /** Another device: its own cookie jar against the same server. */
-  device(): HttpFetch;
-  online: boolean;
-  saves: Map<string, { data: unknown; rev: number; updatedAt: number }>;
-}
+const BASE = 'https://api.varesa.mom';
+let app: Awaited<ReturnType<typeof buildApp>>;
+let online = true;
+let ipN = 0;
 
-function fakeServer(): FakeServer {
-  const users = new Map<string, { password: string }>();
-  const sessions = new Map<string, string>();
-  const saves = new Map<string, { data: unknown; rev: number; updatedAt: number }>();
-  let n = 0;
-  const server = { online: true, saves } as FakeServer;
-  const reply = (status: number, body?: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => (body === undefined ? null : body) });
-  const device = (): HttpFetch => {
-    const jar = { cookie: '' };
-    return async (url, init) => {
-      if (!server.online) throw new TypeError('Failed to fetch');
-      assert.equal(init.credentials, 'include', 'every request carries the cookie');
-      const path = url.replace(/^https:\/\/api\.test/, '');
-      const body = init.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
-      const user = sessions.get(jar.cookie);
-      if (path === '/v1/auth/register' && init.method === 'POST') {
-        const name = String(body.username);
-        if (users.has(name)) return reply(409, { error: 'username_taken' });
-        if (String(body.password).length < 8) return reply(400, { error: 'weak_password' });
-        users.set(name, { password: String(body.password) });
-        jar.cookie = `sid${++n}`;
-        sessions.set(jar.cookie, name);
-        return reply(201, { user: { id: name, name } });
-      }
-      if (path === '/v1/auth/login' && init.method === 'POST') {
-        const u = users.get(String(body.username));
-        if (!u || u.password !== body.password) return reply(401, { error: 'invalid_credentials' });
-        jar.cookie = `sid${++n}`;
-        sessions.set(jar.cookie, String(body.username));
-        return reply(200, { user: { id: body.username, name: body.username } });
-      }
-      if (path === '/v1/auth/logout') {
-        sessions.delete(jar.cookie);
-        return reply(204);
-      }
-      if (path === '/v1/save') {
-        if (!user) return reply(401, { error: 'unauthorized' });
-        const cur = saves.get(user);
-        if (init.method === 'GET') return cur ? reply(200, cur) : reply(204);
-        if (init.method === 'PUT') {
-          if ((cur?.rev ?? 0) !== body.baseRev) return reply(409, { error: 'conflict', current: cur });
-          const next = { data: body.data, rev: (cur?.rev ?? 0) + 1, updatedAt: Date.now() };
-          saves.set(user, next);
-          return reply(200, { rev: next.rev });
-        }
-      }
-      return reply(404, { error: 'not_found' });
-    };
+beforeEach(async () => {
+  online = true;
+  const config = loadConfig({ MONGODB_URI: 'mongodb://tidak-dipakai', JWT_SECRET: 'k'.repeat(48), DEV_SETUP_CODE: 'kode-uji' });
+  app = await buildApp({ config, repos: memoryRepos() });
+});
+
+/** One phone: its own cookie jar and address. */
+function phone(): { fetch: HttpFetch; jar: Map<string, string> } {
+  const jar = new Map<string, string>();
+  const ip = `192.0.2.${++ipN}`;
+  const fetch: HttpFetch = async (url, init) => {
+    if (!online) throw new TypeError('Failed to fetch');
+    assert.equal(init.credentials, 'include');
+    const path = url.slice(BASE.length);
+    const headers: Record<string, string> = { ...init.headers, origin: 'https://game.varesa.mom', 'cf-connecting-ip': ip };
+    // like the browser: the cookie is scoped to /auth, and JavaScript never sees it
+    if (path.startsWith('/auth') && jar.size) headers.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
+    const res = await app.inject({ method: init.method as 'GET', url: path, headers, ...(init.body !== undefined ? { payload: init.body } : {}) });
+    for (const c of res.cookies) {
+      if (!c.value || (c.expires && c.expires.getTime() < Date.now())) jar.delete(c.name);
+      else jar.set(c.name, c.value);
+    }
+    return { ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, json: async () => res.json() };
   };
-  server.fetch = device();
-  server.device = device;
-  return server;
+  return { fetch, jar };
 }
 
-function auth(fetch: HttpFetch, store = new Map<string, string>()) {
-  return {
-    store,
-    auth: new RemoteAuth({
-      base: 'https://api.test',
-      fetch,
-      now: () => 1,
-      read: (k) => store.get(k) ?? null,
-      write: (k, v) => (store.set(k, v), true),
-      remove: (k) => void store.delete(k),
-    }),
-  };
+function client(p = phone(), store = new Map<string, string>()) {
+  const auth = new RemoteAuth({
+    base: BASE,
+    fetch: p.fetch,
+    now: () => Date.now(),
+    read: (k) => store.get(k) ?? null,
+    write: (k, v) => (store.set(k, v), true),
+    remove: (k) => void store.delete(k),
+    timeoutMs: 2000,
+  });
+  return { auth, store, phone: p };
 }
 
-const save = (stage: number, level: number, worldTime = 0) => ({ v: 2, quest: { stage, kills: 0 }, character: { level, exp: 0 }, worldTime });
+const save = (stage: number, level: number) => ({ v: 2, hero: { x: 100, y: 100, hp: 10 }, quest: { stage, kills: 0 }, character: { level, exp: 0 } });
+const hooks = () => ({ backups: [] as unknown[], remoteWon: 0, loggedOut: 0 });
+const syncOf = (auth: RemoteAuth, h = hooks()) =>
+  new SaveSync(new RemoteSaveStore(auth), { backup: (d) => void h.backups.push(d), remoteWon: () => void h.remoteWon++, loggedOut: () => void h.loggedOut++ });
 
-test('register and login over the API; the client stores who, never a secret', async () => {
-  const s = fakeServer();
-  const { auth: a, store } = auth(s.fetch);
-  const r = await a.register('Penjaga', 'sandi-panjang-1', 'saya@contoh.id');
-  assert.ok(r.ok && r.session.kind === 'remote');
-  const stored = JSON.parse(store.get(REMOTE_SESSION_KEY)!);
-  assert.deepEqual(Object.keys(stored).sort(), ['id', 'kind', 'name', 'since']);
+// ───────────────────────── accounts ─────────────────────────
+
+test('register over the API: logged in, and storage holds who — never a token or a password', async () => {
+  const { auth, store, phone: p } = client();
+  const r = await auth.register('Penjaga_1', 'sandi-panjang-1');
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.equal(r.ok && r.session.role, 'player');
   const everything = [...store.values()].join('\n');
-  assert.ok(!everything.includes('sandi-panjang-1') && !/sid\d/.test(everything), 'no password, no session id in storage');
-
-  const dup = await a.register('penjaga', 'sandi-panjang-2');
-  assert.ok(!dup.ok && dup.error === 'nama-dipakai', 'server errors become Indonesian messages');
-  const bad = await a.login('penjaga', 'salah-salah');
-  assert.ok(!bad.ok && bad.error === 'salah');
-  await a.logout();
-  assert.equal(a.current(), null);
-  assert.ok((await a.login('penjaga', 'sandi-panjang-1')).ok);
+  assert.ok(!everything.includes('sandi-panjang-1'), 'no password');
+  assert.ok(!/eyJ|token/i.test(everything), 'no access token in storage');
+  assert.ok(p.jar.has('lm_refresh'), 'the refresh token is a cookie the page cannot read');
+  assert.deepEqual(Object.keys(JSON.parse(store.get(REMOTE_SESSION_KEY)!)).sort(), ['id', 'name', 'role', 'since']);
+  const me = await auth.me();
+  assert.deepEqual(me, { username: 'Penjaga_1', role: 'player' });
 });
 
-test('offline is reported as offline, not as a wrong password', async () => {
-  const s = fakeServer();
-  s.online = false;
-  const { auth: a } = auth(s.fetch);
-  const r = await a.login('siapa', 'sandi-panjang-1');
-  assert.ok(!r.ok && r.error === 'jaringan');
+test('login: right password in, wrong password out with an Indonesian message', async () => {
+  const first = client();
+  await first.auth.register('Masuk', 'sandi-panjang-1');
+  const { auth } = client();
+  const bad = await auth.login('masuk', 'salah-salah');
+  assert.ok(!bad.ok && bad.error === 'salah' && /salah/.test(bad.message));
+  const ok = await auth.login('MASUK', 'sandi-panjang-1');
+  assert.ok(ok.ok && ok.session.name === 'Masuk');
 });
 
-test('saves go up with revisions, and a push waits for its interval', async () => {
-  const s = fakeServer();
-  await auth(s.fetch).auth.register('satu', 'sandi-panjang-1');
-  const sync = new SaveSync(new RemoteSaveStore('https://api.test', s.fetch), { backup: () => undefined, remoteWon: () => undefined, loggedOut: () => undefined });
-  sync.queue(save(1, 3));
-  await sync.tick(100);
+test('duplicate usernames are refused, whatever the case, and the name check says so first', async () => {
+  await client().auth.register('Pemain', 'sandi-panjang-1');
+  const { auth } = client();
+  assert.deepEqual(await auth.checkUsername('pEMAIN'), { available: false, message: 'Nama akun itu sudah dipakai. Pilih nama lain.' });
+  assert.equal((await auth.checkUsername('Pemain_Baru')).available, true);
+  const dup = await auth.register('PEMAIN', 'sandi-panjang-2');
+  assert.ok(!dup.ok && dup.error === 'nama-dipakai');
+});
+
+test('the developer role comes from the server only', async () => {
+  const { auth, store } = client();
+  const r = await auth.register('biasa', 'sandi-panjang-1');
+  assert.ok(r.ok && r.session.role === 'player');
+  // editing storage does not make anyone a developer: the server's answer does
+  store.set(REMOTE_SESSION_KEY, JSON.stringify({ id: 'biasa', name: 'biasa', role: 'dev', since: 0 }));
+  assert.deepEqual(await auth.me(), { username: 'biasa', role: 'player' });
+  assert.equal(JSON.parse(store.get(REMOTE_SESSION_KEY)!).role, 'player', 'and the cache is corrected');
+});
+
+test('a server that cannot be reached says so, instead of "wrong password" or a spinner', async () => {
+  online = false;
+  const { auth } = client();
+  const r = await auth.login('siapa', 'sandi-panjang-1');
+  assert.ok(!r.ok && r.error === 'jaringan' && r.message === UNREACHABLE);
+
+  // and a server that accepts the connection but never answers is cut off by the timeout
+  const hanging = new RemoteAuth({ base: BASE, fetch: (_u, init) => new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted')))), now: () => 0, read: () => null, write: () => true, remove: () => undefined, timeoutMs: 50 });
+  const t0 = Date.now();
+  const late = await hanging.login('siapa', 'sandi-panjang-1');
+  assert.ok(!late.ok && late.error === 'jaringan');
+  assert.ok(Date.now() - t0 < 1000, 'bounded');
+});
+
+// ───────────────────────── save sync ─────────────────────────
+
+test('save sync: saves go up with revisions and come down on another phone', async () => {
+  const a = client();
+  await a.auth.register('Satu', 'sandi-panjang-1');
+  const sync = syncOf(a.auth);
+  assert.equal(await sync.reconcile(save(1, 3)), null, 'nothing on the server yet: the phone save stays');
+  await sync.tick(0, true);
   assert.equal(sync.rev, 1);
   sync.queue(save(1, 4));
-  await sync.tick(105);
-  assert.equal(sync.rev, 1, 'not yet: pushes are spaced out');
-  await sync.tick(125);
+  await sync.tick(100, true);
   assert.equal(sync.rev, 2);
-  assert.equal((s.saves.get('satu')!.data as ReturnType<typeof save>).character.level, 4);
+
+  const b = client();
+  await b.auth.login('satu', 'sandi-panjang-1');
+  const got = (await syncOf(b.auth).reconcile(null)) as ReturnType<typeof save>;
+  assert.equal(got.character.level, 4, 'a new phone starts from the server copy');
 });
 
-test('offline pushes are kept and sent later; nothing is lost', async () => {
-  const s = fakeServer();
-  await auth(s.fetch).auth.register('dua', 'sandi-panjang-1');
-  const sync = new SaveSync(new RemoteSaveStore('https://api.test', s.fetch), { backup: () => undefined, remoteWon: () => undefined, loggedOut: () => undefined });
-  s.online = false;
+test('two phones: the save further along wins, and the other copy is kept as a backup', async () => {
+  const a = client();
+  await a.auth.register('Dua', 'sandi-panjang-1');
+  const b = client();
+  await b.auth.login('dua', 'sandi-panjang-1');
+  const ha = hooks();
+  const hb = hooks();
+  const sa = syncOf(a.auth, ha);
+  const sb = syncOf(b.auth, hb);
+
+  sa.queue(save(2, 8));
+  await sa.tick(0, true);
+  // phone B, older progress, never synced: conflict, and it loses
+  sb.queue(save(1, 3));
+  await sb.tick(0, true);
+  assert.equal(hb.remoteWon, 1);
+  assert.equal(sb.paused, true, 'B stops pushing until it reloads the newer save');
+  assert.equal((hb.backups[0] as ReturnType<typeof save>).character.level, 3, "B's copy is kept");
+
+  // phone A plays on further while B's server copy is stale for A: A wins and writes over it
+  sa.queue(save(3, 12));
+  await sa.tick(10, true);
+  const c = client();
+  await c.auth.login('dua', 'sandi-panjang-1');
+  const now = (await syncOf(c.auth).reconcile(null)) as ReturnType<typeof save>;
+  assert.equal(now.quest.stage, 3);
+});
+
+test('offline: saves wait on the phone and go up when the connection is back', async () => {
+  const a = client();
+  await a.auth.register('Tiga', 'sandi-panjang-1');
+  const sync = syncOf(a.auth);
+  online = false;
   sync.queue(save(1, 2));
   await sync.tick(0, true);
   assert.equal(sync.offlineCount, 1);
   assert.ok(sync.hasPending);
-  s.online = true;
+  online = true;
   await sync.tick(100, true);
   assert.equal(sync.hasPending, false);
-  assert.equal(s.saves.get('dua')!.rev, 1);
+  assert.equal(sync.rev, 1);
 });
 
-test('two phones: the one further along wins, and the other copy is kept as a backup', async () => {
-  const s = fakeServer();
-  const phoneA = s.fetch;
-  const phoneB = s.device();
-  await auth(phoneA).auth.register('tiga', 'sandi-panjang-1');
-  await auth(phoneB).auth.login('tiga', 'sandi-panjang-1');
-  const backups: unknown[] = [];
-  let remoteWon = 0;
-  const hooks = { backup: (d: unknown) => void backups.push(d), remoteWon: () => void remoteWon++, loggedOut: () => undefined };
-  const a = new SaveSync(new RemoteSaveStore('https://api.test', phoneA), hooks);
-  const b = new SaveSync(new RemoteSaveStore('https://api.test', phoneB), hooks);
-
-  a.queue(save(2, 8));
-  await a.tick(0, true); // rev 1 on the server
-  // phone B has older progress and has never synced: its push conflicts, and it loses
-  b.queue(save(1, 3));
-  await b.tick(0, true);
-  assert.equal(remoteWon, 1, 'B is told the server copy is further along');
-  assert.equal(b.paused, true, 'and stops pushing until it reloads');
-  assert.equal((s.saves.get('tiga')!.data as ReturnType<typeof save>).quest.stage, 2, "A's progress is untouched");
-  assert.equal((backups[0] as ReturnType<typeof save>).character.level, 3, "B's copy is kept");
-
-  // phone A later plays offline on an old revision while the server moved on: it is further along, so it wins
-  s.saves.set('tiga', { data: save(2, 9), rev: 5, updatedAt: 0 });
-  a.queue(save(3, 12));
-  await a.tick(10, true);
-  assert.equal(a.rev, 5, 'adopts the server revision…');
-  await a.tick(11, true);
-  assert.equal((s.saves.get('tiga')!.data as ReturnType<typeof save>).quest.stage, 3, '…and writes over it');
-});
-
-test('logging in on a new phone brings the server save down; a fresh account takes the phone save up', async () => {
-  const s = fakeServer();
-  await auth(s.fetch).auth.register('empat', 'sandi-panjang-1');
-  const hooks = { backup: () => undefined, remoteWon: () => undefined, loggedOut: () => undefined };
-  const first = new SaveSync(new RemoteSaveStore('https://api.test', s.fetch), hooks);
-  assert.equal(await first.reconcile(save(1, 5)), null, 'nothing on the server yet: keep the local one');
-  assert.ok(first.hasPending, 'and it is queued to go up');
-  await first.tick(0, true);
-
-  const other = s.device();
-  await auth(other).auth.login('empat', 'sandi-panjang-1');
-  const second = new SaveSync(new RemoteSaveStore('https://api.test', other), hooks);
-  const got = (await second.reconcile(null)) as ReturnType<typeof save>;
-  assert.equal(got.character.level, 5, 'the new phone starts from the server copy');
-});
-
-test('an expired session asks for a login instead of failing silently', async () => {
-  const s = fakeServer();
-  let out = 0;
-  const sync = new SaveSync(new RemoteSaveStore('https://api.test', s.device()), { backup: () => undefined, remoteWon: () => undefined, loggedOut: () => void out++ });
+test('an expired access token is refreshed through the cookie without the player noticing', async () => {
+  const a = client();
+  await a.auth.register('Empat', 'sandi-panjang-1');
+  // throw away the in-memory access token, as a page reload would
+  (a.auth as unknown as { access: unknown }).access = null;
+  const sync = syncOf(a.auth);
   sync.queue(save(1, 1));
   await sync.tick(0, true);
-  assert.equal(out, 1);
-  assert.ok(sync.hasPending, 'the save is still waiting');
+  assert.equal(sync.rev, 1, 'refreshed and pushed');
 });
 
-test('progress beats recency: the boss beats everything, then quest stage, then level', () => {
+// ───────────────────────── connecting after login ─────────────────────────
+
+function cloudDeps(local: unknown = null) {
+  const log = { notices: [] as string[], adopted: null as unknown, mirrored: false };
+  const deps: CloudDeps = {
+    loadLocal: () => local as never,
+    adopt: (d) => void (log.adopted = d),
+    mirror: (fn) => void (log.mirrored = fn !== null),
+    backup: () => undefined,
+    notice: (t) => void log.notices.push(t),
+    every: () => () => undefined,
+    onOnline: () => undefined,
+    onHide: () => undefined,
+    now: () => Date.now(),
+  };
+  return { deps, log };
+}
+
+test('after login: the role and the newer save come from the server; offline plays on from the phone', async () => {
+  const a = client();
+  const reg = await a.auth.register('Lima', 'sandi-panjang-1');
+  assert.ok(reg.ok);
+  const s = syncOf(a.auth);
+  s.queue(save(2, 7));
+  await s.tick(0, true);
+
+  const b = client();
+  const login = await b.auth.login('lima', 'sandi-panjang-1');
+  assert.ok(login.ok);
+  const { deps, log } = cloudDeps(save(1, 2));
+  const res = await connectCloud(b.auth, login.session, deps);
+  assert.equal(res.role, 'player');
+  assert.equal((log.adopted as ReturnType<typeof save>).character.level, 7, "the server's further-along save is adopted");
+  assert.ok(log.mirrored, 'and every local save is mirrored from now on');
+
+  online = false;
+  const off = cloudDeps(save(1, 2));
+  const res2 = await connectCloud(b.auth, login.session, off.deps, 500);
+  assert.equal(res2.offline, true);
+  assert.equal(res2.role, null, 'no developer mode on a role nobody confirmed');
+  assert.match(off.log.notices[0], /tidak bisa dihubungi/);
+});
+
+test('a session the server has ended sends the player back to the login form', async () => {
+  const a = client();
+  const reg = await a.auth.register('Enam', 'sandi-panjang-1');
+  assert.ok(reg.ok);
+  // logged out elsewhere: this phone's cookie is revoked, and it has no access token
+  a.phone.jar.set('lm_refresh', 'dicabut');
+  (a.auth as unknown as { access: unknown }).access = null;
+  const { deps } = cloudDeps();
+  const res = await connectCloud(a.auth, reg.session, deps);
+  assert.match(res.relogin ?? '', /masuk lagi/);
+});
+
+test('the conflict rule: progress first, time only breaks a tie', () => {
   assert.ok(progressScore({ ...save(4, 5), bossDefeated: true }) > progressScore(save(3, 30)));
   assert.ok(progressScore(save(2, 1)) > progressScore(save(1, 30)));
-  assert.ok(progressScore(save(1, 6)) > progressScore(save(1, 5, 99999)));
-  assert.equal(resolveConflict(save(1, 5), { data: save(1, 5), rev: 3, updatedAt: 0 }).winner, 'remote', 'a tie goes to the server');
+  assert.equal(resolveConflict(save(1, 5), { data: save(1, 5), rev: 3, updatedAt: 1000 }, 2000).winner, 'local', 'same progress, later write');
+  assert.equal(resolveConflict(save(1, 5), { data: save(1, 5), rev: 3, updatedAt: 3000 }, 2000).winner, 'remote');
+  assert.equal(resolveConflict(save(1, 4), { data: save(1, 5), rev: 3, updatedAt: 0 }, 9e12).winner, 'remote', 'a clock cannot beat progress');
 });

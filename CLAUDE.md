@@ -47,6 +47,11 @@ Flag URL untuk menguji di HP: `?fps=1`, `?bloom=0`, `?preset=vlow|low|medium|hig
 Variabel build: `VITE_API_URL` (akun server), `VITE_DEV_TOOLS=1` (Mode Pengembang di build staging).
 Semuanya juga ada di menu Pengaturan (gerigi di pojok kanan atas).
 
+- **Server akun** (`server/`, Fastify + MongoDB, `127.0.0.1:3000` → `https://api.varesa.mom`) hidup di
+  **sesi tmux `api`**: `tmux new-session -d -s api -c <repo>/server "npm start"`. Rahasia hanya di
+  `server/.env` (di-.gitignore; contoh nama variabel di `server/.env.example`). **Jangan pernah membaca,
+  mencetak, atau menyalin isi `server/.env`** — termasuk ke log, dokumen, atau pesan commit.
+  Tes server berjalan lewat `npm test` di akar repo (`server/tests/`, tanpa database).
 - Dev server harus hidup di **sesi tmux bernama `game`**: `tmux new-session -d -s game -c <repo> "npm run dev"`.
   Cek: `tmux capture-pane -t game -p | tail`. `vite.config.ts` sudah berisi `allowedHosts: ['game.varesa.mom']` dan HMR `wss`/443.
 - VPS: RAM 4 GB tanpa swap/GPU → **jangan menjalankan browser headless**. Verifikasi visual dilakukan lewat `npm run assets`
@@ -57,7 +62,8 @@ Semuanya juga ada di menu Pengaturan (gerigi di pojok kanan atas).
 
 ```
 src/
-  main.ts            entry: pasang overlay debug lalu muat render3d/boot3d secara dinamis
+  main.ts            entry: overlay debug, layar judul + akun, lalu muat render3d/boot3d secara dinamis
+  cloud.ts           setelah login ke server: peran, save server vs HP, antrean sinkron (dibatasi waktu)
   config.ts          konstanta global (TILE, ukuran dunia, key save/setelan, versi)
   core/              LOGIKA GAME MURNI — dilarang mengimpor three, dan hanya boleh mengimpor
                      src/core/** + src/config (dijaga tests/architecture.test.ts)
@@ -76,7 +82,8 @@ src/
                      drops (tabel loot), look (perlengkapan → warna di model hero)
     download/        pack (format paket area), manifest, downloader (aman & bisa dilanjutkan),
                      gate (area mana yang butuh data)
-    account/         auth (AuthAdapter + aturan), local (PBKDF2, di HP), remote (API server, cookie)
+    account/         auth (AuthAdapter + aturan dari shared/), local (PBKDF2, tes tanpa server),
+                     remote (API server: access token di memori, refresh lewat cookie HttpOnly)
     sync/            saveSync (save lokal-dulu → server: revisi, konflik berdasarkan progres)
     (akar)           autotune (AUTO per komponen), devtools (gerbang Mode Pengembang)
     (akar)           progression (level/EXP), lifecycle (pause/context-lost/orientasi), saveMigrate
@@ -101,7 +108,10 @@ tests/               Vitest: logika inti, playthrough headless, dan penjaga lapi
 scripts/             skrip node — termasuk areaPacks.ts (paket data area; dipakai plugin Vite),
                      ekspor sheet, preview dunia, ascii-map, plan-stats,
                      stream-budget, preview-textures, crop-reference, debug-puzzle)
-docs/                OVERHAUL.md (rencana induk), GAME_DESIGN.md, PROGRESS.md, STORY.md
+shared/              api.ts: kontrak game ↔ server (tipe, aturan nama/sandi, kode galat) — murni
+server/              backend akun & save (Fastify + MongoDB + argon2id + JWT), paket npm sendiri:
+                     src/app (rute), config, repo (antarmuka + memori), repo.mongo, index (start)
+docs/                OVERHAUL.md (rencana induk), GAME_DESIGN.md, PROGRESS.md, STORY.md, BACKEND.md
 docs/reference/      TARGET VISUAL (referensi-visual.png). Buka dengan scripts/crop-reference.ts
                      untuk memeriksa bagiannya dari dekat; scripts/png.ts bisa decode PNG.
 ```
@@ -143,8 +153,8 @@ phaser.
   (`lm-set-*`, `lm-shop-*`, …). Class `lm-title` milik layar judul pernah dipakai header Pengaturan
   dan menutupi seluruh panelnya. Dijaga `tests/source.test.ts` (satu class, satu stylesheet) dan
   `tests/settingspanel.test.ts` (cascade CSS nyata ke setiap elemen panel).
-- **Akun:** tidak pernah simpan kata sandi plaintext, tidak ada rahasia/API key di klien, dan jangan
-  menjanjikan keamanan akun lokal. Lihat `docs/BACKEND.md`.
+- **Akun:** tidak pernah simpan kata sandi plaintext, tidak ada rahasia/API key di klien, access token
+  hanya di memori, dan peran (`dev`) hanya dari jawaban server. Lihat `docs/BACKEND.md`.
 - **Semua panel UI wajib menghormati safe area** lewat `var(--lm-sa*)` di CSS, atau `safeInsets()`
   kalau memposisikan dengan JavaScript. Dijaga `tests/layout.test.ts` di 2318x759.
 - **Jangan pakai backtick di dalam komentar yang berada DI DALAM template literal** (blok CSS di

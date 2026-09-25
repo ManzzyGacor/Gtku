@@ -13,12 +13,12 @@
  *
  * Pure apart from the injected `fetch`; the clock is passed in, so tests drive it frame by frame.
  */
-import type { HttpFetch } from '../account/remote';
+import type { RemoteAuth } from '../account/remote';
 
 export interface RemoteSave {
   data: unknown;
   rev: number;
-  /** Server time of the last write, epoch ms (for display only — never for deciding). */
+  /** Server time of the last write, epoch ms: the tie-breaker when two saves are equally far along. */
   updatedAt: number;
 }
 
@@ -26,47 +26,34 @@ export type PushResult = { ok: true; rev: number } | { ok: false; conflict: Remo
 
 export interface SaveStore {
   pull(): Promise<RemoteSave | null | 'offline' | 'unauthorized'>;
-  push(data: unknown, baseRev: number): Promise<PushResult>;
+  push(data: unknown, baseRev: number, clientUpdatedAt: number): Promise<PushResult>;
 }
 
-/** GET/PUT `/v1/save`, with the session cookie. */
+/** `GET/PUT /save` on the server, through the account's access token (refreshed as needed). */
 export class RemoteSaveStore implements SaveStore {
-  constructor(
-    private readonly base: string,
-    private readonly fetch: HttpFetch,
-  ) {}
+  constructor(private readonly auth: Pick<RemoteAuth, 'authed'>) {}
 
   async pull(): Promise<RemoteSave | null | 'offline' | 'unauthorized'> {
-    try {
-      const res = await this.fetch(`${this.base}/v1/save`, { method: 'GET', credentials: 'include' });
-      if (res.status === 204 || res.status === 404) return null;
-      if (res.status === 401) return 'unauthorized';
-      if (!res.ok) return 'offline';
-      return asRemote(await res.json());
-    } catch {
-      return 'offline';
-    }
+    const r = await this.auth.authed('/save', 'GET');
+    if (r === 'logged-out') return 'unauthorized';
+    if (r.ok) return r.status === 204 ? null : asRemote(r.body);
+    return 'offline';
   }
 
-  async push(data: unknown, baseRev: number): Promise<PushResult> {
-    try {
-      const res = await this.fetch(`${this.base}/v1/save`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data, baseRev }),
-        credentials: 'include',
-      });
-      const body = (await res.json().catch(() => null)) as { rev?: unknown; current?: unknown } | null;
-      if (res.status === 409) {
-        const current = asRemote(body?.current);
-        return current ? { ok: false, conflict: current } : { ok: false, offline: true };
-      }
-      if (res.status === 401) return { ok: false, unauthorized: true };
-      if (!res.ok || typeof body?.rev !== 'number') return { ok: false, offline: true };
-      return { ok: true, rev: body.rev };
-    } catch {
-      return { ok: false, offline: true };
+  async push(data: unknown, baseRev: number, clientUpdatedAt: number): Promise<PushResult> {
+    const r = await this.auth.authed('/save', 'PUT', { data, baseRev, clientUpdatedAt });
+    if (r === 'logged-out') return { ok: false, unauthorized: true };
+    if (r.ok) {
+      const rev = (r.body as { rev?: unknown } | null)?.rev;
+      return typeof rev === 'number' ? { ok: true, rev } : { ok: false, offline: true };
     }
+    if (r.status === 409) {
+      const current = asRemote((r.body as { current?: unknown } | null)?.current);
+      // "conflict" with nothing stored means it was deleted meanwhile: start again from rev 0
+      return { ok: false, conflict: current ?? { data: null, rev: 0, updatedAt: 0 } };
+    }
+    // a refused save (too large, unknown version) is not something retrying fixes; keep it local
+    return { ok: false, offline: true };
   }
 }
 
@@ -92,9 +79,17 @@ export function progressScore(save: unknown): number {
   );
 }
 
-/** The conflict rule: more progress wins; the other copy is the backup. Ties go to the server. */
-export function resolveConflict(local: unknown, remote: RemoteSave): { winner: 'local' | 'remote'; backup: unknown } {
-  return progressScore(local) > progressScore(remote.data) ? { winner: 'local', backup: remote.data } : { winner: 'remote', backup: local };
+/**
+ * The conflict rule, by *version* (the revision tells us there is a conflict) and *progress*, with
+ * *time* only as the tie-breaker: more progress wins; equally far along, the later write wins
+ * (`localAt` is when this phone saved, `remote.updatedAt` when the server accepted theirs). The
+ * loser is the backup. Progress first because phone clocks drift; a clock is fine for a tie.
+ */
+export function resolveConflict(local: unknown, remote: RemoteSave, localAt = 0): { winner: 'local' | 'remote'; backup: unknown } {
+  const l = progressScore(local);
+  const r = progressScore(remote.data);
+  const localWins = l > r || (l === r && localAt > remote.updatedAt);
+  return localWins ? { winner: 'local', backup: remote.data } : { winner: 'remote', backup: local };
 }
 
 export interface SaveSyncHooks {
@@ -113,6 +108,8 @@ export class SaveSync {
   /** Revision the local save was last in step with. */
   rev = 0;
   private pending: unknown = undefined;
+  /** When the pending save was written on this phone, epoch ms. */
+  private pendingAt = 0;
   private lastPush = -Infinity;
   private inflight = false;
   /** Pushes that failed for lack of network, for the report. */
@@ -126,8 +123,9 @@ export class SaveSync {
   ) {}
 
   /** A new local save exists; it goes up at the next opportunity. */
-  queue(data: unknown): void {
+  queue(data: unknown, at = Date.now()): void {
     this.pending = data;
+    this.pendingAt = at;
   }
 
   get hasPending(): boolean {
@@ -140,10 +138,11 @@ export class SaveSync {
     if (!force && now - this.lastPush < PUSH_EVERY) return;
     this.lastPush = now;
     const data = this.pending;
+    const at = this.pendingAt;
     this.pending = undefined;
     this.inflight = true;
     try {
-      const res = await this.store.push(data, this.rev);
+      const res = await this.store.push(data, this.rev, at);
       if (res.ok) {
         this.rev = res.rev;
         return;
@@ -151,20 +150,20 @@ export class SaveSync {
       if ('offline' in res) {
         this.offlineCount++;
         // keep it for the next try, unless something newer arrived meanwhile
-        if (this.pending === undefined) this.pending = data;
+        if (this.pending === undefined) this.queue(data, at);
         return;
       }
       if ('unauthorized' in res) {
-        this.pending = this.pending ?? data;
+        if (this.pending === undefined) this.queue(data, at);
         this.hooks.loggedOut();
         return;
       }
-      const verdict = resolveConflict(data, res.conflict);
-      this.hooks.backup(verdict.backup);
-      if (verdict.winner === 'local') {
-        // ours is further along: write it over theirs, based on their revision
+      const verdict = resolveConflict(data, res.conflict, at);
+      if (res.conflict.data !== null) this.hooks.backup(verdict.backup);
+      if (verdict.winner === 'local' || res.conflict.data === null) {
+        // ours is further along (or theirs is gone): write it over theirs, based on their revision
         this.rev = res.conflict.rev;
-        this.pending = this.pending ?? data;
+        if (this.pending === undefined) this.queue(data, at);
         this.lastPush = -Infinity;
       } else {
         this.rev = res.conflict.rev;
@@ -181,7 +180,7 @@ export class SaveSync {
    * On login: fetch the server's copy and decide against the local one. Returns the save the game
    * should start from (or null to keep the local one as it is).
    */
-  async reconcile(local: unknown): Promise<unknown> {
+  async reconcile(local: unknown, localAt = 0): Promise<unknown> {
     const remote = await this.store.pull();
     if (remote === 'offline') return null;
     if (remote === 'unauthorized') {
@@ -195,10 +194,10 @@ export class SaveSync {
     }
     this.rev = remote.rev;
     if (!local) return remote.data;
-    const verdict = resolveConflict(local, remote);
+    const verdict = resolveConflict(local, remote, localAt);
     this.hooks.backup(verdict.backup);
     if (verdict.winner === 'remote') return remote.data;
-    this.queue(local);
+    this.queue(local, localAt);
     return null;
   }
 }

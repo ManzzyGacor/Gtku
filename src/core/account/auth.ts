@@ -9,10 +9,17 @@
  * Pure: no DOM, no fetch, no crypto here. The adapters bring their own.
  */
 
+import { PASSWORD_MAX, PASSWORD_MIN as SHARED_PASSWORD_MIN, PASSWORD_RULE_TEXT, USERNAME_RULE_TEXT, validUsername as sharedValidUsername, type UserRole } from '../../../shared/api';
+
 /** Who is logged in. `id` is what saves are filed under; `name` is what the screens show. */
 export interface AccountSession {
   id: string;
   name: string;
+  /**
+   * What the account may do. For a server account this is **the server's answer** (`/auth/me`,
+   * the login response) — the client only reads it. Absent = player.
+   */
+  role?: UserRole | undefined;
   /** Where the account lives, for the honest line on the menu ("di perangkat ini" / "di server"). */
   kind: AuthKind;
   /** Epoch ms of the login. */
@@ -29,7 +36,8 @@ export type AuthErrorCode =
   | 'terkunci'
   | 'penyimpanan'
   | 'jaringan'
-  | 'server';
+  | 'server'
+  | 'dicadangkan';
 
 export type AuthResult = { ok: true; session: AccountSession } | { ok: false; error: AuthErrorCode; message: string };
 
@@ -41,28 +49,30 @@ export interface AuthAdapter {
   logout(): Promise<void>;
   /** The remembered session, if any — read synchronously so the title can skip the login form. */
   current(): AccountSession | null;
+  /** Is this name free? Only a server knows for sure; the local adapter answers from this phone. */
+  checkUsername?(username: string): Promise<{ available: boolean; message: string }>;
 }
 
-/** 3–20 characters: lowercase letters, digits and underscore. Case-insensitive on input. */
-export const USERNAME_RULE = 'Nama akun 3–20 huruf kecil, angka, atau garis bawah (_).';
-export const PASSWORD_MIN = 8;
-export const PASSWORD_RULE = `Kata sandi minimal ${PASSWORD_MIN} karakter.`;
+/** The rules are the server's (`shared/api.ts`), so the form and the API can never disagree. */
+export const USERNAME_RULE = USERNAME_RULE_TEXT;
+export const PASSWORD_MIN = SHARED_PASSWORD_MIN;
+export const PASSWORD_RULE = PASSWORD_RULE_TEXT;
 
+/** Names compare case-insensitively; the id an account is filed under is the lowercase form. */
 export function normalizeUsername(raw: string): string {
   return String(raw ?? '').trim().toLowerCase();
 }
 
 export function validUsername(name: string): boolean {
-  return /^[a-z0-9_]{3,20}$/.test(name);
+  return sharedValidUsername(String(name ?? '').trim());
 }
 
 /**
  * The only password rule is length. Composition rules ("one digit, one symbol") make passwords
  * harder to remember without making them meaningfully harder to guess; a long one is what helps.
- * An upper bound stops a pasted novel from being hashed.
  */
 export function validPassword(pw: string): boolean {
-  return typeof pw === 'string' && pw.length >= PASSWORD_MIN && pw.length <= 256;
+  return typeof pw === 'string' && pw.length >= PASSWORD_MIN && pw.length <= PASSWORD_MAX;
 }
 
 export const fail = (error: AuthErrorCode, message: string): AuthResult => ({ ok: false, error, message });

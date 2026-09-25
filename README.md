@@ -12,9 +12,9 @@ cerita: [`docs/STORY.md`](docs/STORY.md). Status pekerjaan dan cara mengetesnya:
 
 1. Buka game → **Sentuh untuk memulai** (musik tema mulai, dan game meminta layar penuh; kalau
    browser menolak, ketuk tombol **⛶ Layar Penuh** di atas).
-2. **Masuk** atau **Daftar**. Akun wajib. Selama server belum ada, akun **hanya tersimpan di HP ini**
-   dan hilang kalau data browser dibersihkan — form Daftar mengatakannya. Kata sandi disimpan
-   sebagai hash (PBKDF2), tidak pernah dalam bentuk asli. Setiap akun punya save sendiri.
+2. **Masuk** atau **Daftar** (wajib). Akun disimpan di server Lentera Malam (`https://api.varesa.mom`,
+   kode di `server/`); progres disinkronkan, dan game tetap bisa dimainkan offline dari save di HP.
+   Kalau server tidak bisa dihubungi, layar mengatakannya. Nama akun 3–16 huruf/angka/`_`.
 3. Menu: Lanjutkan · Main Baru · Pengaturan · Akun · Kredit.
 
 ## Cara main
@@ -48,9 +48,12 @@ keempat elemen dan mengatur elemen primer & sekunder, mengatur level & EXP, memu
 musuh dan boneka latihan, log reaksi elemen di layar, teleport ke setiap area & tempat penting
 (termasuk tiap peti), mengatur jam & cuaca, **memulai/mengakhiri world event**, mode kebal, reset
 status cutscene, dan hapus save. Di build pengembangan, layar Masuk juga punya tombol
-**LEWATI LOGIN (MODE PENGEMBANG)** untuk mengetes tanpa akun.
+**LEWATI LOGIN** untuk mengetes tanpa server (tanpa akun, jadi tanpa Mode Pengembang).
 
-**Cara membuka** (salah satu):
+**Hanya untuk akun `manzzy`** (peran `dev` yang ditentukan server; lihat `docs/BACKEND.md` §5).
+Akun lain yang mencoba membukanya mendapat pesan "Mode Pengembang hanya untuk akun pengembang".
+
+**Cara membuka** (salah satu, setelah masuk sebagai `manzzy`):
 
 1. Tambahkan **`?debug=1`** di URL, misalnya `https://game.varesa.mom/?debug=1` — menu langsung terbuka.
 2. Buka **Pengaturan** (⚙), gulir ke paling bawah, lalu **ketuk nomor versi 5 kali dengan cepat**
@@ -79,8 +82,18 @@ npm run lint     # oxlint
 Parameter URL: `?fps=1` (penghitung FPS), `?bloom=0`, `?preset=vlow|low|medium|high|ultra`,
 `?debug=1` (Mode Pengembang, hanya build pengembangan).
 
-Variabel build: `VITE_API_URL=https://…/api` memakai akun & sinkronisasi save di server
-(`docs/BACKEND.md`; servernya belum dibangun), `VITE_DEV_TOOLS=1` membawa Mode Pengembang.
+Variabel build: `VITE_API_URL` (bawaan `https://api.varesa.mom`; `local` = akun hanya di HP untuk
+tes tanpa server), `VITE_DEV_TOOLS=1` membawa Mode Pengembang ke build staging.
+
+### Server akun
+
+```bash
+cd server && npm install
+cp .env.example .env && chmod 600 .env   # isi MONGODB_URI dan JWT_SECRET di server, jangan di-commit
+tmux new-session -d -s api -c "$PWD" "npm start"   # 127.0.0.1:3000 → Cloudflare Tunnel api.varesa.mom
+```
+
+Detail, endpoint, keamanan, dan langkah Cloudflare: [`docs/BACKEND.md`](docs/BACKEND.md).
 
 ## Dokumentasi
 

@@ -36,6 +36,8 @@ export function installGameEnv(search = ''): GameHarness {
     cancelAnimationFrame: () => undefined,
     screen: { orientation: {} },
   });
+  // the session lifecycle (visibility, pagehide) listens on the document
+  Object.assign(doc as unknown as Record<string, unknown>, { addEventListener: () => undefined, removeEventListener: () => undefined, hidden: false });
   const create = doc.createElement;
   doc.createElement = (tag: string) => {
     const node = create(tag);

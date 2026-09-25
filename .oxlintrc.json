@@ -17,7 +17,8 @@
   "ignorePatterns": [
     "dist",
     ".preview",
-    "node_modules"
+    "node_modules",
+    "server/node_modules"
   ],
   "rules": {
     "unicorn/no-array-sort": "off",
@@ -32,11 +33,21 @@
     {
       "files": [
         "tests/**",
-        "scripts/**"
+        "scripts/**",
+        "server/tests/**",
+        "server/scripts/**"
       ],
       "rules": {
         "unicorn/consistent-function-scoping": "off",
         "unicorn/no-array-sort": "off"
+      }
+    },
+    {
+      "files": [
+        "server/**"
+      ],
+      "rules": {
+        "oxc/no-async-endpoint-handlers": "off"
       }
     }
   ]

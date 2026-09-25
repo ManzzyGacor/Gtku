@@ -76,14 +76,15 @@ test('src/core has files and none of them import a renderer', () => {
   assert.deepEqual(bad, [], `src/core must stay renderer-free:\n${bad.join('\n')}`);
 });
 
-test('src/core only reaches into src/core and src/config', () => {
+test('src/core only reaches into src/core, src/config and shared/', () => {
   const bad: string[] = [];
   for (const file of FILES) {
     const dir = posix.dirname(relative(ROOT, file).split('\\').join('/'));
     for (const { spec, line } of specifiers(readFileSync(file, 'utf8'))) {
       if (!spec.startsWith('.')) continue; // bare packages are covered by the test above
       const target = posix.normalize(posix.join(dir, spec));
-      const ok = target.startsWith('src/core/') || target === 'src/config';
+      // shared/ is the API contract with the server: types and pure validation only
+      const ok = target.startsWith('src/core/') || target === 'src/config' || target.startsWith('shared/');
       if (!ok) bad.push(`${relative(ROOT, file)}:${line} reaches outside: "${spec}" → ${target}`);
     }
   }
@@ -156,4 +157,10 @@ test('the renderer is the only place Three.js appears, and nothing imports Phase
 test('the world plan is renderer-free so the 3D layout can be tested in Node', () => {
   const pkgs = packageImports('src/render3d').filter((i) => i.file.endsWith('worldPlan.ts'));
   assert.deepEqual(pkgs.map((i) => i.spec), [], 'worldPlan.ts must not import three');
+});
+
+test('shared/ is pure: no Node, no DOM, no renderer, no server code', () => {
+  const src = readFileSync(join(ROOT, 'shared/api.ts'), 'utf8');
+  assert.ok(!/^import\s/m.test(src), 'shared/api.ts imports nothing');
+  assert.ok(!/process\.|document\.|window\./.test(src));
 });

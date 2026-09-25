@@ -121,8 +121,11 @@ export interface TitleHooks {
   auth?: AuthAdapter | null;
   /** The first tap: the one guaranteed user gesture, for the theme music and fullscreen. */
   started?(): void;
-  /** Logged in (or out). The game files saves under this account — and may sync it first. */
-  account?(session: AccountSession | null): void | Promise<void>;
+  /**
+   * Logged in (or out). The game files saves under this account — and a server account connects
+   * first. A string back means "the server ended this session": the login form comes back with it.
+   */
+  account?(session: AccountSession | null): void | Promise<void | string>;
   /** Developer builds only: a button past the login. Absent from release builds entirely. */
   devSkip?: { label: string } | undefined;
 }
@@ -310,6 +313,23 @@ export class TitleScreen {
       return input;
     };
     const user = field('Nama akun', 'text', 'username');
+    if (register && auth.checkUsername) {
+      // tell them the name is taken before they invent a password for it
+      const hint = el('div', {}, '');
+      hint.className = 'lm-title-note';
+      box.appendChild(hint);
+      const check = auth.checkUsername.bind(auth);
+      user.addEventListener('blur', () => {
+        const name = user.value.trim();
+        if (!name) return;
+        hint.textContent = 'Memeriksa nama\u2026';
+        void check(name).then((r) => {
+          if (user.value.trim() !== name) return;
+          hint.textContent = r.message;
+          hint.style.color = r.available ? '#9be59b' : '#ff9a8a';
+        });
+      });
+    }
     const pass = field('Kata sandi', 'password', register ? 'new-password' : 'current-password');
     const again = register ? field('Ulangi kata sandi', 'password', 'new-password') : null;
     // only a server can use an email (to reset a forgotten password); a local account has no use for one
@@ -351,7 +371,13 @@ export class TitleScreen {
     const swap = el('button', {}, register ? 'Sudah punya akun? MASUK' : 'Belum punya akun? DAFTAR');
     swap.className = 'lm-title-link';
     onTap(swap, () => this.showAuth(!register));
-    const where = el('div', {}, auth.kind === 'local' ? 'Akun tersimpan di perangkat ini saja (belum ada server).' : 'Akun tersimpan di server; progres disinkronkan.');
+    const where = el(
+      'div',
+      {},
+      auth.kind === 'local'
+        ? 'Akun tersimpan di perangkat ini saja (mode tes tanpa server).'
+        : 'Akun tersimpan di server Lentera Malam; progres disinkronkan. Tetap bisa main saat offline.',
+    );
     where.className = 'lm-title-note';
     box.append(err, submit, swap, where);
     this.appendDevSkip(box);
@@ -373,14 +399,22 @@ export class TitleScreen {
     setSaveScope(session?.id ?? null);
     const pending = this.hooks.account?.(session);
     if (pending instanceof Promise) {
-      // a remote account fetches its save first, so "Lanjutkan" knows what there is to continue
-      this.setBusy('Menyinkronkan progres\u2026');
-      void pending.finally(() => {
+      // a server account fetches its save first, so "Lanjutkan" knows what there is to continue
+      this.setBusy('Menghubungkan ke server\u2026');
+      const done = (relogin: string | void): void => {
         this.status?.remove();
         this.status = null;
+        if (typeof relogin === 'string') {
+          this.session = null;
+          setSaveScope(null);
+          this.showAuth(false, relogin);
+          return;
+        }
         this.buildMenu();
         this.setStage('menu');
-      });
+      };
+      // whatever happens on the network, the player ends up somewhere they can act
+      void pending.then(done, () => done(undefined));
       return;
     }
     this.buildMenu();
