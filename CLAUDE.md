@@ -43,8 +43,8 @@ npx tsx scripts/ascii-map.ts 3       # cetak dunia sebagai ASCII (periksa tata l
 npx tsx scripts/crop-reference.ts docs/reference/referensi-visual.png 400 0 420 320 2 .preview/x.png
 ```
 
-Flag URL untuk menguji di HP: `?fps=1`, `?bloom=0`, `?preset=vlow|low|medium|high|ultra`, `?debug=1`.
-Variabel build: `VITE_API_URL` (akun server), `VITE_DEV_TOOLS=1` (Mode Pengembang di build staging).
+Flag URL untuk menguji di HP: `?fps=1`, `?bloom=0`, `?preset=vlow|low|medium|high|ultra`.
+Variabel build: `VITE_API_URL` (bawaan `https://api.varesa.mom`; `local` = akun di HP untuk tes).
 Semuanya juga ada di menu Pengaturan (gerigi di pojok kanan atas).
 
 - **Server akun** (`server/`, Fastify + MongoDB, `127.0.0.1:3000` → `https://api.varesa.mom`) hidup di
@@ -108,7 +108,8 @@ tests/               Vitest: logika inti, playthrough headless, dan penjaga lapi
 scripts/             skrip node — termasuk areaPacks.ts (paket data area; dipakai plugin Vite),
                      ekspor sheet, preview dunia, ascii-map, plan-stats,
                      stream-budget, preview-textures, crop-reference, debug-puzzle)
-shared/              api.ts: kontrak game ↔ server (tipe, aturan nama/sandi, kode galat) — murni
+shared/              kontrak game ↔ server, murni: api (tipe, nama dilindungi, kode galat), catalog
+                     (ringkasan katalog item, dijaga tes), saveRules (validasi save), devActions
 server/              backend akun & save (Fastify + MongoDB + argon2id + JWT), paket npm sendiri:
                      src/app (rute), config, repo (antarmuka + memori), repo.mongo, index (start)
 docs/                OVERHAUL.md (rencana induk), GAME_DESIGN.md, PROGRESS.md, STORY.md, BACKEND.md
@@ -145,9 +146,10 @@ phaser.
 - **Nama tokoh utama datang dari setelan pemain** (`settings.playerName`, fallback `Pengembara`).
   Naskah di `docs/STORY.md` memanggilnya Arka, tapi setiap baris yang dibaca pemain ditulis dengan
   placeholder `{nama}`. Jangan pernah menulis "Arka" di teks yang tampil di game.
-- **Mode Pengembang tidak boleh ada di build rilis.** Gerbangnya harus ekspresi literal
-  `import.meta.env.DEV`, bukan panggilan fungsi — kalau tidak, chunk-nya tetap ter-emit ke `dist/`.
-  Dijaga `tests/devmode.test.ts`, yang membangun versi rilis sungguhan.
+- **Mode Pengembang = peran `dev` dari server** (akun `manzzy`). Tidak ada pintu lain (`?debug`, ketuk
+  versi, lewati login, flag build — semuanya dihapus, dijaga `tests/devmode.test.ts`). Setiap aksi panel
+  lewat `POST /dev/action`; hadiah diterapkan server pada save. Jangan pernah menentukan peran dari
+  teks nama di klien.
 - **Efek layar penuh (blur) hanya di preset Tinggi ke atas** (`ui/fx.ts` `blurAllowed()`).
 - **Nama class CSS global.** Setiap overlay menyuntikkan stylesheet global; beri awalan per komponen
   (`lm-set-*`, `lm-shop-*`, …). Class `lm-title` milik layar judul pernah dipakai header Pengaturan

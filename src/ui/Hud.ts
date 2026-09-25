@@ -78,6 +78,11 @@ const CSS = `
   font: 14px/1 ui-monospace, monospace; cursor: pointer; touch-action: manipulation; }
 .lm-pausebtn:active { background: #ffb82e; color: #1a1430; }
 
+/* developer account: a small badge under the level, not tappable */
+.lm-hud-dev { position: absolute; left: calc(8px + var(--lm-sal, 0px)); top: calc(62px + var(--lm-sat, 0px));
+  padding: 2px 6px; border-radius: 3px; font: 10px/1.2 ui-monospace, monospace; letter-spacing: 1px;
+  color: #0c1a12; background: #7dffb0; box-shadow: 0 0 6px rgba(125,255,176,0.6); }
+
 /* fullscreen, the only thing here you can tap */
 .lm-full { position: fixed; right: calc(44px + var(--lm-sar, 0px)); top: calc(4px + var(--lm-sat, 0px));
   z-index: 80; pointer-events: auto;
@@ -262,6 +267,22 @@ export class Hud {
    * `visibility` rather than `display`, so the floating-damage pool keeps its layout and does not
    * have to be rebuilt when the HUD comes back.
    */
+  /**
+   * A small "DEV" badge in the corner while a developer account is playing, so a screenshot or a
+   * test session can never be mistaken for a normal player's.
+   */
+  setDevBadge(on: boolean): void {
+    if (on && !this.devBadge) {
+      this.devBadge = el('div', {}, 'DEV');
+      this.devBadge.className = 'lm-hud-dev';
+      this.devBadge.title = 'Mode pengembang (akun pengembang)';
+      this.root.appendChild(this.devBadge);
+    }
+    if (this.devBadge) this.devBadge.style.display = on ? 'block' : 'none';
+  }
+
+  private devBadge: HTMLDivElement | null = null;
+
   setVisible(on: boolean): void {
     this.root.style.visibility = on ? 'visible' : 'hidden';
     this.fullBtn.style.display = on ? 'block' : 'none';

@@ -43,31 +43,18 @@ tampil di bawah objektif.
 
 ## Mode Pengembang
 
-Menu untuk mengetes tanpa harus memainkan seluruh game: memberi item/Inti Lentera/koin, membuka
-keempat elemen dan mengatur elemen primer & sekunder, mengatur level & EXP, memunculkan tiap jenis
-musuh dan boneka latihan, log reaksi elemen di layar, teleport ke setiap area & tempat penting
-(termasuk tiap peti), mengatur jam & cuaca, **memulai/mengakhiri world event**, mode kebal, reset
-status cutscene, dan hapus save. Di build pengembangan, layar Masuk juga punya tombol
-**LEWATI LOGIN** untuk mengetes tanpa server (tanpa akun, jadi tanpa Mode Pengembang).
+Hanya untuk akun **`manzzy`**, yang perannya `dev` di database — **ditentukan server**. Masuk sebagai
+`manzzy` → tombol **DEV** hijau di kanan atas dan penanda **DEV** di HUD muncul sendiri. Akun lain
+tidak melihat apa pun dari panel itu, dan tidak ada jalan lain untuk membukanya (`?debug=1`, ketuk
+versi, dan lewati-login sudah dihapus).
 
-**Hanya untuk akun `manzzy`** (peran `dev` yang ditentukan server; lihat `docs/BACKEND.md` §5).
-Akun lain yang mencoba membukanya mendapat pesan "Mode Pengembang hanya untuk akun pengembang".
+Isinya: semua item/perlengkapan/senjata/Inti Lentera/elemen, atur level, EXP, koin, dan stats bebas,
+mode kebal, teleport, jam & cuaca, munculkan musuh dan boneka latihan, log reaksi elemen, event dunia,
+reset save dan status cutscene. **Setiap aksi dijalankan atau disetujui server** dan dicatat di log
+server; save akun pengembang ditandai `devSave` supaya tidak bercampur dengan progres normal.
 
-**Cara membuka** (salah satu, setelah masuk sebagai `manzzy`):
-
-1. Tambahkan **`?debug=1`** di URL, misalnya `https://game.varesa.mom/?debug=1` — menu langsung terbuka.
-2. Buka **Pengaturan** (⚙), gulir ke paling bawah, lalu **ketuk nomor versi 5 kali dengan cepat**
-   (setelah ketukan kedua muncul hitungan mundur "3 lagi…").
-
-Setelah terbuka sekali, tombol **DEV** hijau muncul di kanan atas dan tetap ada setelah reload.
-Selama menu terbuka, dunia berhenti. Musuh yang dimunculkan dari menu **tidak** dihitung quest dan
-**tidak** tersimpan.
-
-**Tidak pernah ada di build rilis.** Pintu masuknya memakai `import.meta.env.DEV`, yang diganti
-menjadi `false` oleh `vite build`, sehingga kode menunya bahkan tidak ikut dibangun — bukan
-disembunyikan, tapi tidak ada. `tests/devmode.test.ts` membangun versi rilis sungguhan dan memeriksa
-bahwa tidak ada potongan menu pengembang (termasuk tombol lewati login) di dalamnya. Untuk build
-staging yang sengaja membawanya: `VITE_DEV_TOOLS=1 npm run build`.
+Akun `manzzy` dibuat dari VPS: `cd server && npm run create-dev-account`. Nama itu (dan `admin`,
+`dev`, `moderator`, `gm`, `system`) tidak bisa didaftarkan dari game. Detail: `docs/BACKEND.md` §5.
 
 ## Menjalankan
 
@@ -79,11 +66,10 @@ npm test         # Vitest: logika inti, playthrough headless, Game3D asli dengan
 npm run lint     # oxlint
 ```
 
-Parameter URL: `?fps=1` (penghitung FPS), `?bloom=0`, `?preset=vlow|low|medium|high|ultra`,
-`?debug=1` (Mode Pengembang, hanya build pengembangan).
+Parameter URL: `?fps=1` (penghitung FPS), `?bloom=0`, `?preset=vlow|low|medium|high|ultra`.
 
 Variabel build: `VITE_API_URL` (bawaan `https://api.varesa.mom`; `local` = akun hanya di HP untuk
-tes tanpa server), `VITE_DEV_TOOLS=1` membawa Mode Pengembang ke build staging.
+tes tanpa server).
 
 ### Server akun
 

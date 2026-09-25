@@ -10,7 +10,6 @@
  */
 import { formatErrors, recentErrors } from '../core/errors';
 import { GAME_VERSION } from '../config';
-import { TapUnlock } from '../core/devtools';
 
 /** Loaded on demand by `toggleCombat` — see the comment there. */
 let tuning: typeof import('../core/entities/combatTuning') | null = null;
@@ -35,14 +34,21 @@ import { el, injectStyle, onTap } from './dom';
 import { wipeSave } from '../core/save';
 import { wipeWorldData } from '../core/download/wipe';
 
-type Row =
+type Row = (
   | { kind: 'header'; label: string; id: string }
   | { kind: 'toggle'; label: string; key: 'bloom' | 'fpsCounter'; hint?: string }
   | { kind: 'number'; label: string; key: NumericKey; fmt: (v: number) => string; hint?: string }
   /** A numeric 0/1 setting shown as one Nyala/Mati button (the per-component graphics caps). */
   | { kind: 'switch'; label: string; key: NumericKey; hint?: string }
   | { kind: 'choice'; label: string; key: 'preset'; hint?: string }
-  | { kind: 'action'; label: string; button: string; run: (panel: SettingsPanel) => void; note?: () => string; danger?: boolean; opensCombat?: boolean };
+  | { kind: 'action'; label: string; button: string; run: (panel: SettingsPanel) => void; note?: () => string; danger?: boolean; opensCombat?: boolean }
+) & {
+  /**
+   * Developer accounts only (the server's word, via `setDeveloper`). Tuning tools that change how
+   * the game plays are not for players; they are not merely hidden behind a trick any more.
+   */
+  devOnly?: boolean | undefined;
+};
 
 const pct = (v: number): string => `${Math.round(v * 100)}%`;
 const mult = (v: number): string => `${v.toFixed(1)}x`;
@@ -116,9 +122,10 @@ export const ROWS: Row[] = [
   { kind: 'number', label: 'Efek', key: 'sfxVol', fmt: off(pct) },
   { kind: 'number', label: 'Antarmuka', key: 'uiVol', fmt: off(pct) },
 
-  { kind: 'header', label: 'Combat', id: 'combat' },
+  { kind: 'header', label: 'Combat', id: 'combat', devOnly: true },
   {
     kind: 'action',
+    devOnly: true,
     label: 'Setelan Combat',
     button: 'Buka',
     note: () => (tuning?.isTuned() ? 'Ada nilai yang sudah kamu ubah' : 'Kombo, busur, jangkauan, getaran'),
@@ -170,6 +177,7 @@ export const ROWS: Row[] = [
   },
   {
     kind: 'action',
+    devOnly: true,
     label: 'Uji performa',
     button: 'Ukur',
     note: () => 'A/B ~15 dtk: mematikan satu fitur per giliran',
@@ -283,6 +291,7 @@ export class SettingsPanel {
       const chip = el('button', {}, row.label);
       chip.className = 'lm-set-chip';
       onTap(chip, () => this.jumpTo(row.id));
+      if (row.devOnly) this.devNodes.push(chip);
       jump.appendChild(chip);
     }
 
@@ -305,35 +314,29 @@ export class SettingsPanel {
 
     this.build();
     this.buildVersion();
+    // nobody is a developer until the server says so
+    this.setDeveloper(false);
     this.unsubscribe = settings.on(() => this.refresh());
     this.refresh();
   }
 
-  /** Fired on the fifth quick tap on the version line. */
-  onDevUnlock: () => void = () => undefined;
-  private readonly taps = new TapUnlock(5, 1.5);
-
-  /**
-   * The version line at the bottom of Settings — and the hidden door to the developer menu.
-   *
-   * Five quick taps. It says nothing about being tappable, because for a player it is only a
-   * version number; the door is for the person testing on a phone with no URL bar to type
-   * `?debug=1` into. After the second tap it counts down, so the tester knows it is working.
-   */
+  /** The version line at the bottom of Settings. Only a version number: it opens nothing. */
   private buildVersion(): void {
     const row = el('div', {}, `Lentera Malam v${GAME_VERSION}`);
     row.className = 'lm-set-note lm-set-version';
-    onTap(row, () => {
-      const now = typeof performance !== 'undefined' ? performance.now() / 1000 : Date.now() / 1000;
-      if (this.taps.tap(now)) {
-        row.textContent = `Lentera Malam v${GAME_VERSION}`;
-        this.onDevUnlock();
-        return;
-      }
-      const left = this.taps.remaining;
-      row.textContent = left <= 3 ? `Lentera Malam v${GAME_VERSION}  (${left} lagi)` : `Lentera Malam v${GAME_VERSION}`;
-    });
     this.body.appendChild(row);
+  }
+
+  /** Rows (and their jump chips) only a developer account sees. */
+  private readonly devNodes: HTMLElement[] = [];
+
+  /**
+   * Show or hide the developer-only rows. Called with the *server's* answer after login
+   * (boot3d.ts); a player never gets them, whatever they type or tap.
+   */
+  setDeveloper(on: boolean): void {
+    for (const n of this.devNodes) n.style.display = on ? '' : 'none';
+    if (!on && this.combatBox.style.display !== 'none') this.combatBox.style.display = 'none';
   }
 
   // ───────────────────────── building ─────────────────────────
@@ -344,6 +347,7 @@ export class SettingsPanel {
         const h = el('div', {}, row.label);
         h.className = 'lm-set-head';
         this.heads.set(row.id, h);
+        if (row.devOnly) this.devNodes.push(h);
         this.body.appendChild(h);
         continue;
       }
@@ -429,6 +433,7 @@ export class SettingsPanel {
         });
       }
       this.body.appendChild(line);
+      if (row.devOnly) this.devNodes.push(line);
       // the combat tuning rows unfold right under their button, not at the bottom of the list
       if (row.kind === 'action' && row.opensCombat) this.body.appendChild(this.combatBox);
     }

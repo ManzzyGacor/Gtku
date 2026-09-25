@@ -8,7 +8,8 @@
  *
  * Dependencies are injected, so `tests/backend.test.ts` runs this against the real server app.
  */
-import type { UserRole } from '../shared/api';
+import { API_ERROR_TEXT, type UserRole } from '../shared/api';
+import type { DevServer } from './render3d/DevTools';
 import type { AccountSession } from './core/account/auth';
 import type { RemoteAuth } from './core/account/remote';
 import { RemoteSaveStore, SaveSync } from './core/sync/saveSync';
@@ -67,6 +68,7 @@ export async function connectCloud(auth: RemoteAuth, session: AccountSession, de
     backup: (data) => deps.backup(session.id, data),
     remoteWon: () => deps.notice('Progres dari perangkat lain lebih jauh. Muat ulang halaman untuk memakainya.'),
     loggedOut: () => deps.notice('Sesi akun berakhir. Muat ulang dan masuk lagi supaya progres tersinkron.'),
+    rejected: (_reason, detail) => deps.notice(`Save ditolak server (${detail || 'isinya tidak wajar'}). Progres ini hanya tersimpan di HP.`),
   });
   // local first, always: from here on every save on this phone is also queued for the server
   deps.mirror((data) => sync.queue(data, deps.now()));
@@ -84,4 +86,26 @@ export async function connectCloud(auth: RemoteAuth, session: AccountSession, de
   const newer = await withTimeout(sync.reconcile(local), timeoutMs, null);
   if (newer) deps.adopt(newer);
   return { role: me.role, offline: false, sync };
+}
+
+/**
+ * The developer panel's line to the server: `POST /dev/action` with the account's token. Built only
+ * after the server has said the role is "dev" in this session. A grant's reply carries the server's
+ * new save, which `onSave` makes the truth on this phone.
+ */
+export function makeDevServer(auth: RemoteAuth, onSave: (save: { data: SaveData; rev: number }) => void): DevServer {
+  return {
+    act: async (action, save) => {
+      const r = await auth.authed('/dev/action', 'POST', save ? { action, save } : { action });
+      if (r === 'logged-out') return { ok: false, message: 'Sesi berakhir. Masuk lagi.' };
+      if (!r.ok) {
+        if (r.error === 'offline') return { ok: false, message: 'Server tidak bisa dihubungi.' };
+        const msg = (r.body as { message?: unknown } | null)?.message;
+        return { ok: false, message: typeof msg === 'string' ? msg : (API_ERROR_TEXT[r.error] ?? 'Ditolak server.') };
+      }
+      const body = r.body as { note?: string; save?: { data: SaveData; rev: number } | null };
+      if (body.save) onSave(body.save);
+      return { ok: true, note: body.note, save: body.save };
+    },
+  };
 }

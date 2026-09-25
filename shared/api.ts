@@ -69,6 +69,8 @@ export type ApiErrorCode =
   | 'save_too_large'
   | 'unsupported_save_version'
   | 'forbidden_origin'
+  | 'forbidden'
+  | 'save_rejected'
   | 'not_found'
   | 'server_error';
 
@@ -82,6 +84,15 @@ export const PASSWORD_MAX = 128;
 export const MAX_SAVE_VERSION = 2;
 /** A save bigger than this is refused (today's saves are ~5–15 KB). */
 export const MAX_SAVE_BYTES = 256 * 1024;
+
+/**
+ * Names nobody can register over the API — not even the first person to try. `manzzy` is the
+ * developer account (made from the VPS with `npm run create-dev-account`); the rest are the names
+ * people trust to be staff.
+ */
+export const PROTECTED_USERNAMES: readonly string[] = ['manzzy', 'admin', 'dev', 'moderator', 'gm', 'system'];
+
+export const isProtectedUsername = (name: string): boolean => PROTECTED_USERNAMES.includes(name.trim().toLowerCase());
 
 export const USERNAME_RULE_TEXT = 'Nama akun 3–16 karakter: huruf, angka, atau garis bawah (_).';
 export const PASSWORD_RULE_TEXT = `Kata sandi ${PASSWORD_MIN}–${PASSWORD_MAX} karakter.`;
@@ -115,6 +126,8 @@ export const API_ERROR_TEXT: Record<ApiErrorCode, string> = {
   save_too_large: 'Save terlalu besar untuk disimpan di server.',
   unsupported_save_version: 'Versi save ini belum dikenal server.',
   forbidden_origin: 'Permintaan ditolak.',
+  forbidden: 'Hanya untuk akun pengembang.',
+  save_rejected: 'Save ditolak server karena isinya tidak wajar.',
   not_found: 'Tidak ditemukan.',
   server_error: 'Server sedang bermasalah. Coba lagi nanti.',
 };

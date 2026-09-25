@@ -6,9 +6,9 @@
  * landscape screen is used rather than scrolled. It is renderer-free UI like every other panel:
  * it talks to the game only through `DevActions`, which `render3d/DevTools.ts` implements.
  *
- * It never ships to players. The menu is only constructed when `core/devtools.ts` says the build
- * allows it, and in a release build that check is a compile-time `false` — the code is not hidden,
- * it is not in the bundle.
+ * Only built for an account whose role the **server** reported as "dev" (boot3d.ts), and every
+ * action it offers is authorised — and for grants, carried out — by the server (DevTools.ts). A
+ * player never sees it; and a player who digs the code out of the bundle gets 403 from the server.
  */
 import { el, injectStyle, onTap } from './dom';
 
@@ -57,45 +57,54 @@ export interface DevOption {
   label: string;
 }
 
+/**
+ * What an action answers: a line for the status bar, now or once the server has replied. Every
+ * action that changes anything goes through the server first (`POST /dev/action`).
+ */
+export type Reply = string | Promise<string>;
+
 /** Everything the menu can do. Implemented in `render3d/DevTools.ts`, against the live game. */
 export interface DevActions {
   items(): { id: string; name: string; kind: string }[];
   rarities(): DevOption[];
-  giveItem(id: string, rarity: string, count: number): string;
-  giveAllCores(): string;
-  giveKit(): string;
-  giveCoins(n: number): string;
+  giveItem(id: string, rarity: string, count: number): Reply;
+  giveAllCores(): Reply;
+  giveKit(): Reply;
+  giveCoins(n: number): Reply;
 
   elements(): { id: string; name: string; unlocked: boolean }[];
-  unlockAllElements(): string;
+  unlockAllElements(): Reply;
   primary(): string | null;
   secondary(): string | null;
-  setElement(slot: 'primary' | 'secondary', id: string | null): string;
+  setElement(slot: 'primary' | 'secondary', id: string | null): Reply;
 
   level(): { level: number; exp: number; need: number };
-  setLevel(level: number): string;
-  addExp(n: number): string;
+  setLevel(level: number): Reply;
+  addExp(n: number): Reply;
 
-  spawn(kind: 'slime' | 'archer' | 'bat' | 'boss' | 'dummy'): string;
-  clearSpawns(): string;
+  spawn(kind: 'slime' | 'archer' | 'bat' | 'boss' | 'dummy'): Reply;
+  clearSpawns(): Reply;
 
   teleports(): DevOption[];
-  teleport(id: string): string;
+  teleport(id: string): Reply;
 
-  setTime(which: 'pagi' | 'siang' | 'sore' | 'malam'): string;
+  setTime(which: 'pagi' | 'siang' | 'sore' | 'malam'): Reply;
   weathers(): DevOption[];
   weather(): string;
-  setWeather(id: string): string;
+  setWeather(id: string): Reply;
   /** World events: every one by id, which is running, and start / end. */
   worldEvents(): DevOption[];
   activeEvent(): string | null;
-  startEvent(id: string | null): string;
+  startEvent(id: string | null): Reply;
 
   godMode(): boolean;
-  setGodMode(on: boolean): string;
-  heal(): string;
-  resetCutscenes(): string;
-  resetSave(): string;
+  setGodMode(on: boolean): Reply;
+  heal(): Reply;
+  resetCutscenes(): Reply;
+  resetSave(): Reply;
+  /** Stats a developer may set freely (on top of level and gear). */
+  stats(): Record<string, number>;
+  setStats(stats: Record<string, number>): Reply;
 }
 
 type Section = 'item' | 'elemen' | 'level' | 'musuh' | 'teleport' | 'dunia' | 'lain';
@@ -210,11 +219,23 @@ export class DevMenu {
     this.status.textContent = text;
   }
 
-  private btn(label: string, run: () => string | void, cls = ''): HTMLButtonElement {
+  private btn(label: string, run: () => Reply | void, cls = ''): HTMLButtonElement {
     const b = el('button', {}, label);
     b.className = `lm-dev-btn${cls ? ` ${cls}` : ''}`;
     onTap(b, () => {
       const msg = run();
+      if (msg instanceof Promise) {
+        // the server decides; say so until it has
+        this.say('Menunggu server\u2026');
+        void msg.then(
+          (text) => {
+            this.say(text);
+            this.render();
+          },
+          () => this.say('Server tidak bisa dihubungi.'),
+        );
+        return;
+      }
       if (msg) this.say(msg);
       this.render();
     });
@@ -310,6 +331,18 @@ export class DevMenu {
         ));
         this.main.appendChild(this.h('TAMBAH EXP'));
         this.main.appendChild(this.row(this.btn('+50', () => a.addExp(50)), this.btn('+500', () => a.addExp(500)), this.btn('+5000', () => a.addExp(5000))));
+        const st = a.stats();
+        const bump = (id: string, by: number) => (): Reply => a.setStats({ ...st, [id]: (st[id] ?? 0) + by });
+        this.main.appendChild(this.h('STATS BEBAS'));
+        this.main.appendChild(this.note(`Tambahan di atas level & perlengkapan: ${Object.entries(st).map(([k, v]) => `${k} ${v}`).join(', ') || 'tidak ada'}`));
+        this.main.appendChild(this.row(
+          this.btn('+100 ATK', bump('atk', 100)),
+          this.btn('+100 DEF', bump('def', 100)),
+          this.btn('+500 HP', bump('maxHp', 500)),
+          this.btn('+20 Kritis', bump('crit', 20)),
+          this.btn('+50 Kecepatan', bump('speed', 50)),
+          this.btn('Reset stats', () => a.setStats({})),
+        ));
         break;
       }
       case 'musuh': {

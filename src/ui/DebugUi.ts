@@ -46,12 +46,9 @@ export class DebugUi {
     this.panel.setOpen(true);
   }
 
-  /**
-   * Fired when the version number in Settings has been tapped five times in a row. The game decides
-   * whether that means anything — in a release build it does not.
-   */
-  set onDevUnlock(fn: () => void) {
-    this.panel.onDevUnlock = fn;
+  /** Developer-only settings rows, shown on the server's word (boot3d.ts). */
+  setDeveloper(on: boolean): void {
+    this.panel.setDeveloper(on);
   }
 
   /** The active renderer calls this once it is running. */

@@ -22,7 +22,13 @@ export interface RemoteSave {
   updatedAt: number;
 }
 
-export type PushResult = { ok: true; rev: number } | { ok: false; conflict: RemoteSave } | { ok: false; offline: true } | { ok: false; unauthorized: true };
+export type PushResult =
+  | { ok: true; rev: number }
+  | { ok: false; conflict: RemoteSave }
+  | { ok: false; offline: true }
+  | { ok: false; unauthorized: true }
+  /** The server looked at the save and refused it (shared/saveRules.ts). Retrying will not help. */
+  | { ok: false; rejected: { reason: string; detail: string } };
 
 export interface SaveStore {
   pull(): Promise<RemoteSave | null | 'offline' | 'unauthorized'>;
@@ -52,7 +58,10 @@ export class RemoteSaveStore implements SaveStore {
       // "conflict" with nothing stored means it was deleted meanwhile: start again from rev 0
       return { ok: false, conflict: current ?? { data: null, rev: 0, updatedAt: 0 } };
     }
-    // a refused save (too large, unknown version) is not something retrying fixes; keep it local
+    if (r.status === 422 || r.status === 413) {
+      const b = (r.body ?? {}) as { reason?: unknown; detail?: unknown };
+      return { ok: false, rejected: { reason: typeof b.reason === 'string' ? b.reason : r.error, detail: typeof b.detail === 'string' ? b.detail : '' } };
+    }
     return { ok: false, offline: true };
   }
 }
@@ -99,6 +108,8 @@ export interface SaveSyncHooks {
   backup(data: unknown): void;
   /** The session expired: log in again. */
   loggedOut(): void;
+  /** The server refused a save as implausible; it stays on this phone only. */
+  rejected?(reason: string, detail: string): void;
 }
 
 /** Seconds between pushes while playing: a save every few seconds must not become a request each. */
@@ -116,6 +127,9 @@ export class SaveSync {
   offlineCount = 0;
   /** Set when the server's copy won mid-game: nothing is pushed until the page reloads and loads it. */
   paused = false;
+  /** Saves the server refused (shared/saveRules.ts), and which reasons have been reported. */
+  rejectedCount = 0;
+  private readonly refusals = new Set<string>();
 
   constructor(
     private readonly store: SaveStore,
@@ -151,6 +165,15 @@ export class SaveSync {
         this.offlineCount++;
         // keep it for the next try, unless something newer arrived meanwhile
         if (this.pending === undefined) this.queue(data, at);
+        return;
+      }
+      if ('rejected' in res) {
+        // said once per kind of refusal, not every twenty seconds
+        if (!this.refusals.has(res.rejected.reason)) {
+          this.refusals.add(res.rejected.reason);
+          this.hooks.rejected?.(res.rejected.reason, res.rejected.detail);
+        }
+        this.rejectedCount++;
         return;
       }
       if ('unauthorized' in res) {

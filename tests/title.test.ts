@@ -135,17 +135,12 @@ test('logging out goes back to the form and unscopes the save', async () => {
   assert.equal(a.current(), null);
 });
 
-test('the developer skip exists only when the build provides it', () => {
-  const plain = new TitleScreen(doc.body as unknown as HTMLElement, { auth: auth() });
-  plain.start();
-  assert.ok(!walkEls(doc.body).some((e) => e.classes.has('dev')), 'no skip without the hook');
-  plain.destroy();
-
-  const dev = new TitleScreen(doc.body as unknown as HTMLElement, { auth: auth(), devSkip: { label: 'LEWATI' } });
-  dev.start();
-  button('LEWATI')!.tap();
-  assert.equal(dev.currentStage, 'menu');
-  assert.match(texts(), /Tanpa akun/);
+test('there is no way past the login', () => {
+  const t = new TitleScreen(doc.body as unknown as HTMLElement, { auth: auth() });
+  t.start();
+  assert.equal(t.currentStage, 'auth');
+  assert.ok(!walkEls(doc.body).some((e) => e.classes.has('dev')), 'no skip button');
+  assert.ok(!/LEWATI/.test(texts()));
 });
 
 test('a browser that cannot keep an account safely is told why, not given a weak one', () => {

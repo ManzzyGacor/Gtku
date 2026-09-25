@@ -35,6 +35,8 @@ export interface CharacterDoc {
   data: unknown;
   /** Copied out of the save for queries and the admin view. */
   level: number;
+  /** A developer's save: kept out of anything that ranks or pairs players (public co-op rooms). */
+  dev?: boolean | undefined;
   updatedAt: Date;
   clientUpdatedAt: Date | null;
   createdAt: Date;
@@ -49,6 +51,7 @@ export interface Repos {
     byId(id: string): Promise<UserDoc | null>;
     touchLogin(id: string, at: Date): Promise<void>;
     setRole(usernameLower: string, role: UserRole): Promise<boolean>;
+    setPassword(usernameLower: string, passwordHash: string): Promise<boolean>;
   };
   sessions: {
     create(s: SessionDoc): Promise<void>;
@@ -64,6 +67,9 @@ export interface Repos {
     insert(doc: CharacterDoc): Promise<void>;
     /** Replace only if the stored rev is `baseRev`; returns the new doc, or null on a lost race. */
     replaceIfRev(userId: string, slot: number, baseRev: number, next: Omit<CharacterDoc, 'userId' | 'slot' | 'createdAt'>): Promise<CharacterDoc | null>;
+    /** Write regardless of revision (developer grants), bumping it. Returns the stored doc. */
+    overwrite(userId: string, slot: number, next: Omit<CharacterDoc, 'userId' | 'slot' | 'createdAt' | 'rev'>): Promise<CharacterDoc>;
+    remove(userId: string, slot: number): Promise<void>;
   };
   ping(): Promise<boolean>;
 }
@@ -104,6 +110,14 @@ export function memoryRepos(): Repos {
           }
         return false;
       },
+      async setPassword(l, hash) {
+        for (const x of users.values())
+          if (x.usernameLower === l) {
+            x.passwordHash = hash;
+            return true;
+          }
+        return false;
+      },
     },
     sessions: {
       async create(s) {
@@ -139,6 +153,15 @@ export function memoryRepos(): Repos {
         if (!c || c.rev !== baseRev) return null;
         Object.assign(c, structuredClone(next));
         return structuredClone(c);
+      },
+      async overwrite(u, s, next) {
+        const c = chars.get(key(u, s));
+        const doc: CharacterDoc = { ...structuredClone(next), userId: u, slot: s, rev: (c?.rev ?? 0) + 1, createdAt: c?.createdAt ?? next.updatedAt };
+        chars.set(key(u, s), doc);
+        return structuredClone(doc);
+      },
+      async remove(u, s) {
+        chars.delete(key(u, s));
       },
     },
     async ping() {

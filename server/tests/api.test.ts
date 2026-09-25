@@ -30,7 +30,7 @@ async function fresh(env: Record<string, string> = {}): Promise<void> {
 
 beforeEach(async () => {
   clock = Date.UTC(2026, 8, 25);
-  await fresh({ DEV_SETUP_CODE: 'kode-uji-pengembang' });
+  await fresh();
 });
 
 /** Each test speaks from its own address, so the rate limits of one do not bleed into the next. */
@@ -124,31 +124,6 @@ test('register is rate limited per address', async () => {
 });
 
 // ───────────────────────── roles ─────────────────────────
-
-test('the developer role belongs to "manzzy", is decided by the server, and cannot be claimed', async () => {
-  const noCode = await post('/auth/register', { username: 'manzzy', password: 'sandi-panjang-1' });
-  assert.equal(noCode.statusCode, 403);
-  assert.equal(noCode.json().error, 'username_reserved');
-  const wrongCode = await post('/auth/register', { username: 'MANZZY', password: 'sandi-panjang-1', devSetupCode: 'tebakan' });
-  assert.equal(wrongCode.statusCode, 403);
-
-  const dev = await post('/auth/register', { username: 'manzzy', password: 'sandi-panjang-1', devSetupCode: 'kode-uji-pengembang' });
-  assert.equal(dev.statusCode, 201);
-  assert.equal(dev.json().user.role, 'dev');
-  const me = await app.inject({ method: 'GET', url: '/auth/me', headers: { authorization: `Bearer ${dev.json().accessToken}` } });
-  assert.deepEqual(me.json(), { username: 'manzzy', role: 'dev' });
-
-  // an ordinary account stays a player whatever it sends
-  const p = await post('/auth/register', { username: 'biasa', password: 'sandi-panjang-1' });
-  const pm = await app.inject({ method: 'GET', url: '/auth/me', headers: { authorization: `Bearer ${p.json().accessToken}` } });
-  assert.equal(pm.json().role, 'player');
-});
-
-test('without DEV_SETUP_CODE the developer name cannot be registered at all', async () => {
-  await fresh();
-  const r = await post('/auth/register', { username: 'manzzy', password: 'sandi-panjang-1', devSetupCode: '' });
-  assert.equal(r.statusCode, 403);
-});
 
 // ───────────────────────── tokens ─────────────────────────
 

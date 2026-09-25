@@ -1,271 +1,189 @@
 /**
- * Mode Pengembang.
+ * Developer mode: decided by the server, carried out by the server.
  *
- * Three things matter and all three are checked: the doors open (five taps, `?debug=1`), every
- * button does what it says **on the real game**, and the whole thing is absent from a release
- * build — not hidden, absent, which is verified by actually building one.
+ * Checked here, on the real game and the real server app (in memory):
+ *  • there is no way in without login — no `?debug=1`, no taps, no skip button, no build flag;
+ *  • a player gets nothing (no panel, no badge, no tuning rows), a developer gets all of it;
+ *  • every panel action goes through `POST /dev/action`: grants come back as the server's save and
+ *    the game adopts it; a player's token is refused; offline does nothing.
  */
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'vitest';
-import { debugRequested, devToolsBuild, TapUnlock } from '../src/core/devtools';
 import { bootGame, installGameEnv, removeGameEnv, type GameHarness } from './helpers/game';
-import { buildDevActions } from '../src/render3d/DevTools';
-import type { SwingEvent } from '../src/core/entities/HeroCore';
+import { buildDevActions, type DevServer } from '../src/render3d/DevTools';
+import { makeDevServer } from '../src/cloud';
+import { RemoteAuth, type HttpFetch } from '../src/core/account/remote';
+import { buildApp, hashPassword } from '../server/src/app';
+import { loadConfig } from '../server/src/config';
+import { memoryRepos, type Repos } from '../server/src/repo';
+import type { SaveData } from '../src/core/state/GameState';
 
-// ───────────────────────────── the doors ─────────────────────────────
+// ───────────────────────── no doors without login ─────────────────────────
 
-test('five quick taps unlock, slow taps do not', () => {
-  const lock = new TapUnlock(5, 1.5);
-  assert.equal(lock.tap(0), false);
-  assert.equal(lock.tap(0.4), false);
-  assert.equal(lock.remaining, 3, 'it can say how many are left');
-  assert.equal(lock.tap(0.8), false);
-  assert.equal(lock.tap(1.2), false);
-  assert.equal(lock.tap(1.6), true, 'the fifth quick tap opens it');
+function sources(dir: string): string[] {
+  return readdirSync(dir).flatMap((n) => {
+    const p = join(dir, n);
+    return statSync(p).isDirectory() ? sources(p) : p.endsWith('.ts') ? [p] : [];
+  });
+}
 
-  // five taps spread over a minute of fiddling with settings must not
-  const slow = new TapUnlock(5, 1.5);
-  for (let i = 0; i < 10; i++) assert.equal(slow.tap(i * 3), false, `tap ${i} at ${i * 3}s`);
-});
-
-test('?debug=1 asks for it, and nothing else does', () => {
-  assert.equal(debugRequested('?debug=1'), true);
-  assert.equal(debugRequested('?fps=1&debug=on'), true);
-  assert.equal(debugRequested('?debug=0'), false);
-  assert.equal(debugRequested(''), false);
-  assert.equal(debugRequested('?debugger=1'), false);
-});
-
-test('only a development or explicit staging build offers it', () => {
-  assert.equal(devToolsBuild({ DEV: true }), true);
-  assert.equal(devToolsBuild({ DEV: false }), false, 'a release build never does');
-  assert.equal(devToolsBuild({ DEV: false, VITE_DEV_TOOLS: '1' }), true, 'unless a staging build asks for it');
-  assert.equal(devToolsBuild({ DEV: false, VITE_DEV_TOOLS: 'yes' }), false);
-});
-
-test('a release build contains no developer menu at all', async () => {
-  /*
-   * Built for real, in memory. The first version of this gate compiled the menu out of the *code
-   * path* but still emitted its two chunks into dist/ — never loaded, but downloadable. The only
-   * way to know that cannot happen again is to look at what the build actually produces.
-   */
-  const { build } = await import('vite');
-  // Vitest runs with NODE_ENV=test, and Vite decides `import.meta.env.DEV` from NODE_ENV — so an
-  // unforced build here would be a development build and prove nothing. Force what `vite build`
-  // does from the command line.
-  const previous = process.env.NODE_ENV;
-  process.env.NODE_ENV = 'production';
-  let out: Awaited<ReturnType<typeof build>>;
-  try {
-    out = await build({ mode: 'production', logLevel: 'silent', build: { write: false, minify: false } });
-  } finally {
-    process.env.NODE_ENV = previous;
+test('the game has no debug entry that works without login', () => {
+  const offenders: string[] = [];
+  for (const file of [...sources('src'), 'index.html']) {
+    // code only: the comments that explain these doors are gone may name them
+    const src = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    for (const [what, re] of [
+      ['?debug=1', /debug=1|['"]debug['"]\s*\)|get\(['"]debug['"]\)/],
+      ['tap-to-unlock', /TapUnlock|onDevUnlock/],
+      ['skip login', /devSkip|LEWATI LOGIN/],
+      ['build-flag gate', /VITE_DEV_TOOLS/],
+      ['role from the name on the client', /devName|===\s*['"]manzzy['"]/],
+    ] as const)
+      if (re.test(src)) offenders.push(`${file}: ${what}`);
   }
-  const outputs = (Array.isArray(out) ? out : [out]).flatMap((o) => ('output' in o ? o.output : []));
-  const names = outputs.map((o) => o.fileName);
-  assert.ok(names.some((n) => n.includes('boot3d')), `the build ran (${names.length} files)`);
-  assert.ok(!names.some((n) => /DevMenu|DevTools/.test(n)), `developer chunks in a release build: ${names.join(', ')}`);
-  for (const o of outputs) {
-    if (o.type !== 'chunk') continue;
-    assert.ok(!o.code.includes('MODE PENGEMBANG'), `${o.fileName} carries the developer menu`);
-    assert.ok(!o.code.includes('lm-devbtn'), `${o.fileName} carries the DEV button`);
-  }
-}, 60_000);
+  assert.deepEqual(offenders, []);
+});
 
-// ───────────────────────────── every button, on the real game ─────────────────────────────
+// ───────────────────────── the real game + the real server ─────────────────────────
 
 let env: GameHarness;
-beforeEach(() => {
+let repos: Repos;
+let app: Awaited<ReturnType<typeof buildApp>>;
+let online = true;
+
+beforeEach(async () => {
   env = installGameEnv();
+  online = true;
+  repos = memoryRepos();
+  app = await buildApp({ config: loadConfig({ MONGODB_URI: 'mongodb://tidak-dipakai', JWT_SECRET: 'm'.repeat(48) }), repos });
 });
 afterEach(() => removeGameEnv());
 
-test('items, cores, a full kit and coins land in the real bag', async () => {
+const BASE = 'https://api.varesa.mom';
+function fetchFor(): HttpFetch {
+  const jar = new Map<string, string>();
+  return async (url, init) => {
+    if (!online) throw new TypeError('Failed to fetch');
+    const path = url.slice(BASE.length);
+    const headers: Record<string, string> = { ...init.headers, origin: 'https://game.varesa.mom', 'cf-connecting-ip': '192.0.2.50' };
+    if (path.startsWith('/auth') && jar.size) headers.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
+    const res = await app.inject({ method: init.method as 'GET', url: path, headers, ...(init.body !== undefined ? { payload: init.body } : {}) });
+    for (const c of res.cookies) jar.set(c.name, c.value);
+    return { ok: res.statusCode < 300, status: res.statusCode, json: async () => res.json() };
+  };
+}
+
+async function logIn(name: string, role: 'dev' | 'player'): Promise<RemoteAuth> {
+  if (role === 'dev') {
+    await repos.users.create({ username: name, usernameLower: name, passwordHash: await hashPassword('sandi-panjang-1'), role, createdAt: new Date(), lastLogin: null });
+  }
+  const store = new Map<string, string>();
+  const auth = new RemoteAuth({ base: BASE, fetch: fetchFor(), now: () => Date.now(), read: (k) => store.get(k) ?? null, write: (k, v) => (store.set(k, v), true), remove: (k) => void store.delete(k) });
+  const r = role === 'dev' ? await auth.login(name, 'sandi-panjang-1') : await auth.register(name, 'sandi-panjang-1');
+  assert.ok(r.ok, JSON.stringify(r));
+  return auth;
+}
+
+type Game = Awaited<ReturnType<typeof bootGame>>;
+async function panelFor(role: 'dev' | 'player', name = role === 'dev' ? 'manzzy' : 'biasa') {
   const game = await bootGame(env, { continue: false });
-  const dev = buildDevActions(game, () => undefined);
+  const auth = await logIn(name, role);
+  const saves: { data: SaveData; rev: number }[] = [];
+  const server: DevServer = makeDevServer(auth, (s) => void saves.push(s));
+  let reloads = 0;
+  const actions = buildDevActions(game, server, () => void reloads++);
+  return { game, actions, saves, reloads: () => reloads };
+}
 
-  const itemCount = dev.items().length;
-  assert.ok(itemCount >= 15, `every item is offered, got ${itemCount}`);
-  dev.giveItem('helm_stone', 'mythic', 1);
-  const helm = game.character.inventory.slots.find((s) => s?.id === 'helm_stone');
-  assert.equal(helm?.rarity, 'mythic', 'at the chosen rarity');
+const bagHas = (game: Game, id: string): boolean => game.character.inventory.slots.some((s) => s?.id === id);
 
-  dev.giveAllCores();
-  for (const id of ['core_ember', 'core_tide', 'core_frost', 'core_storm'])
-    assert.equal(game.character.inventory.countOf(id), 1, `${id} given`);
+test("grants are made by the server: the item arrives in the game from the server's save", async () => {
+  const { game, actions, saves } = await panelFor('dev');
+  const msg = await actions.giveItem('sword_dawn', 'mythic', 1);
+  assert.match(msg, /masuk tas/);
+  assert.ok(bagHas(game, 'sword_dawn'), 'the game adopted the server save');
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0].data.devSave, true, 'marked as a developer save by the server');
 
-  const before = game.character.inventory.used;
-  dev.giveKit();
-  assert.ok(game.character.inventory.used - before >= 6, 'a piece for every slot');
-
-  dev.giveCoins(1000);
+  await actions.setLevel(20);
+  assert.equal(game.character.level, 20);
+  await actions.unlockAllElements();
+  assert.equal(game.character.unlocked.length, 4);
+  const atk = game.character.stats.atk;
+  await actions.setStats({ atk: 250 });
+  assert.equal(game.character.stats.atk, atk + 250, 'developer stats reach the sheet');
+  await actions.giveCoins(1000);
   assert.equal(game.character.coins, 1000);
   game.dispose();
 });
 
-test('all four elements unlock, and primary/secondary reach the hero', async () => {
-  const game = await bootGame(env, { continue: false });
-  const dev = buildDevActions(game, () => undefined);
-  dev.unlockAllElements();
-  assert.deepEqual(dev.elements().filter((e) => e.unlocked).map((e) => e.id).sort(), ['air', 'api', 'es', 'petir']);
-  dev.setElement('primary', 'petir');
-  dev.setElement('secondary', 'air');
-  assert.equal(game.hero.element, 'petir');
-  assert.equal(game.hero.skillElement, 'air');
+test("a player's token is refused by the server, and nothing changes in the game", async () => {
+  const { game, actions } = await panelFor('player');
+  const msg = await actions.giveItem('sword_dawn', 'mythic', 1);
+  assert.equal(msg, 'Hanya untuk akun pengembang.');
+  assert.equal(bagHas(game, 'sword_dawn'), false);
+  assert.equal(await actions.setGodMode(true), 'Hanya untuk akun pengembang.');
+  assert.equal(game.hero.invincible, false, 'not even a session tool runs');
   game.dispose();
 });
 
-test('level and EXP go through the real sheet', async () => {
-  const game = await bootGame(env, { continue: false });
-  const dev = buildDevActions(game, () => undefined);
-  const hp1 = game.hero.maxHp;
-  dev.setLevel(30);
-  assert.equal(game.character.level, 30);
-  assert.ok(game.hero.maxHp > hp1, 'the level reached the hero');
-  assert.equal(game.hero.hp, game.hero.maxHp, 'and it heals, so the new ceiling can be tested');
-  dev.setLevel(Number.NaN);
-  assert.equal(game.character.level, 30, 'nonsense is ignored');
-  dev.setLevel(1);
-  dev.addExp(5000);
-  assert.ok(game.character.level > 1);
+test('session tools run only after the server said yes; offline nothing happens', async () => {
+  const { game, actions } = await panelFor('dev');
+  assert.match(await actions.setGodMode(true), /Kebal: nyala/);
+  assert.equal(game.hero.invincible, true);
+  assert.match(await actions.teleport('cp_forest'), /Pindah/);
+  assert.match(await actions.setTime('malam'), /malam/);
+  assert.match(await actions.spawn('slime'), /dimunculkan/);
+  assert.match(await actions.startEvent('badai'), /dimulai/);
+
+  online = false;
+  assert.equal(await actions.setGodMode(false), 'Server tidak bisa dihubungi.');
+  assert.equal(game.hero.invincible, true, 'unchanged while the server cannot be asked');
+  assert.equal(await actions.giveKit(), 'Server tidak bisa dihubungi.');
   game.dispose();
 });
 
-test('spawned monsters exist, and their deaths stay out of the quest and the save', async () => {
-  const game = await bootGame(env, { continue: false });
-  const dev = buildDevActions(game, () => undefined);
-  const n0 = game.combat.world.enemies.length;
-  dev.spawn('slime');
-  dev.spawn('archer');
-  dev.spawn('bat');
-  dev.spawn('dummy');
-  assert.ok(game.combat.world.enemies.length - n0 >= 6, 'slime + archer + 3 bats + dummy');
-
-  const kills = game.state.quest.kills;
-  const killed = Object.keys(game.state.killed).length;
-  const coins = game.character.coins;
-  for (const e of game.combat.world.enemies) {
-    if (e.spawnId.startsWith('dev_') && e.kind !== 'dummy') e.hurt(9999, e.x, e.y, 0, 0, { emit: (x) => game.combat.world.events.push(x) });
-  }
-  game.combat.update(1 / 60, 1 / 60, game.hero);
-  assert.equal(game.state.quest.kills, kills, 'the quest counter is untouched');
-  assert.equal(Object.keys(game.state.killed).length, killed, 'nothing is remembered as dead');
-  assert.ok(game.character.coins > coins, 'but coins do drop');
-
-  dev.spawn('boss');
-  assert.equal(game.story.questText().title.length > 0, true);
-  assert.ok(dev.clearSpawns().length > 0);
-  assert.ok(!game.combat.world.enemies.some((e) => e.spawnId.startsWith('dev_')), 'clear removes them all');
+test('reset save goes through the server and reloads', async () => {
+  const { game, actions, reloads } = await panelFor('dev');
+  await actions.giveAllCores();
+  await actions.resetSave();
+  assert.equal(reloads(), 1);
+  const id = (await repos.users.byLower('manzzy'))!.id;
+  assert.equal(await repos.characters.get(id, 0), null, 'gone on the server');
   game.dispose();
 });
 
-test('every teleport lands somewhere the hero can stand', async () => {
-  const game = await bootGame(env, { continue: false });
-  const dev = buildDevActions(game, () => undefined);
-  const targets = dev.teleports();
-  assert.ok(targets.length >= 12, `areas, landmarks and every chest, got ${targets.length}`);
-  for (const t of targets) {
-    dev.teleport(t.id);
-    const tx = Math.floor(game.hero.x / 16);
-    const ty = Math.floor(game.hero.y / 16);
-    assert.equal(game.world.solidAt(tx, ty), false, `${t.label} put the hero inside something`);
-  }
-  game.dispose();
-});
-
-test('time, weather, god mode, heal and the resets', async () => {
-  const game = await bootGame(env, { continue: false });
-  const dev = buildDevActions(game, () => undefined);
-
-  dev.setTime('malam');
-  assert.ok(Math.abs(game.timeOfDay - 0.95) < 1e-9);
-  dev.setTime('siang');
-  assert.ok(Math.abs(game.timeOfDay - 0.5) < 1e-9);
-
-  for (const w of dev.weathers()) {
-    dev.setWeather(w.id);
-    assert.equal(dev.weather(), w.id);
-  }
-  dev.setWeather('cerah');
-
-  dev.setGodMode(true);
-  game.hero.invuln = 0;
-  const hp = game.hero.hp;
-  game.hero.takeDamage(99, game.hero.x + 10, game.hero.y);
-  assert.equal(game.hero.hp, hp, 'kebal means no HP lost');
-  dev.setGodMode(false);
-  game.hero.invuln = 0;
-  game.hero.takeDamage(3, game.hero.x + 10, game.hero.y);
-  assert.ok(game.hero.hp < hp, 'and switching it off really switches it off');
-  dev.heal();
-  assert.equal(game.hero.hp, game.hero.maxHp);
-
-  game.state.markSeen('intro');
-  dev.resetCutscenes();
-  assert.deepEqual(game.state.cutscenesSeen, []);
-
-  let reloaded = false;
-  const withReload = buildDevActions(game, () => {
-    reloaded = true;
-  });
-  game.saveNow(true);
-  assert.ok(env.store.size > 0);
-  withReload.resetSave();
-  assert.equal(reloaded, true, 'resetting the save reloads');
-  assert.ok(![...env.store.keys()].some((k) => k.includes('/save/')), 'and the save is gone');
-  game.dispose();
-});
-
-test('a reaction on the dummy is written to the log as "Es + Api"-style text', async () => {
-  const game = await bootGame(env, { continue: false });
-  const dev = buildDevActions(game, () => undefined);
-  const lines: string[] = [];
-  game.onReactionLog = (line) => lines.push(line);
-  dev.unlockAllElements();
-
-  const dummy = game.combat.world.enemies.find((e) => e.kind === 'dummy')!;
-  game.hero.reset(dummy.x - 18, dummy.y, game.hero.maxHp);
-  const swing = (): SwingEvent => ({ type: 'swing', x: game.hero.x, y: game.hero.y - 6, angle: 0, range: 40, arc: Math.PI / 2, dmg: 2, knock: 70, index: 0 });
-
-  // freeze it with ice, then hit it with fire: that is Lebur
-  dev.setElement('primary', 'es');
-  game.combat.applySwing(game.hero, swing());
-  assert.ok(game.combat.dummyStatus()[0].statuses.includes('Membeku'), `the dummy shows it is frozen: "${game.combat.dummyStatus()[0].statuses}"`);
-  dev.setElement('primary', 'api');
-  game.combat.applySwing(game.hero, swing());
-
-  assert.equal(lines.length, 1, `one reaction logged, got ${JSON.stringify(lines)}`);
-  assert.equal(lines[0], 'Api + Es → Lebur');
-  game.dispose();
-});
-
-test('developer mode opens only for a session the server called "dev"', async () => {
+test('a player sees no panel, no badge and no tuning rows; a developer sees all three', async () => {
   const { startWorld } = await import('../src/render3d/boot3d');
   const { DebugUi } = await import('../src/ui/DebugUi');
-  const settle = () => new Promise((r) => setTimeout(r, 50));
-  const devButtons = () => {
-    const out: unknown[] = [];
+  const settle = () => new Promise((r) => setTimeout(r, 80));
+  const find = (cls: string) => {
+    const out: { style: Record<string, string>; textContent: string }[] = [];
     const walk = (n: { classes?: Set<string>; childNodes: unknown[] }) => {
-      if (n.classes?.has('lm-devbtn')) out.push(n);
+      if (n.classes?.has(cls)) out.push(n as never);
       for (const c of n.childNodes) walk(c as typeof n);
     };
     walk(env.doc.body as never);
-    return out.length;
+    return out;
   };
+  const tuningShown = () => find('lm-set-row').filter((r) => r.textContent.includes('Setelan Combat') && r.style.display !== 'none').length;
 
-  // a player: five taps on the version number, even ?debug=1-style unlock, give an answer, not a menu
   const debug = new DebugUi(env.doc.body as unknown as HTMLElement);
-  const player = startWorld(env.doc.body as unknown as HTMLElement, debug, false, { devAllowed: false });
-  (debug as unknown as { panel: { onDevUnlock(): void } }).panel.onDevUnlock();
+  const player = startWorld(env.doc.body as unknown as HTMLElement, debug, false, {});
   await settle();
-  assert.equal(devButtons(), 0, 'no DEV button for a player');
+  assert.equal(find('lm-devbtn').length, 0, 'no DEV button');
+  assert.equal(find('lm-hud-dev').filter((b) => b.style.display !== 'none').length, 0, 'no badge');
+  assert.equal(tuningShown(), 0, 'no combat tuning in Settings');
   player.dispose();
 
-  // the developer account
+  const auth = await logIn('manzzy', 'dev');
   const debug2 = new DebugUi(env.doc.body as unknown as HTMLElement);
-  const dev = startWorld(env.doc.body as unknown as HTMLElement, debug2, false, { devAllowed: true });
-  (debug2 as unknown as { panel: { onDevUnlock(): void } }).panel.onDevUnlock();
+  const dev = startWorld(env.doc.body as unknown as HTMLElement, debug2, false, { devServer: makeDevServer(auth, () => undefined) });
   await settle();
-  assert.equal(devButtons(), 1, 'the DEV button for the developer');
+  assert.equal(find('lm-devbtn').length, 1, 'the DEV button');
+  assert.ok(find('lm-hud-dev').some((b) => b.style.display === 'block'), 'the DEV badge on the HUD');
+  assert.ok(tuningShown() >= 1, 'combat tuning for the developer');
   dev.dispose();
 });

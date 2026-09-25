@@ -30,6 +30,8 @@ export interface SaveData {
   cutscenesSeen?: string[] | undefined;
   /** World events: the running one, the cooldowns, the next roll (Batch 7). Repaired on load. */
   events?: unknown;
+  /** Set by the *server* on a developer account's save; refused by it on anyone else's. */
+  devSave?: boolean | undefined;
 }
 
 /** What `Character.toJSON()` produces; typed here so the save shape is in one file. */
@@ -39,6 +41,8 @@ export interface CharacterJson {
   /** Absent in saves written before the element picker existed. */
   elements?: { unlocked: string[]; primary: string | null; secondary: string | null } | undefined;
   coins?: number | undefined;
+  /** Developer saves only (the server refuses the field from anyone else). */
+  devStats?: Record<string, number> | undefined;
   inventory: {
     slots: ({ id: string; count: number; rarity: string } | null)[];
     equipped: Record<string, { id: string; count: number; rarity: string } | undefined>;

@@ -1255,3 +1255,27 @@ sama → tepat satu menang (operasi atomik). Algoritma JWT kini juga dikunci eks
 Rahasia: seluruh riwayat git dipindai ulang — nol connection string berkredensial, nol isian
 `MONGODB_URI`/`JWT_SECRET`, nol kunci privat/token. `server/.env` diabaikan git (`!!` di
 `git status --ignored`), izin berkas 600, hanya `server/.env.example` yang terlacak.
+
+## Mode Pengembang berdasarkan peran dari server
+
+- **Dihapus:** `?debug=1`, ketuk nomor versi 5 kali, tombol "lewati login", gerbang flag build
+  (`VITE_DEV_TOOLS`), peran dari nama di akun lokal, dan modul `core/devtools.ts`. Setelan Combat dan
+  Uji performa di Pengaturan kini hanya tampil untuk pengembang. Dijaga tes yang memindai kode sumber.
+- **Peran dari server:** akun `manzzy` ber-`role: "dev"` di database; panel dan penanda **DEV** di HUD
+  hanya muncul bila `/auth/me` di sesi itu menjawab `dev`.
+- **Nama dilindungi:** `manzzy`, `admin`, `dev`, `moderator`, `gm`, `system` ditolak saat register
+  (juga saat akun `manzzy` sudah ada). Akun pengembang dibuat dari VPS dengan
+  `npm run create-dev-account` (kata sandi tidak tampil). `DEV_SETUP_CODE` dihapus.
+- **Aksi lewat server:** `POST /dev/action` — 403 untuk selain peran dev, validasi ketat, dicatat di
+  log. Hadiah (item, Inti, kit, koin, level, EXP, elemen, stats, reset) **diterapkan server** pada save;
+  alat sesi (kebal, teleport, jam, cuaca, musuh, boneka, event, pulihkan) jalan setelah server setuju.
+  Tidak ada lagi jalur di klien yang menambah item ke tas sendiri.
+- **Save pengembang ditandai** `devSave` (dan `characters.dev`) oleh server; field pengembang dari
+  akun biasa ditolak.
+- **Save pemain divalidasi server** (`shared/saveRules.ts`): integritas (item/rarity/jumlah/slot/
+  level/EXP/koin/elemen) dan laju progres per tulis yang bertambah dengan waktu. Save yang ditolak
+  diberitahukan sekali dan tidak dikirim ulang terus-menerus. Tes memastikan save yang ditulis game
+  sungguhan selalu lolos.
+- **Stats bebas** (`devStats`) masuk ke lembar karakter sebagai sumber "Pengembang".
+- Tes: `server/tests/dev.test.ts` (10), `tests/devmode.test.ts` (6, game + app server sungguhan),
+  `tests/catalog.test.ts` (2), `tests/saverules.test.ts` (1), satu tambahan di `tests/backend.test.ts`.

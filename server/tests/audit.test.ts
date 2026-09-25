@@ -99,7 +99,7 @@ test('forged tokens are refused: wrong secret, alg none, unknown user', async ()
 test('concurrent writes of the same revision: exactly one wins', async () => {
   const { token } = await account();
   const put = (level: number) =>
-    app.inject({ method: 'PUT', url: '/save', headers: { authorization: `Bearer ${token}`, 'cf-connecting-ip': ip() }, payload: { data: { v: 2, hero: { x: 1, y: 1, hp: 1 }, character: { level } }, baseRev: 0 } });
+    app.inject({ method: 'PUT', url: '/save', headers: { authorization: `Bearer ${token}`, 'cf-connecting-ip': ip() }, payload: { data: { v: 2, hero: { x: 1, y: 1, hp: 1 }, character: { level, exp: 0 } }, baseRev: 0 } });
   const codes = (await Promise.all([put(1), put(2), put(3)])).map((r) => r.statusCode).sort();
   assert.deepEqual(codes, [200, 409, 409]);
 });

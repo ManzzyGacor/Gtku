@@ -11,7 +11,9 @@ import { ELEMENTS, type ElementId } from '../combat/elements';
 import { Inventory } from '../items/inventory';
 import { passiveMeta, type PassiveId } from '../items/items';
 import { gainExp, levelMods, MAX_LEVEL, expForNext, type LevelUp, type Progress } from '../progression';
-import { HERO_BASE, resolveStats, type Modifier, type StatBlock } from './stats';
+import { HERO_BASE, resolveStats, STAT_META, type Modifier, type StatBlock, type StatId } from './stats';
+
+const STAT_IDS: ReadonlySet<string> = new Set(STAT_META.map((m) => m.id));
 
 export interface SourceLine {
   label: string;
@@ -48,6 +50,11 @@ export class Character {
   coins = 0;
   primary: ElementId | null = null;
   secondary: ElementId | null = null;
+  /**
+   * Stats a developer set by hand (developer mode). Only ever present in a save the *server* has
+   * marked as a developer's — it refuses them in anyone else's — so a player never has any.
+   */
+  devStats: Partial<Record<StatId, number>> = {};
   private cachedMods: Modifier[] = [];
   private clock = 0;
 
@@ -127,6 +134,7 @@ export class Character {
     if (core) this.unlock(core);
     const mods: Modifier[] = [...levelMods(this.level), ...this.inventory.equippedMods()];
     for (const b of this.buffs) mods.push(...b.mods);
+    for (const [stat, flat] of Object.entries(this.devStats)) if (flat) mods.push({ stat: stat as StatId, flat, source: 'Pengembang' });
     this.cachedMods = mods;
     this.cached = resolveStats(HERO_BASE, mods);
   }
@@ -141,6 +149,8 @@ export class Character {
       else out.push({ label, mods: [line] });
     }
     for (const b of this.buffs) out.push({ label: b.label, mods: b.mods });
+    const dev = Object.entries(this.devStats).map(([stat, flat]) => ({ stat: stat as StatId, flat, source: 'Pengembang' }));
+    if (dev.length) out.push({ label: 'Pengembang', mods: dev });
     return out;
   }
 
@@ -203,6 +213,7 @@ export class Character {
     inventory: ReturnType<Inventory['toJSON']>;
     elements: { unlocked: ElementId[]; primary: ElementId | null; secondary: ElementId | null };
     coins: number;
+    devStats?: Partial<Record<StatId, number>>;
   } {
     return {
       level: this.level,
@@ -210,10 +221,12 @@ export class Character {
       inventory: this.inventory.toJSON(),
       elements: { unlocked: [...this.unlocked], primary: this.primary, secondary: this.secondary },
       coins: this.coins,
+      // only written when there are any: a player's save never carries the field at all
+      ...(Object.keys(this.devStats).length ? { devStats: { ...this.devStats } } : {}),
     };
   }
 
-  load(data: { level?: unknown; exp?: unknown; inventory?: unknown; elements?: unknown; coins?: unknown } | null | undefined): void {
+  load(data: { level?: unknown; exp?: unknown; inventory?: unknown; elements?: unknown; coins?: unknown; devStats?: unknown } | null | undefined): void {
     const level = typeof data?.level === 'number' && Number.isFinite(data.level) ? Math.floor(data.level) : 1;
     const exp = typeof data?.exp === 'number' && Number.isFinite(data.exp) ? Math.floor(data.exp) : 0;
     this.level = Math.max(1, Math.min(MAX_LEVEL, level));
@@ -227,6 +240,11 @@ export class Character {
     this.unlocked = Array.isArray(el?.unlocked) ? [...new Set(el.unlocked.filter(known))] : [];
     this.primary = known(el?.primary) && this.unlocked.includes(el.primary) ? el.primary : null;
     this.secondary = known(el?.secondary) && this.unlocked.includes(el.secondary) && el.secondary !== this.primary ? el.secondary : null;
+    this.devStats = {};
+    const ds = data?.devStats;
+    if (ds && typeof ds === 'object')
+      for (const [k, v] of Object.entries(ds as Record<string, unknown>))
+        if (STAT_IDS.has(k) && typeof v === 'number' && Number.isFinite(v)) this.devStats[k as StatId] = Math.max(-100_000, Math.min(100_000, v));
     this.refresh();
     // A save written before the level cap dropped, or hand-edited, could hold more EXP than the
     // level needs; fold it in rather than leaving a bar that is permanently past full.

@@ -24,7 +24,9 @@ import { RemoteAuth, type HttpFetch } from './core/account/remote';
 import type { AccountSession, AuthAdapter } from './core/account/auth';
 import { adoptSave, loadGame, setSaveMirror } from './core/save';
 import { readRaw, writeRaw, removeRaw } from './core/storage';
-import { connectCloud } from './cloud';
+import { connectCloud, makeDevServer } from './cloud';
+import type { DevServer } from './render3d/DevTools';
+import type { SaveSync } from './core/sync/saveSync';
 
 /**
  * Where accounts live: the Lentera Malam server (`server/`, docs/BACKEND.md) at api.varesa.mom.
@@ -33,7 +35,6 @@ import { connectCloud } from './cloud';
  * about the server: no key, no secret.
  */
 const API_URL: string = import.meta.env.VITE_API_URL ?? 'https://api.varesa.mom';
-const DEV_BUILD: boolean = import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1';
 
 const browserFetch: HttpFetch = (url, init) =>
   fetch(url, { method: init.method, headers: init.headers ?? {}, body: init.body ?? null, credentials: init.credentials, signal: init.signal ?? null });
@@ -53,25 +54,22 @@ function makeAuth(): AuthAdapter | null {
     return remote;
   }
   const deps = browserAuthDeps();
-  // with no server to decide, a developer build lets the local "manzzy" have developer mode
-  return deps ? new LocalAuth(DEV_BUILD ? { ...deps, devName: 'manzzy' } : deps) : null;
+  // local accounts (tests without a server) are always players: only a server can grant a role
+  return deps ? new LocalAuth(deps) : null;
 }
 
 /**
- * Whether this session may open developer mode. For a server account: only what the server said
- * *in this session* (role "dev") — a cached role from storage does not count, so being offline
- * never grants it. For a local account (developer builds only), the local rule above.
+ * The developer panel's line to the server, when — and only when — the server said this account's
+ * role is "dev" in this session. A role cached in storage never counts; neither does the name.
  */
-let devAllowed = false;
+let devServer: DevServer | undefined;
+let cloudSync: SaveSync | undefined;
 
 async function onAccount(session: AccountSession | null): Promise<void | string> {
   setSaveMirror(null);
-  devAllowed = false;
-  if (!session) return undefined;
-  if (session.kind === 'local' || !remote) {
-    devAllowed = session.role === 'dev';
-    return undefined;
-  }
+  devServer = undefined;
+  cloudSync = undefined;
+  if (!session || session.kind === 'local' || !remote) return undefined;
   const result = await connectCloud(remote, session, {
     loadLocal: () => loadGame(),
     adopt: (data) => void adoptSave(data),
@@ -86,7 +84,13 @@ async function onAccount(session: AccountSession | null): Promise<void | string>
     onHide: (fn) => window.addEventListener('pagehide', fn),
     now: () => Date.now(),
   });
-  devAllowed = result.role === 'dev';
+  cloudSync = result.sync;
+  if (result.role === 'dev')
+    devServer = makeDevServer(remote, (save) => {
+      // the server's save is now the truth: on this phone, and as the base of the next sync
+      adoptSave(save.data);
+      if (cloudSync) cloudSync.rev = save.rev;
+    });
   return result.relogin;
 }
 
@@ -135,12 +139,6 @@ async function boot(): Promise<void> {
       void fullscreen().enter();
       void import('./core/audio').then(({ bus }) => bus.music('title', 2.5));
     },
-    /*
-     * A way past the login for testing, in developer builds only. Written as the literal
-     * import.meta.env expression (not a helper call) so a release build compiles this to
-     * undefined and the button's text never reaches the bundle — tests/devmode.test.ts checks.
-     */
-    devSkip: import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1' ? { label: 'LEWATI LOGIN (TES, MODE PENGEMBANG)' } : undefined,
   });
   // Start the download now, not after the tap: by the time anyone reads the menu it is usually in.
   const loading = import('./render3d/boot3d');
@@ -165,7 +163,7 @@ async function boot(): Promise<void> {
     title.setBackdrop(false);
     (backdrop as { dispose(): void } | null)?.dispose();
     backdrop = null;
-    (window as unknown as { __game3d: unknown }).__game3d = startWorld(host, debug, choice.continueGame, { devAllowed });
+    (window as unknown as { __game3d: unknown }).__game3d = startWorld(host, debug, choice.continueGame, { devServer });
   } catch (e) {
     /*
      * Show what actually failed.

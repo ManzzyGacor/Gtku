@@ -8,12 +8,11 @@
  */
 import { Game3D } from './Game3D';
 import { TitleBackdrop } from './TitleBackdrop';
+import type { DevServer } from './DevTools';
 import { resumeAudio, suspendAudio } from '../core/audio';
 import { loadCombatTuning } from '../core/entities/combatTuning';
 import { Lifecycle } from '../core/lifecycle';
 import { invalidateInsets } from '../ui/safearea';
-import { debugRequested } from '../core/devtools';
-import { readRaw, writeRaw } from '../core/storage';
 import { el, injectStyle, onTap } from '../ui/dom';
 import { recordError } from '../core/errors';
 import type { DebugUi } from '../ui/DebugUi';
@@ -57,7 +56,15 @@ function notice(text: string | null): void {
  * Build the world. The choice (continue or start over) is made *before* construction, which is
  * what lets a loaded save place the hero and the clock on the very first frame.
  */
-export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: boolean, access: { devAllowed: boolean } = { devAllowed: false }): Booted3D {
+/**
+ * What this session may do beyond playing. `devServer` is present only when the server said the
+ * logged-in account's role is "dev" (main.ts) — and every panel action still goes through it.
+ */
+export interface SessionAccess {
+  devServer?: DevServer | undefined;
+}
+
+export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: boolean, access: SessionAccess = {}): Booted3D {
   // Whatever the player tuned in the combat panel on a previous run, applied before anything reads
   // an attack's numbers. It lives here rather than in the entry so the title screen does not have
   // to wait for the combat model to download.
@@ -98,7 +105,7 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
   if (!continueGame) game.playCutscene('intro', { auto: true });
 
   // ── Mode Pengembang ──
-  const dev = installDevMode(() => game, debug, access.devAllowed);
+  const dev = installDevMode(() => game, debug, access.devServer);
 
   /**
    * Rebuild everything that lived on the GPU.
@@ -182,81 +189,47 @@ export function startTitleBackdrop(parent: HTMLElement): { dispose(): void } | n
   }
 }
 
-/** Remembered between reloads so a tester who unlocked it once does not have to tap again. */
-const DEV_KEY = 'lentera-malam/dev';
-
 /**
- * Whether this build carries the developer menu at all.
+ * The developer panel, for an account the server calls "dev" — and for nobody else.
  *
- * Written as the literal `import.meta.env` expressions, not as a call to `devToolsBuild()`: Vite
- * replaces these with constants at build time, so in a release build this is the literal `false`,
- * the bundler proves the dynamic imports below unreachable, and **no DevMenu/DevTools chunk is
- * emitted at all**. A first version called the helper function instead; the menu was never loaded,
- * but its two chunks still sat in `dist/`, downloadable by anyone who guessed the file names.
- * `tests/devmode.test.ts` checks the built output for exactly that.
+ * There is no other door: no `?debug=1`, no taps on the version number, no build flag, no
+ * "skip login". The panel's code is a separate chunk loaded only here, and even with the chunk in
+ * hand every action is authorised by the server (`DevTools.ts`). A small DEV badge on the HUD says
+ * which mode the session is in.
  */
-const DEV_TOOLS: boolean = import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1';
-
-/** The developer menu, if this build is allowed one (see `DEV_TOOLS`). */
-function installDevMode(getGame: () => Game3D, debug: DebugUi, allowed: boolean): { dispose(): void } {
-  if (!DEV_TOOLS) return { dispose: () => undefined };
-  /*
-   * Two locks. The build (above): a release build does not contain the menu at all. And the
-   * account: only a session whose role the *server* reported as "dev" in this session (the
-   * account "manzzy"). Everyone else gets a plain answer instead of a menu.
-   */
-  if (!allowed) {
-    debug.onDevUnlock = () => getGame().hud.toast('Mode Pengembang hanya untuk akun pengembang.', 3);
-    return { dispose: () => undefined };
-  }
-
+function installDevMode(getGame: () => Game3D, debug: DebugUi, server: DevServer | undefined): { dispose(): void } {
+  debug.setDeveloper(!!server);
+  if (!server) return { dispose: () => undefined };
   let menu: import('../ui/DevMenu').DevMenu | null = null;
   let button: HTMLButtonElement | null = null;
-  let loading = false;
+  let disposed = false;
 
-  /** Load the menu (once) and show the DEV button; open it too unless `quiet`. */
-  const open = async (quiet = false): Promise<void> => {
-    writeRaw(DEV_KEY, '1');
-    if (!menu && !loading) {
-      loading = true;
-      const [{ DevMenu }, { buildDevActions }] = await Promise.all([import('../ui/DevMenu'), import('./DevTools')]);
-      const game = getGame();
-      menu = new DevMenu(buildDevActions(game, () => location.reload()));
-      // the reaction log: every reaction, spelled out, while the developer menu is on
-      game.onReactionLog = (line) => menu?.pushReaction(line);
-      menu.onToggle = (isOpen) => {
-        game.setDevPaused(isOpen);
-      };
-      loading = false;
-      showButton();
-    }
-    if (!quiet) menu?.openMenu();
-  };
+  injectStyle(
+    'lm-ui-devbtn',
+    `.lm-devbtn { position: fixed; z-index: 80; pointer-events: auto; width: 40px; height: 34px; padding: 0;
+      right: calc(158px + var(--lm-sar, 0px)); top: calc(4px + var(--lm-sat, 0px));
+      border: 1px solid #7dffb0; border-radius: 17px; background: rgba(8, 26, 18, 0.85); color: #7dffb0;
+      font: 11px/1 ui-monospace, monospace; letter-spacing: 1px; cursor: pointer; touch-action: manipulation; }`,
+  );
+  button = el('button', {}, 'DEV');
+  button.className = 'lm-devbtn';
+  button.setAttribute('aria-label', 'Panel pengembang');
+  getGame().hud.setDevBadge(true);
 
-  const showButton = (): void => {
-    if (button) return;
-    injectStyle(
-      'lm-ui-devbtn',
-      `.lm-devbtn { position: fixed; z-index: 80; pointer-events: auto; width: 40px; height: 34px; padding: 0;
-        right: calc(158px + var(--lm-sar, 0px)); top: calc(4px + var(--lm-sat, 0px));
-        border: 1px solid #7dffb0; border-radius: 17px; background: rgba(8, 26, 18, 0.85); color: #7dffb0;
-        font: 11px/1 ui-monospace, monospace; letter-spacing: 1px; cursor: pointer; touch-action: manipulation; }`,
-    );
-    button = el('button', {}, 'DEV');
-    button.className = 'lm-devbtn';
-    onTap(button, () => void open());
-    document.body.appendChild(button);
-  };
-
-  // unlocked by the URL, by a previous session, or by five taps on the version number
-  debug.onDevUnlock = () => void open();
-  const search = typeof location !== 'undefined' ? location.search : '';
-  // ?debug=1 opens the menu straight away; a tester who unlocked it before just gets the button
-  if (debugRequested(search)) void open();
-  else if (readRaw(DEV_KEY) === '1') void open(true);
+  void Promise.all([import('../ui/DevMenu'), import('./DevTools')]).then(([{ DevMenu }, { buildDevActions }]) => {
+    if (disposed) return;
+    const game = getGame();
+    menu = new DevMenu(buildDevActions(game, server, () => location.reload()));
+    // the reaction log: every reaction, spelled out, while in developer mode
+    game.onReactionLog = (line) => menu?.pushReaction(line);
+    menu.onToggle = (isOpen) => game.setDevPaused(isOpen);
+    onTap(button!, () => menu?.openMenu());
+    document.body.appendChild(button!);
+  });
 
   return {
     dispose: () => {
+      disposed = true;
       menu?.destroy();
       button?.remove();
     },

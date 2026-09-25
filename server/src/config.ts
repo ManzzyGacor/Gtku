@@ -15,8 +15,6 @@ export interface ServerConfig {
   accessTtl: number;
   /** Refresh token lifetime, seconds. */
   refreshTtl: number;
-  /** Code that allows registering the reserved developer name over the API; '' = not allowed. */
-  devSetupCode: string;
   /** Behind Cloudflare Tunnel the socket is always 127.0.0.1; the real client IP is in a header. */
   trustCfHeader: boolean;
   /** Secure cookies (true everywhere but the test suite, which runs over plain inject()). */
@@ -25,7 +23,7 @@ export interface ServerConfig {
 
 export class ConfigError extends Error {}
 
-/** The one account allowed developer mode (docs/BACKEND.md "Peran"). */
+/** The developer account (docs/BACKEND.md "Peran"). Created only from the VPS. */
 export const DEV_USERNAME = 'manzzy';
 
 export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
@@ -46,7 +44,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
     port: 3000,
     accessTtl: 15 * 60,
     refreshTtl: 30 * 24 * 60 * 60,
-    devSetupCode: env.DEV_SETUP_CODE?.trim() ?? '',
     trustCfHeader: true,
     secureCookies: true,
   };

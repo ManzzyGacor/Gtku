@@ -12,9 +12,8 @@
  *
  * **An account is required.** There is no guest option. Until the backend of Batch 7 exists the
  * accounts are stored on this phone only, and the register form says so in plain words — including
- * that clearing the browser's data deletes them. Developer builds get a way past the login for
- * testing; release builds do not contain it (the label and the handler come from `main.ts`, behind
- * `import.meta.env.DEV`).
+ * that clearing the browser's data deletes them. There is no way past the login: developer mode
+ * belongs to an account the server calls "dev", not to a button on this screen.
  */
 import { clearSave, hasSave, setSaveScope } from '../core/save';
 // Imported from the engine rather than the barrel on purpose: the barrel pulls in the music and
@@ -126,8 +125,6 @@ export interface TitleHooks {
    * first. A string back means "the server ended this session": the login form comes back with it.
    */
   account?(session: AccountSession | null): void | Promise<void | string>;
-  /** Developer builds only: a button past the login. Absent from release builds entirely. */
-  devSkip?: { label: string } | undefined;
 }
 
 type Stage = 'gate' | 'auth' | 'menu' | 'name' | 'busy';
@@ -275,7 +272,6 @@ export class TitleScreen {
       );
       msg.className = 'lm-title-warn';
       box.appendChild(msg);
-      this.appendDevSkip(box);
       this.setStage('auth');
       return;
     }
@@ -380,20 +376,10 @@ export class TitleScreen {
     );
     where.className = 'lm-title-note';
     box.append(err, submit, swap, where);
-    this.appendDevSkip(box);
     this.setStage('auth');
   }
 
-  private appendDevSkip(box: HTMLElement): void {
-    const dev = this.hooks.devSkip;
-    if (!dev) return;
-    const skip = el('button', {}, dev.label);
-    skip.className = 'lm-title-btn dev';
-    onTap(skip, () => this.enter(null));
-    box.appendChild(skip);
-  }
-
-  /** Logged in (or skipped, in a developer build): file saves under the account, show the menu. */
+  /** Logged in: file saves under the account, show the menu. */
   private enter(session: AccountSession | null): void {
     this.session = session;
     setSaveScope(session?.id ?? null);
@@ -443,7 +429,7 @@ export class TitleScreen {
       who.appendChild(el('b', {}, this.session.name));
       who.appendChild(el('span', {}, this.session.kind === 'local' ? ' · di perangkat ini' : ' · tersambung'));
     } else {
-      who.appendChild(el('span', {}, 'Tanpa akun (mode pengembang)'));
+      who.appendChild(el('span', {}, 'Belum masuk'));
     }
     menu.appendChild(who);
 
@@ -505,7 +491,7 @@ export class TitleScreen {
           ? 'Belum ada server. Akun dan progresmu hilang kalau data browser dibersihkan, dan belum bisa dipindah ke HP lain. ' +
             'Sinkronisasi ke server direncanakan (docs/BACKEND.md).'
           : 'Progresmu disinkronkan ke server.')
-      : 'Masuk tanpa akun lewat mode pengembang. Progres disimpan di slot tanpa akun.';
+      : 'Belum masuk.';
     this.showPanel('AKUN', body, [{ label: s ? 'KELUAR AKUN' : 'MASUK / DAFTAR', run: () => void this.logout() }]);
   }
 

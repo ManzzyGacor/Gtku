@@ -89,6 +89,10 @@ export function mongoRepos(db: Db): Repos {
         const r = await users.updateOne({ usernameLower: l }, { $set: { role } });
         return r.matchedCount > 0;
       },
+      async setPassword(l, passwordHash) {
+        const r = await users.updateOne({ usernameLower: l }, { $set: { passwordHash } });
+        return r.matchedCount > 0;
+      },
     },
     sessions: {
       async create(s) {
@@ -118,6 +122,17 @@ export function mongoRepos(db: Db): Repos {
           if (isDup(e)) throw new DuplicateError();
           throw e;
         }
+      },
+      async overwrite(userId, slot, next) {
+        const r = await characters.findOneAndUpdate(
+          { userId, slot },
+          { $set: next, $inc: { rev: 1 }, $setOnInsert: { createdAt: next.updatedAt } },
+          { upsert: true, returnDocument: 'after' },
+        );
+        return strip(r) as CharacterDoc;
+      },
+      async remove(userId, slot) {
+        await characters.deleteOne({ userId, slot });
       },
       async replaceIfRev(userId, slot, baseRev, next) {
         // the revision check and the write are one atomic operation

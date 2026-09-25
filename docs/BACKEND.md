@@ -42,7 +42,6 @@ Semua rahasia **hanya** ada di `server/.env` di VPS. `.gitignore` mengabaikan `.
 | `JWT_SECRET` | ya | Rahasia penanda access token (HS256), **minimal 32 karakter acak**. Buat dengan `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Mengganti nilainya membuat semua access token lama tidak berlaku (pemain cukup di-refresh otomatis). |
 | `MONGODB_DB` | tidak | Nama database (bawaan `lentera_malam`). |
 | `CORS_ORIGIN` | tidak | Origin game yang boleh memanggil API (bawaan `https://game.varesa.mom`). |
-| `DEV_SETUP_CODE` | tidak | Kode untuk mendaftarkan akun pengembang `manzzy` lewat API (§5). Kosong = nama itu tidak bisa didaftarkan lewat API. Hapus lagi setelah dipakai. |
 
 ## 3. Endpoint
 
@@ -56,10 +55,11 @@ driver. Kode-kodenya ada di `shared/api.ts` (`ApiErrorCode`) beserta teks bahasa
 | `POST /auth/register` | — | `{ username, password, email? }` | `201 { accessToken, expiresIn, user }` + cookie refresh |
 | `POST /auth/login` | — | `{ username, password }` | `200 { accessToken, expiresIn, user }` + cookie refresh |
 | `POST /auth/refresh` | cookie | — | `200 { accessToken, expiresIn, user }` + cookie baru (rotasi) |
-| `POST /auth/logout` | cookie | — | `204`, sesi dicabut, cookie dihapus |
+| `POST /auth/logout` | cookie | — | `204`, sesi dicabut (access token ikut mati), cookie dihapus |
 | `GET /auth/me` | Bearer | — | `{ username, role }` |
 | `GET /save` | Bearer | — | `200 { data, saveVersion, rev, updatedAt }` atau `204` |
-| `PUT /save` | Bearer | `{ data, baseRev, clientUpdatedAt? }` | `200 { rev, updatedAt }` · `409 { error: "conflict", current }` · `413` · `422` |
+| `PUT /save` | Bearer | `{ data, baseRev, clientUpdatedAt? }` | `200 { rev, updatedAt }` · `409 { error: "conflict", current }` · `413` · `422 { error: "save_rejected", reason, detail }` |
+| `POST /dev/action` | Bearer, peran `dev` | `{ action, save? }` | `200 { ok, note?, save? }` · `403 forbidden` · `400` |
 
 `user` = `{ username, role }`, `role` = `"player"` atau `"dev"`.
 
@@ -107,22 +107,57 @@ Cloudflare Tunnel.
 
 ## 5. Peran & Mode Pengembang
 
-Mode Pengembang hanya untuk akun **`manzzy`**, disimpan sebagai `role: "dev"` di database. **Server
-yang memutuskan**:
+Mode Pengembang hanya untuk akun **`manzzy`**, yang tersimpan dengan `role: "dev"` di database.
+**Server yang memutuskan; klien hanya mengikuti.**
 
-- Mendaftar dengan nama `manzzy` ditolak (`username_reserved`) kecuali body menyertakan
-  `devSetupCode` yang sama dengan `DEV_SETUP_CODE` di `.env`. Tanpa ini, orang pertama yang kebetulan
-  mendaftar "manzzy" akan mendapat mode pengembang.
-- Cara lain (tanpa kode): daftarkan akun biasa, lalu di VPS: `cd server && npm run set-role -- manzzy dev`
-  (butuh akses shell ke server — itulah kuncinya).
-- Game hanya membuka Mode Pengembang bila **server** menjawab `role: "dev"` di sesi itu
-  (`/auth/me` setelah masuk). Peran yang tersimpan di `localStorage` tidak dihitung, jadi mengedit
-  storage atau bermain offline tidak membukanya. Build rilis tetap tidak membawa kode menunya sama
-  sekali (`tests/devmode.test.ts`).
-- Batas yang jujur: isi save dibuat oleh game di HP pemain, jadi server tidak bisa membuktikan item
-  di dalamnya "sah". Yang dijaga server: siapa yang boleh membaca/menulis save mana, bentuk dan
-  ukuran save, versi, dan peran. Untuk ekonomi yang tidak bisa dicurangi, logika itu harus pindah
-  ke server (belum).
+**Nama dilindungi.** `manzzy`, `admin`, `dev`, `moderator`, `gm`, dan `system` ditolak saat register
+(`username_reserved`), apa pun huruf besar-kecilnya, ada atau belum ada akunnya. Akun `manzzy` hanya
+bisa dibuat dari VPS:
+
+```bash
+cd server && npm run create-dev-account
+```
+
+Skrip itu meminta kata sandi **tanpa menampilkannya** (tidak masuk layar, riwayat shell, atau
+daftar proses), lalu membuat akun `manzzy` dengan peran `dev` — atau, kalau sudah ada, mengatur
+perannya ke `dev` dan mengganti kata sandinya. `npm run set-role -- <nama> <dev|player>` tetap ada.
+
+**Klien.** Panel pengembang dan penanda **DEV** di HUD hanya muncul bila server menjawab
+`role: "dev"` di sesi itu (`/auth/me` setelah login). Tidak ada pintu lain: `?debug=1`, ketuk nomor
+versi, tombol lewati login, dan flag build sudah **dihapus**. Peran tidak pernah disimpulkan dari
+teks nama di klien, dan peran yang tersimpan di `localStorage` tidak dihitung (jadi offline pun tidak
+membukanya). Setelan Combat dan Uji performa di Pengaturan juga hanya tampil untuk pengembang.
+
+**Setiap aksi lewat server** — `POST /dev/action` (Bearer), ditolak `403 forbidden` untuk akun yang
+perannya di database bukan `dev` (dan percobaannya dicatat). Aksi divalidasi ketat
+(`shared/devActions.ts`) dan dicatat di log server (`aksi pengembang`, dengan nama akun dan aksinya).
+
+| Jenis | Aksi | Yang terjadi |
+| --- | --- | --- |
+| Hadiah (mengubah save) | beri item/equipment/senjata (rarity apa pun), semua Inti Lentera, set perlengkapan Legendaris, atur koin, atur level, tambah EXP, buka semua elemen, atur elemen primer/sekunder, atur stats bebas (`devStats`), reset status cutscene, reset save | **Server** menerapkannya pada save, menyimpan, dan mengembalikan save baru; game hanya memakai save dari server |
+| Alat sesi | mode kebal, teleport, jam, cuaca, munculkan musuh/boneka, hapus musuh, pulihkan HP, mulai/akhiri event | server mengizinkan & mencatat; game menjalankannya setelah jawaban "ya" |
+
+Offline, tidak ada aksi yang jalan ("Server tidak bisa dihubungi").
+
+**Save pengembang ditandai.** Setiap save akun pengembang diberi `devSave: true` oleh server dan
+`characters.dev = true` di database, apa pun yang dikirim klien. Akun biasa yang mengirim `devSave`
+atau `devStats` ditolak. Room co-op publik tidak menerima save pengembang (docs/MULTIPLAYER.md).
+
+**Save pemain divalidasi** (`shared/saveRules.ts`, katalog di `shared/catalog.ts` yang dijaga tes agar
+sama dengan katalog game):
+- *integritas*: hanya item yang ada, rarity sah, jumlah ≤ tumpukan, perlengkapan di slot yang benar,
+  level 1–30 dan EXP sesuai kurva, koin dalam batas, elemen hanya dari Inti Lentera yang dimiliki,
+  tidak ada field pengembang;
+- *laju progres* (dibanding save yang sudah di server): per tulis maksimal +3 level, +5.000 koin,
+  30 barang baru, 3 barang Legendaris/Mitos baru — **ditambah** sesuai waktu sejak tulis terakhir
+  (mis. +1 level per 4 menit), jadi main lama offline tetap bisa tersinkron. Tulis pertama (impor
+  progres HP) hanya dicek integritasnya.
+- Ditolak → `422 save_rejected` dengan alasan; game memberi tahu sekali dan menyimpan progres itu di
+  HP saja.
+
+**Batas yang jujur.** Save tetap dibuat oleh game di HP, jadi pemain yang mengubah save sedikit demi
+sedikit di bawah batas per-tulis masih bisa lolos. Menutup itu butuh progres yang dimiliki server —
+dan itulah yang dilakukan room co-op: HP boss, damage, dan loot ditentukan server.
 
 ## 6. Data (MongoDB)
 
@@ -174,8 +209,7 @@ Index dibuat otomatis saat server mulai (`ensureIndexes`).
    izinkan IP publik VPS ini saja.
 2. **`server/.env`:** `cp server/.env.example server/.env`, isi `MONGODB_URI` dan `JWT_SECRET`
    (perintah pembuatnya di §2), `chmod 600 server/.env`.
-3. **Akun pengembang:** isi `DEV_SETUP_CODE` sementara, daftar sebagai `manzzy` dengan kode itu
-   (atau daftar biasa lalu `npm run set-role -- manzzy dev`), lalu kosongkan lagi kodenya.
+3. **Akun pengembang:** `cd server && npm run create-dev-account` (kata sandi diketik tanpa tampil).
 4. **Jalankan:** `tmux new-session -d -s api -c /home/dev/projects/Gtku/server "npm start"`,
    cek `curl -s http://127.0.0.1:3000/health`.
 5. **Cloudflare Tunnel:** tambahkan public hostname **`api.varesa.mom` → `http://127.0.0.1:3000`**
@@ -192,4 +226,4 @@ Index dibuat otomatis saat server mulai (`ensureIndexes`).
 - Lupa sandi lewat email (email opsional sudah disimpan; butuh layanan kirim email).
 - Ganti kata sandi, hapus akun, dan daftar sesi aktif.
 - Menampilkan cadangan save di menu Akun untuk dipulihkan manual.
-- Validasi isi save yang lebih dalam di server (lihat batas jujur di §5).
+- Progres yang sepenuhnya dimiliki server di dunia utama (lihat batas jujur di §5).

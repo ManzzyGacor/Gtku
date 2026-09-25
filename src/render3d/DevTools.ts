@@ -1,22 +1,35 @@
 /**
- * The developer menu's actions, against the live game.
+ * The developer panel's actions, against the live game — **each one asked of the server first**.
  *
- * Every button in `ui/DevMenu.ts` ends up here, and every one of them goes through the same doors
- * the game itself uses — `inventory.add`, `character.unlock`, `applySheet`, `combat.devSpawn`,
- * `saveNow` — so a test done with the developer menu tests the real thing rather than a shortcut
- * around it. Each action returns a short sentence for the menu's status line, so the player can
- * see that the tap did something.
+ * The panel only exists for an account the server calls "dev" (see `boot3d.ts`), but that is not
+ * the lock; this is. Every button sends its action to `POST /dev/action`
+ * (shared/devActions.ts), where the server checks the account's role in the database, validates
+ * the action, and logs it:
+ *
+ *  • **grants** (items, cores, kit, coins, level, EXP, elements, stats, cutscene reset, save reset)
+ *    are *applied by the server* to the save and returned — the game then adopts the server's save.
+ *    There is no code path here that adds an item to the bag by itself.
+ *  • **session tools** (god mode, teleport, time, weather, spawns, heal, events, reaction log) run
+ *    locally only after the server said yes.
+ *
+ * Offline, nothing happens: the answer is "server tidak bisa dihubungi".
  */
 import type { Game3D } from './Game3D';
-import type { DevActions } from '../ui/DevMenu';
+import type { DevActions, Reply } from '../ui/DevMenu';
+import type { DevAction } from '../../shared/devActions';
+import type { SaveData } from '../core/state/GameState';
 import { ELEMENTS, type ElementId } from '../core/combat/elements';
-import { EQUIP_SLOTS, ITEMS, RARITIES, itemDef, type Rarity } from '../core/items/items';
+import { ITEMS, RARITIES } from '../core/items/items';
 import { MAX_LEVEL } from '../core/progression';
 import { WEATHER, WEATHER_IDS, type Weather } from '../core/systems/weather';
-import { findStandable } from '../core/saveMigrate';
-import { wipeSave } from '../core/save';
-import { DUMMY_TILE } from '../core/systems/tutorial';
 import { WORLD_EVENT_IDS, WORLD_EVENTS, type WorldEventId } from '../core/systems/worldEvents';
+import { findStandable } from '../core/saveMigrate';
+import { DUMMY_TILE } from '../core/systems/tutorial';
+
+/** The server side of the panel: `POST /dev/action`. Implemented in main.ts with the account's token. */
+export interface DevServer {
+  act(action: DevAction, save?: SaveData): Promise<{ ok: true; note?: string | undefined; save?: { data: SaveData; rev: number } | null | undefined } | { ok: false; message: string }>;
+}
 
 const KIND_LABEL: Record<string, string> = {
   weapon: 'Senjata',
@@ -32,13 +45,31 @@ const KIND_LABEL: Record<string, string> = {
 
 const TIMES = { pagi: 0.3, siang: 0.5, sore: 0.72, malam: 0.95 } as const;
 
+const elementName = (id: ElementId | null): string => (id ? ELEMENTS[id].name : '-');
+
 /** Tile to the pixel at its centre. */
 const t = (tx: number, ty: number): { x: number; y: number } => ({ x: tx * 16 + 8, y: ty * 16 + 8 });
 
-export function buildDevActions(game: Game3D, reload: () => void): DevActions {
+export function buildDevActions(game: Game3D, server: DevServer, reload: () => void): DevActions {
   const ch = game.character;
 
-  const give = (id: string, rarity: Rarity, count = 1): number => ch.inventory.add(id, count, rarity).added;
+  /** A grant: the server changes the save, the game takes the server's save. */
+  const grant = async (action: DevAction): Promise<string> => {
+    const r = await server.act(action, game.snapshotSave());
+    if (!r.ok) return r.message;
+    if (r.save === null) {
+      reload();
+      return r.note ?? 'Selesai.';
+    }
+    if (r.save) game.adoptSave(r.save.data);
+    return r.note ?? 'Selesai.';
+  };
+
+  /** A session tool: the server says yes (and logs it), then it runs here. */
+  const tool = async (action: DevAction, run: () => string): Promise<string> => {
+    const r = await server.act(action);
+    return r.ok ? run() : r.message;
+  };
 
   const teleportTargets = (): { id: string; label: string; x: number; y: number }[] => {
     const m = game.world.markers;
@@ -54,7 +85,6 @@ export function buildDevActions(game: Game3D, reload: () => void): DevActions {
       { id: 'bossdoor', label: 'Pintu arena boss', ...t(m.boss.door.tx - 2, m.boss.door.ty + 1) },
       { id: 'arena', label: 'Dalam arena boss', ...t(m.boss.arena.x0 + 4, Math.round((m.boss.arena.y0 + m.boss.arena.y1) / 2)) },
     ];
-    // every chest, numbered west to east, so all of them can be reached for testing
     const chests: { x: number; y: number }[] = [];
     for (let cy = 0; cy < game.world.heightTiles / 16; cy++)
       for (let cx = 0; cx < game.world.widthTiles / 16; cx++)
@@ -67,134 +97,89 @@ export function buildDevActions(game: Game3D, reload: () => void): DevActions {
   return {
     items: () => Object.values(ITEMS).map((d) => ({ id: d.id, name: d.name, kind: KIND_LABEL[d.kind] ?? d.kind })),
     rarities: () => RARITIES.map((r) => ({ id: r.id, label: r.label })),
-    giveItem: (id, rarity, count) => {
-      const def = itemDef(id);
-      if (!def) return 'Item tidak dikenal.';
-      const n = give(id, rarity as Rarity, count);
-      game.saveNow(true);
-      return n > 0 ? `${def.name} (${rarity}) masuk tas.` : 'Tas penuh.';
-    },
-    giveAllCores: () => {
-      let n = 0;
-      for (const def of Object.values(ITEMS)) if (def.kind === 'lantern') n += give(def.id, def.rarity);
-      game.saveNow(true);
-      return `${n} Inti Lentera masuk tas.`;
-    },
-    giveKit: () => {
-      // the best defined item for each slot kind, at Legendary
-      let n = 0;
-      for (const slot of EQUIP_SLOTS) {
-        if (slot.id === 'accessory2' || slot.kind === 'lantern') continue;
-        // the last-defined item of each kind is the strongest; a reverse scan, not findLast (ES2023)
-      let pick: (typeof ITEMS)[string] | undefined;
-      for (const d of Object.values(ITEMS)) if (d.kind === slot.kind) pick = d;
-        if (pick) n += give(pick.id, 'legendary');
-      }
-      game.saveNow(true);
-      return `${n} perlengkapan Legendaris masuk tas. Pakai dari panel Karakter.`;
-    },
-    giveCoins: (n) => {
-      ch.addCoins(n);
-      game.saveNow(true);
-      return `Koin: ${ch.coins}`;
-    },
+    giveItem: (id, rarity, count) => grant({ type: 'give_item', item: id, rarity: rarity as never, count }),
+    giveAllCores: () => grant({ type: 'give_all_cores' }),
+    giveKit: () => grant({ type: 'give_kit' }),
+    giveCoins: (n) => grant({ type: 'set_coins', amount: Math.max(0, Math.min(99_999_999, ch.coins + n)) }),
 
     elements: () =>
-      (Object.keys(ELEMENTS) as ElementId[])
-        .filter((id) => ELEMENTS[id].implemented)
-        .map((id) => ({ id, name: ELEMENTS[id].name, unlocked: ch.unlocked.includes(id) })),
-    unlockAllElements: () => {
-      for (const id of Object.keys(ELEMENTS) as ElementId[]) ch.unlock(id);
-      game.applySheet();
-      game.saveNow(true);
-      return `Terbuka: ${ch.unlocked.map((id) => ELEMENTS[id].name).join(', ')}`;
-    },
+      (Object.keys(ELEMENTS) as ElementId[]).filter((id) => ELEMENTS[id].implemented).map((id) => ({ id, name: ELEMENTS[id].name, unlocked: ch.unlocked.includes(id) })),
+    unlockAllElements: () => grant({ type: 'unlock_elements' }),
     primary: () => ch.primary,
     secondary: () => ch.secondary,
-    setElement: (slot, id) => {
-      const ok = ch.setElement(slot, id as ElementId | null);
-      game.applySheet();
-      game.saveNow(true);
-      if (!ok) return 'Elemen itu belum terbuka.';
-      return `Primer: ${ch.primary ? ELEMENTS[ch.primary].name : '-'}, sekunder: ${ch.secondary ? ELEMENTS[ch.secondary].name : '-'}`;
+    setElement: (slot, id): Reply => {
+      const next = { primary: ch.primary, secondary: ch.secondary, [slot]: id as ElementId | null };
+      // the same element cannot sit in both hands: the other hand lets go of it
+      if (next.primary && next.primary === next.secondary) next[slot === 'primary' ? 'secondary' : 'primary'] = null;
+      return grant({ type: 'set_elements', primary: next.primary as never, secondary: next.secondary as never }).then(
+        (msg) => `${msg} Primer: ${elementName(ch.primary)}, sekunder: ${elementName(ch.secondary)}.`,
+      );
     },
 
     level: () => ({ level: ch.level, exp: ch.exp, need: ch.expNeeded }),
-    setLevel: (level) => {
-      if (!Number.isFinite(level)) return 'Angka tidak sah.';
-      ch.level = Math.max(1, Math.min(MAX_LEVEL, Math.floor(level)));
-      ch.exp = 0;
-      game.applySheet();
-      game.hero.heal(game.hero.maxHp);
-      game.saveNow(true);
-      return `Level ${ch.level}. HP maks ${game.hero.maxHp}, ATK ${ch.stats.atk.toFixed(0)}.`;
-    },
-    addExp: (n) => {
-      game.gainExp(n);
-      return `Level ${ch.level}, EXP ${ch.exp}/${ch.expNeeded || '-'}`;
+    setLevel: (level) => (Number.isFinite(level) ? grant({ type: 'set_level', level: Math.max(1, Math.min(MAX_LEVEL, Math.floor(level))) }) : 'Angka tidak sah.'),
+    addExp: (n) => grant({ type: 'add_exp', amount: n }),
+    stats: () => ({ ...ch.devStats }) as Record<string, number>,
+    setStats: (stats) => {
+      // the server merges and drops zeros: send every stat so "reset" clears the lot
+      const all: Record<string, number> = {};
+      for (const k of Object.keys(ch.devStats)) all[k] = 0;
+      return grant({ type: 'set_stats', stats: { ...all, ...stats } });
     },
 
-    spawn: (kind) => {
-      // a little in front of the hero, on ground they can reach
-      const a = game.hero.aim;
-      const spot = findStandable(game.world, game.hero.x + Math.cos(a) * 48, game.hero.y + Math.sin(a) * 48) ?? { x: game.hero.x + 48, y: game.hero.y };
-      if (kind === 'dummy') {
-        const d = game.combat.addDummy(spot.x, spot.y);
-        d.spawnId = `dev_dummy_${Math.round(spot.x)}`;
-        return 'Boneka latihan dimunculkan.';
-      }
-      const made = game.combat.devSpawn(kind, spot.x, spot.y);
-      return `${made.length} musuh dimunculkan.`;
-    },
-    clearSpawns: () => `${game.combat.devClear()} dihapus.`,
+    spawn: (kind) =>
+      tool({ type: 'spawn', kind }, () => {
+        const a = game.hero.aim;
+        const spot = findStandable(game.world, game.hero.x + Math.cos(a) * 48, game.hero.y + Math.sin(a) * 48) ?? { x: game.hero.x + 48, y: game.hero.y };
+        if (kind === 'dummy') {
+          const d = game.combat.addDummy(spot.x, spot.y);
+          d.spawnId = `dev_dummy_${Math.round(spot.x)}`;
+          return 'Boneka latihan dimunculkan.';
+        }
+        return `${game.combat.devSpawn(kind, spot.x, spot.y).length} musuh dimunculkan.`;
+      }),
+    clearSpawns: () => tool({ type: 'clear_spawns' }, () => `${game.combat.devClear()} dihapus.`),
 
     teleports: () => teleportTargets().map((dest) => ({ id: dest.id, label: dest.label })),
-    teleport: (id) => {
-      const target = teleportTargets().find((dest) => dest.id === id);
-      if (!target) return 'Tujuan tidak dikenal.';
-      const spot = findStandable(game.world, target.x, target.y);
-      if (!spot) return 'Tidak ada tempat berdiri di sana.';
-      game.teleport(spot.x, spot.y);
-      return `Pindah ke ${target.label}.`;
-    },
+    teleport: (id) =>
+      tool({ type: 'teleport', to: id }, () => {
+        const target = teleportTargets().find((dest) => dest.id === id);
+        const spot = target && findStandable(game.world, target.x, target.y);
+        if (!target || !spot) return 'Tujuan tidak dikenal.';
+        game.teleport(spot.x, spot.y);
+        return `Pindah ke ${target.label}.`;
+      }),
 
-    setTime: (which) => {
-      game.setTimeOfDay(TIMES[which]);
-      return `Jam: ${which}.`;
-    },
+    setTime: (which) =>
+      tool({ type: 'time', to: which }, () => {
+        game.setTimeOfDay(TIMES[which]);
+        return `Jam: ${which}.`;
+      }),
     weathers: () => WEATHER_IDS.map((id) => ({ id, label: WEATHER[id].label })),
     weather: () => game.currentWeather,
-    setWeather: (id) => {
-      if (!(id in WEATHER)) return 'Cuaca tidak dikenal.';
-      game.setWeather(id as Weather);
-      return `Cuaca: ${WEATHER[id as Weather].label}.`;
-    },
-
+    setWeather: (id) =>
+      id in WEATHER
+        ? tool({ type: 'weather', to: id }, () => {
+            game.setWeather(id as Weather);
+            return `Cuaca: ${WEATHER[id as Weather].label}.`;
+          })
+        : 'Cuaca tidak dikenal.',
     worldEvents: () => WORLD_EVENT_IDS.map((id) => ({ id, label: WORLD_EVENTS[id].name })),
     activeEvent: () => game.events.active?.id ?? null,
-    startEvent: (id) => {
-      if (id !== null && !(id in WORLD_EVENTS)) return 'Event tidak dikenal.';
-      return game.devEvent(id as WorldEventId | null);
-    },
+    startEvent: (id) => (id !== null && !(id in WORLD_EVENTS) ? 'Event tidak dikenal.' : tool({ type: 'event', id }, () => game.devEvent(id as WorldEventId | null))),
 
     godMode: () => game.hero.invincible,
-    setGodMode: (on) => {
-      game.hero.invincible = on;
-      return on ? 'Kebal: nyala. Serangan tetap terasa, tapi HP tidak berkurang.' : 'Kebal: mati.';
-    },
-    heal: () => {
-      game.hero.heal(game.hero.maxHp);
-      return `HP ${game.hero.hp}/${game.hero.maxHp}`;
-    },
-    resetCutscenes: () => {
-      game.state.cutscenesSeen = [];
-      game.saveNow(true);
-      return 'Status cutscene direset. Prolog akan diputar lagi di Game Baru.';
-    },
-    resetSave: () => {
-      wipeSave();
-      reload();
-      return 'Save dihapus.';
-    },
+    setGodMode: (on) =>
+      tool({ type: 'god', on }, () => {
+        game.hero.invincible = on;
+        return on ? 'Kebal: nyala. Serangan tetap terasa, tapi HP tidak berkurang.' : 'Kebal: mati.';
+      }),
+    heal: () =>
+      tool({ type: 'heal' }, () => {
+        game.hero.heal(game.hero.maxHp);
+        return `HP ${game.hero.hp}/${game.hero.maxHp}`;
+      }),
+    resetCutscenes: () => grant({ type: 'reset_cutscenes' }),
+    resetSave: () => grant({ type: 'reset_save' }),
   };
 }

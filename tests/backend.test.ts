@@ -22,7 +22,7 @@ let ipN = 0;
 
 beforeEach(async () => {
   online = true;
-  const config = loadConfig({ MONGODB_URI: 'mongodb://tidak-dipakai', JWT_SECRET: 'k'.repeat(48), DEV_SETUP_CODE: 'kode-uji' });
+  const config = loadConfig({ MONGODB_URI: 'mongodb://tidak-dipakai', JWT_SECRET: 'k'.repeat(48) });
   app = await buildApp({ config, repos: memoryRepos() });
 });
 
@@ -163,7 +163,7 @@ test('two phones: the save further along wins, and the other copy is kept as a b
   assert.equal((hb.backups[0] as ReturnType<typeof save>).character.level, 3, "B's copy is kept");
 
   // phone A plays on further while B's server copy is stale for A: A wins and writes over it
-  sa.queue(save(3, 12));
+  sa.queue(save(3, 10));
   await sa.tick(10, true);
   const c = client();
   await c.auth.login('dua', 'sandi-panjang-1');
@@ -258,4 +258,19 @@ test('the conflict rule: progress first, time only breaks a tie', () => {
   assert.equal(resolveConflict(save(1, 5), { data: save(1, 5), rev: 3, updatedAt: 1000 }, 2000).winner, 'local', 'same progress, later write');
   assert.equal(resolveConflict(save(1, 5), { data: save(1, 5), rev: 3, updatedAt: 3000 }, 2000).winner, 'remote');
   assert.equal(resolveConflict(save(1, 4), { data: save(1, 5), rev: 3, updatedAt: 0 }, 9e12).winner, 'remote', 'a clock cannot beat progress');
+});
+
+test('a save the server refuses is reported once and not retried forever', async () => {
+  const a = client();
+  await a.auth.register('Curang', 'sandi-panjang-1');
+  const said: string[] = [];
+  const sync = new SaveSync(new RemoteSaveStore(a.auth), { backup: () => undefined, remoteWon: () => undefined, loggedOut: () => undefined, rejected: (r) => void said.push(r) });
+  const edited = { ...save(1, 3), character: { level: 3, exp: 0, inventory: { slots: [{ id: 'pedang_dewa', count: 1, rarity: 'mythic' }], equipped: {} } } };
+  sync.queue(edited);
+  await sync.tick(0, true);
+  sync.queue(edited);
+  await sync.tick(100, true);
+  assert.deepEqual(said, ['unknown_item'], 'told once');
+  assert.equal(sync.rejectedCount, 2);
+  assert.equal(sync.hasPending, false, 'not queued again and again');
 });

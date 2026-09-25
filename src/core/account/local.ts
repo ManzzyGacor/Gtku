@@ -38,11 +38,6 @@ export interface LocalAuthDeps {
   remove(key: string): void;
   /** Iterations for new accounts; tests lower it. Existing accounts keep their own. */
   iterations?: number | undefined;
-  /**
-   * The name that gets the developer role — only passed by developer builds, where there is no
-   * server to decide. With a server, the role always comes from the server.
-   */
-  devName?: string | undefined;
 }
 
 export function browserAuthDeps(): LocalAuthDeps | null {
@@ -94,8 +89,9 @@ export class LocalAuth implements AuthAdapter {
     return new Uint8Array(bits);
   }
 
-  private roleOf(id: string): 'dev' | 'player' {
-    return this.deps.devName && id === this.deps.devName ? 'dev' : 'player';
+  /** A local account is always a player: only the server grants a role, never a name. */
+  private roleOf(_id: string): 'player' {
+    return 'player';
   }
 
   async checkUsername(username: string): Promise<{ available: boolean; message: string }> {

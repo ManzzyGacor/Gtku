@@ -18,6 +18,7 @@ import { DAY_SECONDS, gradeAt, nightAmount, smooth, timeLabel } from '../core/sy
 import { CAVE_X0, FOREST_X0 } from '../core/world/areas';
 import { ATTACKS, HeroCore, HERO_STATS, type HeroEvent, type HeroInput } from '../core/entities/HeroCore';
 import { WEAPONS } from '../core/combat/weapons';
+import type { SaveData } from '../core/state/GameState';
 import { GameState } from '../core/state/GameState';
 import { loadGame, saveGame } from '../core/save';
 import { migrateSave } from '../core/saveMigrate';
@@ -1327,6 +1328,26 @@ export class Game3D {
   }
 
   /** Write the save. Never mid-boss-fight unless forced, so death cannot lock you in. */
+  /** The save as it would be written right now (the developer panel sends it with each grant). */
+  snapshotSave(): SaveData {
+    this.state.dayTime = this.dayTime;
+    this.state.events = this.events.toJSON();
+    return this.state.toJSON({ x: this.hero.x, y: this.hero.y, hp: this.hero.hp }, this.character.toJSON());
+  }
+
+  /**
+   * Take a save the server produced (a developer grant) into the running game: the character — level,
+   * bag, gear, elements, coins, stats — and the cutscene record. Position and the world stay as they
+   * are; the grant did not move anyone.
+   */
+  adoptSave(data: SaveData): void {
+    this.character.load(data.character);
+    this.state.cutscenesSeen = Array.isArray(data.cutscenesSeen) ? [...data.cutscenesSeen] : this.state.cutscenesSeen;
+    this.applySheet();
+    this.hero.heal(this.hero.maxHp);
+    if (this.sheet.isOpen) this.sheet.render();
+  }
+
   saveNow(force = false): void {
     const boss = this.combat.bossRef;
     if (!this.hero.alive) return;

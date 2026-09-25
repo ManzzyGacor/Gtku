@@ -39,7 +39,8 @@
       ],
       "rules": {
         "unicorn/consistent-function-scoping": "off",
-        "unicorn/no-array-sort": "off"
+        "unicorn/no-array-sort": "off",
+        "eslint/no-await-in-loop": "off"
       }
     },
     {

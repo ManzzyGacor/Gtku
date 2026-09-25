@@ -25,6 +25,7 @@ import { jwtVerify, SignJWT } from 'jose';
 import {
   MAX_SAVE_BYTES,
   MAX_SAVE_VERSION,
+  isProtectedUsername,
   validEmail,
   validPassword,
   validUsername,
@@ -34,8 +35,11 @@ import {
   type SaveEnvelope,
   type UserRole,
 } from '../../shared/api';
-import { DEV_USERNAME, redact, type ServerConfig } from './config';
+import { redact, type ServerConfig } from './config';
 import { DuplicateError, type CharacterDoc, type Repos, type UserDoc } from './repo';
+import { checkProgression, checkSaveIntegrity } from '../../shared/saveRules';
+import { isGrant, parseDevAction } from '../../shared/devActions';
+import { applyGrant } from './devGrants';
 
 export const REFRESH_COOKIE = 'lm_refresh';
 /** How long after a rotation the old refresh token is still accepted (two tabs refreshing at once). */
@@ -46,6 +50,9 @@ export const REFRESH_GRACE_MS = 20_000;
  * a guesser, invisible to a player, and small enough that a burst of logins cannot exhaust 4 GB.
  */
 const ARGON = { type: argon2.argon2id, memoryCost: 19 * 1024, timeCost: 2, parallelism: 1 } as const;
+
+/** The one way a password becomes a stored hash (the API and the VPS scripts both use it). */
+export const hashPassword = (password: string): Promise<string> => argon2.hash(password, ARGON);
 
 export interface AppDeps {
   config: ServerConfig;
@@ -224,7 +231,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       const name = req.query.username;
       if (!validUsername(name)) return { available: false, reason: 'invalid_username' };
       const lower = name.toLowerCase();
-      if (lower === DEV_USERNAME) return { available: false, reason: 'username_reserved' };
+      if (isProtectedUsername(lower)) return { available: false, reason: 'username_reserved' };
       return (await repos.users.byLower(lower)) ? { available: false, reason: 'username_taken' } : { available: true };
     },
   );
@@ -238,12 +245,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         username: { type: 'string', maxLength: 32 },
         password: { type: 'string', maxLength: 256 },
         email: { type: 'string', maxLength: 254 },
-        devSetupCode: { type: 'string', maxLength: 128 },
       },
     },
   } as const;
 
-  app.post<{ Body: { username: string; password: string; email?: string; devSetupCode?: string } }>(
+  app.post<{ Body: { username: string; password: string; email?: string } }>(
     '/auth/register',
     // five new accounts per IP per ten minutes
     { schema: registerSchema, config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } },
@@ -254,13 +260,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       if (!validPassword(password)) return fail(reply, 400, 'weak_password');
       if (email !== undefined && !validEmail(email)) return fail(reply, 400, 'invalid_email');
       const lower = username.toLowerCase();
-      let role: UserRole = 'player';
-      if (lower === DEV_USERNAME) {
-        // the developer name: only with the setup code from server/.env, compared in constant time
-        const code = req.body.devSetupCode ?? '';
-        if (!config.devSetupCode || sha256(code) !== sha256(config.devSetupCode)) return fail(reply, 403, 'username_reserved');
-        role = 'dev';
-      }
+      /*
+       * Protected names (manzzy, admin, dev, moderator, gm, system) are refused outright, whether or
+       * not they exist yet: the developer account is made on the VPS (`npm run create-dev-account`),
+       * never by whoever registers the name first. Everyone who registers here is a player.
+       */
+      if (isProtectedUsername(lower)) return fail(reply, 403, 'username_reserved');
+      const role: UserRole = 'player';
       const passwordHash = await argon2.hash(password, ARGON);
       let user: UserDoc;
       try {
@@ -387,6 +393,20 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       const clientAt = typeof req.body.clientUpdatedAt === 'number' && Number.isFinite(req.body.clientUpdatedAt) ? new Date(req.body.clientUpdatedAt) : null;
 
       const current = await repos.characters.get(user.id, 0);
+      /*
+       * What the save may contain (shared/saveRules.ts). The account's role is the server's: a
+       * player's save may not carry developer fields, may only hold real items in real amounts,
+       * and may not jump further than play allows since the copy already here. A developer's save
+       * is marked `devSave` by the server, whatever the client sent.
+       */
+      const dev = user.role === 'dev';
+      const integrity = checkSaveIntegrity(data, dev);
+      const progress = integrity.ok && !dev && current ? checkProgression(current.data, data, now() - current.updatedAt.getTime()) : integrity;
+      if (!progress.ok) {
+        req.log.warn({ user: user.username, reason: progress.reason, detail: progress.detail }, 'save ditolak');
+        return fail(reply, 422, 'save_rejected', { reason: progress.reason, detail: progress.detail });
+      }
+      if (dev) data.devSave = true;
       const conflict = async (): Promise<FastifyReply> => {
         const latest = await repos.characters.get(user.id, 0);
         return fail(reply, 409, 'conflict', { current: latest ? envelope(latest) : null });
@@ -394,16 +414,66 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       if ((current?.rev ?? 0) !== baseRev) return conflict();
       if (!current) {
         try {
-          await repos.characters.insert({ userId: user.id, slot: 0, saveVersion: v, rev: 1, data, level, updatedAt: at, clientUpdatedAt: clientAt, createdAt: at });
+          await repos.characters.insert({ userId: user.id, slot: 0, saveVersion: v, rev: 1, data, level, dev, updatedAt: at, clientUpdatedAt: clientAt, createdAt: at });
         } catch (e) {
           if (e instanceof DuplicateError) return conflict();
           throw e;
         }
         return { rev: 1, updatedAt: at.getTime() };
       }
-      const next = await repos.characters.replaceIfRev(user.id, 0, baseRev, { saveVersion: v, rev: baseRev + 1, data, level, updatedAt: at, clientUpdatedAt: clientAt });
+      const next = await repos.characters.replaceIfRev(user.id, 0, baseRev, { saveVersion: v, rev: baseRev + 1, data, level, dev, updatedAt: at, clientUpdatedAt: clientAt });
       if (!next) return conflict();
       return { rev: next.rev, updatedAt: at.getTime() };
+    },
+  );
+
+  // ───────────────────────── developer ─────────────────────────
+
+  const devSchema = {
+    body: {
+      type: 'object',
+      required: ['action'],
+      additionalProperties: false,
+      properties: { action: { type: 'object' }, save: { type: 'object' } },
+    },
+  } as const;
+
+  /**
+   * Every developer action (shared/devActions.ts). Only an account whose role **in the database**
+   * is "dev" gets past the first check; everyone else is refused and the attempt is logged. Grants
+   * are applied here, to the save, and handed back; session tools are authorised and logged.
+   */
+  app.post<{ Body: { action: unknown; save?: Record<string, unknown> } }>(
+    '/dev/action',
+    { schema: devSchema, config: { rateLimit: { max: 120, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const user = await requireUser(req, reply);
+      if (!user) return reply;
+      if (user.role !== 'dev') {
+        req.log.warn({ user: user.username }, 'aksi pengembang ditolak: bukan akun pengembang');
+        return fail(reply, 403, 'forbidden');
+      }
+      const action = parseDevAction(req.body.action);
+      if (!action) return fail(reply, 400, 'invalid_input');
+      req.log.info({ dev: user.username, action }, 'aksi pengembang');
+      if (!isGrant(action)) return { ok: true };
+
+      // the save to change: what the game holds right now, else what the server holds
+      const current = await repos.characters.get(user.id, 0);
+      const base = req.body.save ?? current?.data ?? null;
+      if (base && !checkSaveIntegrity(base, true).ok) return fail(reply, 422, 'save_rejected');
+      const result = applyGrant(base, action);
+      if (!result.ok) return reply.code(409).send({ error: 'invalid_input', message: result.error });
+      if (result.save === null) {
+        await repos.characters.remove(user.id, 0);
+        return { ok: true, note: result.note, save: null };
+      }
+      const data = result.save;
+      const v = typeof data.v === 'number' ? data.v : MAX_SAVE_VERSION;
+      const level = Number((data.character as { level?: number } | undefined)?.level ?? 1);
+      const at = new Date(now());
+      const stored = await repos.characters.overwrite(user.id, 0, { saveVersion: v, data, level, dev: true, updatedAt: at, clientUpdatedAt: null });
+      return { ok: true, note: result.note, save: envelope(stored) };
     },
   );
 
