@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
 import { HeroCore, type HeroEvent, type HeroInput, type ShootEvent } from '../src/core/entities/HeroCore';
-import { BOW_SHOTS, FULL_CHARGE_TIME, IMPLEMENTED_WEAPONS, shotForCharge, WEAPONS } from '../src/core/combat/weapons';
+import { BOW_SHOTS, fullChargeTime, IMPLEMENTED_WEAPONS, shotForCharge, WEAPONS } from '../src/core/combat/weapons';
 import { Collision } from '../src/core/world/collision';
 import { GeneratedWorld } from '../src/core/world/worldgen';
 
@@ -103,7 +103,7 @@ test('holding the bow charges it, and releasing fires the stronger shot', () => 
   run(h, 12);
 
   // hold to full charge
-  run(h, Math.ceil(FULL_CHARGE_TIME * 60) + 4, { attackHeld: true });
+  run(h, Math.ceil(fullChargeTime() * 60) + 4, { attackHeld: true });
   assert.ok(h.charge > 0.95, `charge reached ${h.charge.toFixed(2)}`);
   assert.equal(h.state, 'free', 'drawing does not fire by itself');
 

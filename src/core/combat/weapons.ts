@@ -40,12 +40,47 @@ export interface WeaponDef {
   swapTime: number;
 }
 
-/** Fully charged shots pierce; a tap does not. */
+/**
+ * The three shots, by how long the string was drawn. Fully charged shots pierce; a tap does not.
+ *
+ * Speeds are in world px per second, and were **lowered** from 300/420/520 after the first phone
+ * test ("busur terasa kurang bagus"): at 520 px/s an arrow crosses the whole visible screen in
+ * about half a second and moves 17 px per frame at 30 fps, so the player never actually saw it fly.
+ * Around 230-340 px/s it reads as a projectile and is still much faster than anything that dodges.
+ */
 export const BOW_SHOTS: ShotDef[] = [
-  { id: 'cepat', name: 'Tembakan Cepat', draw: 0.12, recover: 0.16, dmg: 2, speed: 300, pierce: 1, needsCharge: 0 },
-  { id: 'terisi', name: 'Tembakan Terisi', draw: 0.1, recover: 0.24, dmg: 5, speed: 420, pierce: 2, needsCharge: 0.55 },
-  { id: 'tembus', name: 'Tembakan Tembus', draw: 0.1, recover: 0.3, dmg: 7, speed: 520, pierce: 4, needsCharge: 1 },
+  { id: 'cepat', name: 'Tembakan Cepat', draw: 0.1, recover: 0.16, dmg: 2, speed: 230, pierce: 1, needsCharge: 0 },
+  { id: 'terisi', name: 'Tembakan Terisi', draw: 0.08, recover: 0.22, dmg: 5, speed: 285, pierce: 2, needsCharge: 0.55 },
+  { id: 'tembus', name: 'Tembakan Tembus', draw: 0.08, recover: 0.28, dmg: 7, speed: 340, pierce: 4, needsCharge: 1 },
 ];
+
+/**
+ * Everything else about how the bow *feels*, as data. Every field is on the "Setelan Combat" panel
+ * (`combatTuning.ts`), because — like the sword — the only way to judge these is on the phone.
+ */
+export const BOW = {
+  /** Seconds of holding to reach full charge. */
+  fullCharge: 0.75,
+  /** Fraction of walking speed kept while the string is drawn: slow enough to feel the weight. */
+  drawMove: 0.45,
+  /** Auto-aim for the bow: longer and narrower than the sword's, since arrows travel. */
+  aimRange: 170,
+  aimCone: 22,
+  /** Length of the aim line on the ground at full charge, px. */
+  aimLine: 96,
+  /** Seconds an arrow flies before it drops. */
+  arrowLife: 0.95,
+  /** Seconds an arrow stays stuck in a wall or an enemy after it lands. */
+  stickTime: 1.1,
+  /** Camera shake on release, px (scaled by charge). */
+  releaseShake: 2.2,
+  /** Hit-stop on a fully charged release, ms: the "thwack" of a heavy bow. */
+  fullReleaseFreeze: 45,
+  /** Phone vibration on release, ms (0 = off). Full charge doubles it. */
+  vibrate: 14,
+  /** Fraction of the sword's hit-stop an arrow hit gets. */
+  hitStop: 0.5,
+};
 
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
   pedang: { id: 'pedang', name: 'Pedang', kind: 'melee', implemented: true, swapTime: 0.16 },
@@ -68,5 +103,8 @@ export function shotForCharge(charge: number): ShotDef {
   return best;
 }
 
-/** Seconds of holding needed to reach full charge. */
-export const FULL_CHARGE_TIME = 0.75;
+/**
+ * Seconds of holding needed to reach full charge. A function now, not a constant: the value lives
+ * in `BOW.fullCharge` so it can be tuned at runtime.
+ */
+export const fullChargeTime = (): number => Math.max(0.05, BOW.fullCharge);

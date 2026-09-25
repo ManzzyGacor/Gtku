@@ -89,6 +89,13 @@ export class HeroMesh3D {
   private legL!: Joint;
   private legR!: Joint;
   private lanternBox!: THREE.Mesh;
+  private readonly sword = new THREE.Group();
+  private readonly bow = new THREE.Group();
+  private bowString!: THREE.Mesh;
+  private readonly nocked = new THREE.Group();
+  private nockHead!: THREE.Mesh;
+  /** How far the string is drawn, eased (0..1). */
+  private pull = 0;
   private slash!: THREE.Mesh;
   private slashMaterial!: THREE.MeshBasicMaterial;
   private slashGeometry!: THREE.PlaneGeometry;
@@ -221,10 +228,34 @@ export class HeroMesh3D {
     for (const arm of [this.armL, this.armR]) this.box(0.17, 0.14, 0.17, shade(L.boots, 0.15), arm.pivot, -0.34);
 
     // sword in the right hand: a long steel blade with a wrapped grip and a gold guard
-    this.box(0.07, 0.86, 0.13, 0xbcc4dc, this.armR.pivot, -0.34 - 0.48);
-    this.box(0.03, 0.86, 0.05, P.white, this.armR.pivot, -0.34 - 0.48, 0.05);
-    this.box(0.2, 0.07, 0.16, P.y3, this.armR.pivot, -0.34 - 0.06);
-    this.box(0.08, 0.16, 0.1, P.o0, this.armR.pivot, -0.34 + 0.04);
+    this.armR.pivot.add(this.sword);
+    this.box(0.07, 0.86, 0.13, 0xbcc4dc, this.sword, -0.34 - 0.48);
+    this.box(0.03, 0.86, 0.05, P.white, this.sword, -0.34 - 0.48, 0.05);
+    this.box(0.2, 0.07, 0.16, P.y3, this.sword, -0.34 - 0.06);
+    this.box(0.08, 0.16, 0.1, P.o0, this.sword, -0.34 + 0.04);
+
+    /*
+     * The bow, in the same hand, shown instead of the sword while it is the active weapon. Until
+     * the first phone test the hero drew and loosed arrows with a sword in his hand.
+     *
+     * Built in its own frame — limbs along Y, forward along +Z — and counter-rotated against the
+     * arm every frame (see `update`), so it stays upright whether the arm hangs or points.
+     */
+    this.bow.position.y = -0.34 - 0.07;
+    this.armR.pivot.add(this.bow);
+    const wood = 0x8a5a36;
+    this.box(0.07, 0.16, 0.08, 0x5a3a26, this.bow);
+    const upper = this.box(0.05, 0.38, 0.05, wood, this.bow, 0.2, -0.03);
+    upper.rotation.x = -0.35;
+    const lower = this.box(0.05, 0.38, 0.05, wood, this.bow, -0.2, -0.03);
+    lower.rotation.x = 0.35;
+    this.bowString = this.box(0.015, 0.72, 0.015, 0xe8e0c8, this.bow, 0, -0.1);
+    this.bowString.castShadow = false;
+    this.nocked.visible = false;
+    this.bow.add(this.nocked);
+    const shaft = this.box(0.03, 0.03, 0.52, 0xd9c7a0, this.nocked, 0, 0.26);
+    shaft.castShadow = false;
+    this.nockHead = this.box(0.07, 0.07, 0.09, 0xf2f6ff, this.nocked, 0, 0.55, true);
 
     // lantern on a short bar in the left hand
     const bar = this.box(0.04, 0.22, 0.04, 0x4a4e6f, this.armL.pivot, -0.34 - 0.11);
@@ -307,13 +338,33 @@ export class HeroMesh3D {
       case 'dead':
         this.poseDead(core);
         break;
+      case 'shoot':
+        this.poseDraw(core, speed, dt);
+        break;
       default:
-        if (speed > 14) this.poseWalk(dt, speed);
+        if (core.isRanged && core.charge > 0) this.poseDraw(core, speed, dt);
+        else if (speed > 14) this.poseWalk(dt, speed);
         else this.poseIdle();
     }
 
     this.ease(realDt);
     this.apply();
+
+    // the weapon in hand, and the bowstring: it follows the charge back and snaps forward on release
+    const ranged = core.isRanged;
+    this.sword.visible = !ranged;
+    this.bow.visible = ranged;
+    if (ranged) {
+      const drawing = core.charge > 0;
+      const want = drawing ? 0.25 + core.charge * 0.75 : 0;
+      // the release is instant; the draw eases in
+      this.pull = want < this.pull ? want : this.pull + (want - this.pull) * Math.min(1, realDt * 14);
+      this.bow.rotation.x = -this.current.armRX;
+      this.bowString.position.z = -0.1 - this.pull * 0.24;
+      this.nocked.visible = drawing;
+      this.nocked.position.z = this.bowString.position.z;
+      (this.nockHead.material as THREE.MeshBasicMaterial).color.setHex(core.charge >= 1 ? 0xffe066 : 0xf2f6ff);
+    }
 
     // the lamp always burns, with a small flicker
     const flicker = 0.9 + Math.sin(time * 9) * 0.06 + Math.sin(time * 23) * 0.04;
@@ -431,6 +482,33 @@ export class HeroMesh3D {
         this.smoothRate = 14;
       }
     }
+  }
+
+  /**
+   * Drawing the bow: the bow arm straight out in front, the lantern hand coming back toward the
+   * string, the body turned a little side-on. The longer the draw, the further back the weight
+   * sits; after the release the body rocks with the recoil.
+   */
+  private poseDraw(core: HeroCore, speed: number, dt: number): void {
+    const p = this.target;
+    const released = core.state === 'shoot' && core.charge === 0;
+    const k = released ? 0 : core.charge;
+    p.armRX = -1.5;
+    p.armRZ = 0.08;
+    p.armLX = released ? 0.2 : -0.85 - 0.45 * k;
+    p.armLZ = released ? 0 : -0.35;
+    p.bodyRotY = 0.28;
+    p.bodyZ = released ? -0.07 : -0.03 * k;
+    p.headRotX = 0.06;
+    p.cloakX = -0.2 - k * 0.12;
+    // still walking (slowly) while drawing: the legs keep moving
+    if (speed > 10) {
+      this.walkPhase += dt * (2.6 + (speed / HERO_STATS.speed) * 3);
+      const sw = Math.sin(this.walkPhase);
+      p.legLX = sw * 0.45;
+      p.legRX = -sw * 0.45;
+    }
+    this.smoothRate = released ? 30 : 20;
   }
 
   private poseRoll(core: HeroCore): void {

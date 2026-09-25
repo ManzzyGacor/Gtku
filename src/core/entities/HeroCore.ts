@@ -5,7 +5,7 @@
 import { clamp } from '../rng';
 import type { Collision } from '../world/collision';
 import type { ElementId } from '../combat/elements';
-import { DEFAULT_LOADOUT, FULL_CHARGE_TIME, shotForCharge, WEAPONS, type ShotDef, type WeaponId } from '../combat/weapons';
+import { BOW, DEFAULT_LOADOUT, fullChargeTime, shotForCharge, WEAPONS, type ShotDef, type WeaponId } from '../combat/weapons';
 
 export type HeroState = 'free' | 'attack' | 'roll' | 'hurt' | 'cast' | 'dead' | 'shoot' | 'swap';
 export type Dir4 = 'd' | 'u' | 's';
@@ -407,7 +407,9 @@ export class HeroCore {
       case 'free': {
         const mag = clamp(Math.hypot(inp.mx, inp.my), 0, 1);
         if (mag > 0.05) {
-          const s = HERO_STATS.speed * this.speedScale * moveMult * (mag < 0.35 ? 0.55 : 1);
+          // drawing the bow slows the walk: the weight of the string is part of the feel
+          const drawing = this.isRanged && this.charge > 0 ? BOW.drawMove : 1;
+          const s = HERO_STATS.speed * this.speedScale * moveMult * drawing * (mag < 0.35 ? 0.55 : 1);
           targetVx = (inp.mx / mag) * s * Math.min(1, mag * 1.15);
           targetVy = (inp.my / mag) * s * Math.min(1, mag * 1.15);
           this.aim = Math.atan2(inp.my, inp.mx);
@@ -428,8 +430,9 @@ export class HeroCore {
            */
           if (inp.attackHeld) {
             const before = this.charge;
-            this.charge = Math.min(1, this.charge + dt / FULL_CHARGE_TIME);
-            if (Math.floor(this.charge * 4) !== Math.floor(before * 4)) this.events.push({ type: 'charge', level: this.charge });
+            this.charge = Math.min(1, this.charge + dt / fullChargeTime());
+            if (before === 0) this.events.push({ type: 'charge', level: this.charge });
+            else if (Math.floor(this.charge * 4) !== Math.floor(before * 4)) this.events.push({ type: 'charge', level: this.charge });
           } else if (this.bufAtk > 0 || this.charge > 0) {
             this.bufAtk = 0;
             this.startShot(inp);

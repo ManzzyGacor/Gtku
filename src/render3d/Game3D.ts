@@ -28,7 +28,7 @@ import { Minimap } from '../ui/Minimap';
 import { CharacterPanel } from '../ui/CharacterPanel';
 import { CutsceneOverlay } from '../ui/CutsceneOverlay';
 import { PauseMenu, type InfoLine } from '../ui/PauseMenu';
-import { BOW_SHOTS } from '../core/combat/weapons';
+import { BOW, BOW_SHOTS } from '../core/combat/weapons';
 import { ELEMENTS, type ElementId } from '../core/combat/elements';
 import { KILLS_NEEDED } from '../core/state/GameState';
 import { DUMMY_TILE, settleTutorial } from '../core/systems/tutorial';
@@ -69,6 +69,19 @@ import { rollDrops } from '../core/items/drops';
 const HERO_SKILL_COOLDOWN = HERO_STATS.skillCooldown;
 
 const LIGHT_BUDGET: Record<string, number> = { vlow: 0, low: 1, medium: 2, high: 3, ultra: 3 };
+
+/**
+ * A short buzz, where the phone allows it. Android Chrome does; iOS Safari has no `vibrate`, and
+ * some browsers refuse it before the first tap — every one of those is simply silent.
+ */
+function vibrate(ms: number): void {
+  if (ms < 1 || typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+  try {
+    navigator.vibrate(Math.round(ms));
+  } catch {
+    /* not allowed right now */
+  }
+}
 
 export class Game3D {
   readonly pixels: PixelRenderer;
@@ -1296,11 +1309,22 @@ export class Game3D {
         case 'swing':
           this.combat.applySwing(this.hero, e);
           break;
-        case 'shoot':
+        case 'shoot': {
           this.combat.spawnArrow(e);
+          // the release: a kick of the camera, and on a full draw a beat of hit-stop and a buzz
+          const full = e.charge >= 1;
+          this.camera.shake(BOW.releaseShake * (0.4 + 0.6 * e.charge), 0.1);
+          if (full) this.freeze(BOW.fullReleaseFreeze);
+          vibrate(BOW.vibrate * (full ? 2 : 1));
           break;
+        }
         case 'charge':
-          if (e.level > 0.5) sfx.bowDraw();
+          // the creak as the string starts back, then a click when it is fully drawn
+          if (e.level < 0.3) sfx.bowDraw();
+          else if (e.level >= 1) {
+            sfx.bowReady();
+            vibrate(BOW.vibrate * 0.6);
+          }
           break;
         case 'swap':
           sfx.swap();

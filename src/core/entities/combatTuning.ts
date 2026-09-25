@@ -8,6 +8,7 @@
  */
 import { readRaw, writeRaw } from '../storage';
 import { ATTACKS, HERO_STATS } from './HeroCore';
+import { BOW, BOW_SHOTS } from '../combat/weapons';
 
 const KEY = 'lentera-malam/combat/v1';
 
@@ -48,6 +49,37 @@ function attackTunables(i: number, name: string): Tunable[] {
   ];
 }
 
+/** One group per bow shot. */
+function shotTunables(i: number): Tunable[] {
+  const s = (): (typeof BOW_SHOTS)[number] => BOW_SHOTS[i];
+  const name = BOW_SHOTS[i].name.replace('Tembakan ', 'Panah ');
+  return [
+    t(`s${i}.speed`, `${name}: kecepatan`, 'px/s', 80, 700, 10, () => s().speed, (v) => (s().speed = v)),
+    t(`s${i}.dmg`, `${name}: damage`, '', 1, 30, 1, () => s().dmg, (v) => (s().dmg = v)),
+    t(`s${i}.draw`, `${name}: jeda lepas`, 's', 0, 0.4, 0.01, () => s().draw, (v) => (s().draw = v)),
+    t(`s${i}.recover`, `${name}: pemulihan`, 's', 0.04, 0.6, 0.01, () => s().recover, (v) => (s().recover = v)),
+    t(`s${i}.pierce`, `${name}: tembus`, 'musuh', 1, 8, 1, () => s().pierce, (v) => (s().pierce = v)),
+  ];
+}
+
+/** The bow's own feel numbers (`BOW` in weapons.ts). */
+const BOW_TUNABLES: Tunable[] = [
+  t('bow.full', 'Busur: waktu tarik penuh', 's', 0.2, 2, 0.05, () => BOW.fullCharge, (v) => (BOW.fullCharge = v)),
+  t('bow.move', 'Busur: gerak saat menarik', '%', 0, 100, 5, () => BOW.drawMove * 100, (v) => (BOW.drawMove = v / 100)),
+  t('bow.aimRange', 'Busur: jarak bidik otomatis', 'px', 40, 320, 10, () => BOW.aimRange, (v) => (BOW.aimRange = v)),
+  t('bow.aimCone', 'Busur: kerucut bidik', '°', 0, 60, 2, () => BOW.aimCone, (v) => (BOW.aimCone = v)),
+  t('bow.line', 'Busur: panjang garis bidik', 'px', 0, 200, 8, () => BOW.aimLine, (v) => (BOW.aimLine = v)),
+  t('bow.life', 'Busur: umur panah', 's', 0.3, 2, 0.05, () => BOW.arrowLife, (v) => (BOW.arrowLife = v)),
+  t('bow.stick', 'Busur: panah menancap', 's', 0, 3, 0.1, () => BOW.stickTime, (v) => (BOW.stickTime = v)),
+  t('bow.shake', 'Busur: getaran kamera', 'px', 0, 8, 0.2, () => BOW.releaseShake, (v) => (BOW.releaseShake = v)),
+  t('bow.freeze', 'Busur: hit-stop lepas penuh', 'ms', 0, 150, 5, () => BOW.fullReleaseFreeze, (v) => (BOW.fullReleaseFreeze = v)),
+  t('bow.vibrate', 'Busur: getar HP', 'ms', 0, 60, 2, () => BOW.vibrate, (v) => (BOW.vibrate = v)),
+  t('bow.hitStop', 'Busur: hit-stop kena', '%', 0, 150, 5, () => BOW.hitStop * 100, (v) => (BOW.hitStop = v / 100)),
+  ...shotTunables(0),
+  ...shotTunables(1),
+  ...shotTunables(2),
+];
+
 export const COMBAT_TUNABLES: Tunable[] = [
   t('comboWindow', 'Jendela combo', 's', 0.05, 0.8, 0.01, () => HERO_STATS.comboWindow, (v) => (HERO_STATS.comboWindow = v)),
   t('holdTime', 'Tahan → serangan berat', 's', 0.1, 0.8, 0.02, () => HERO_STATS.holdTime, (v) => (HERO_STATS.holdTime = v)),
@@ -64,6 +96,7 @@ export const COMBAT_TUNABLES: Tunable[] = [
   ...attackTunables(1, 'Tebas 2'),
   ...attackTunables(2, 'Tebas 3'),
   ...attackTunables(3, 'Berat'),
+  ...BOW_TUNABLES,
 ];
 
 /** Snapshot of the shipped values, so "reset" always has somewhere to go back to. */

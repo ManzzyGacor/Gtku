@@ -36,6 +36,20 @@ export const sfx = {
     tone({ from: 700 + charge * 500, to: 240, dur: 0.12, type: 'sawtooth', gain: 0.08 + charge * 0.06 , cat: COMBAT });
     noise(0.07, 0.07, 2200, 1.2, COMBAT);
   },
+  /** The string reaching full draw: a bright click, so a charged shot can be timed by ear. */
+  bowReady(): void {
+    tone({ from: 1320, to: 1760, dur: 0.07, type: 'triangle', gain: 0.07, cat: COMBAT });
+  },
+  /** An arrow sinking into something alive. */
+  arrowHit(heavy = false): void {
+    tone({ from: heavy ? 320 : 420, to: 110, dur: 0.07, type: 'square', gain: heavy ? 0.12 : 0.09, cat: COMBAT });
+    noise(0.05, 0.08, 1800, 1.1, COMBAT);
+  },
+  /** An arrow thudding into wood or stone. */
+  arrowWall(): void {
+    tone({ from: 190, to: 90, dur: 0.06, type: 'triangle', gain: 0.08, cat: COMBAT });
+    noise(0.04, 0.05, 900, 0.8, COMBAT);
+  },
   roll(): void {
     noise(0.16, 0.08, 600, 0.5, COMBAT);
   },

@@ -62,8 +62,9 @@ src/
                      src/core/** + src/config (dijaga tests/architecture.test.ts)
     world/           tile, worldgen, chunk data, WorldSource, koordinat area, collision grid
     entities/        HeroCore (gerak/kombo/senjata/HP), enemies (AI musuh & boss),
-                     combatTuning (39 angka combat yang bisa disetel dari HP)
-    combat/          elements (15 elemen + 16 status + tabel reaksi), weapons (Pedang/Busur)
+                     combatTuning (65 angka combat + busur yang bisa disetel dari HP)
+    combat/          elements (15 elemen + 16 status + tabel reaksi), weapons (Pedang/Busur + BOW),
+                     arrows (lintasan panah: sapuan, tembus, menancap)
     story/           cutscene (mesin timeline, bebas renderer), cutscenes (SKRIP sebagai data)
     audio/           engine (context + 5 bus kategori), sfx, tracks (musik sebagai data),
                      music (scheduler + crossfade), beds (suasana sebagai data), ambient,

@@ -246,3 +246,41 @@ test('a status bag on the boss resists crowd control', () => {
   soft.apply('freeze');
   assert.ok(tough.active[0].left < soft.active[0].left, 'the boss freezes for less time');
 });
+
+test('the arrow points where it flies, and the bow shows its aim while drawn', async () => {
+  const { BOW } = await import('../src/core/combat/weapons');
+  const { combat, hero, scene } = setup();
+  const { cx, cy } = chunkWithSpawns('slime');
+  combat.spawnForChunk(cx, cy);
+  const target = combat.world.enemies[0];
+
+  // an arrow flying south-east: its long axis (+X) must turn to that direction, not across it
+  const angle = Math.PI / 4;
+  const before = new Set(scene.children);
+  combat.spawnArrow({ type: 'shoot', x: hero.x, y: hero.y, angle, speed: 200, dmg: 1, pierce: 1, charge: 0, shot: 'cepat' });
+  const mesh = scene.children.find((c) => !before.has(c))!;
+  const axis = new THREE.Vector3(1, 0, 0).applyEuler(mesh.rotation);
+  // world x = px x, world z = px y
+  assert.ok(Math.abs(axis.x - Math.cos(angle)) < 1e-6 && Math.abs(axis.z - Math.sin(angle)) < 1e-6, `arrow axis ${axis.x.toFixed(2)},${axis.z.toFixed(2)}`);
+
+  // the bow reaches much further than the sword with auto-aim
+  hero.slot = 1;
+  hero.x = target.x - Math.min(BOW.aimRange - 10, 150);
+  hero.y = target.y + 8;
+  const exact = Math.atan2(target.cy - (hero.y - 8), target.x - hero.x);
+  assert.equal(combat.aimTarget(hero, exact + 0.1), target, 'the bow locks on at arrow range');
+  hero.slot = 0;
+  assert.equal(combat.aimTarget(hero, exact + 0.1), null, 'the sword does not, from that far');
+  hero.slot = 1;
+
+  // drawing: the aim line and the ring under the target appear, and go when the draw ends
+  const shown = (): number => scene.children.filter((c) => c.visible && (c as THREE.Mesh).geometry?.type?.startsWith('Ring')).length;
+  hero.charge = 0.5;
+  hero.aim = exact;
+  combat.update(1 / 60, 1 / 60, hero);
+  assert.equal(shown(), 1, 'target ring while drawing');
+  hero.charge = 0;
+  combat.update(1 / 60, 1 / 60, hero);
+  assert.equal(shown(), 0);
+  combat.dispose();
+});

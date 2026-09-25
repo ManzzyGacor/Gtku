@@ -1047,3 +1047,37 @@ oleh stylesheet lain. Diverifikasi: mengembalikan class lama membuat tes ini gag
 berfungsi, preset berputar AUTO→Ultra, daftar bisa digulir di 2318x759 dengan teks 2x/tombol 1.3x,
 dibuka dari layar judul dan menu jeda (panel yang sama), reset save. `tests/source.test.ts`
 menambah penjaga: **tidak boleh ada class yang diberi gaya oleh dua stylesheet berbeda**.
+
+## Busur: rasa yang diperbaiki
+
+Laporan tes: "busur terasa kurang bagus". Yang ternyata salah atau tidak ada:
+
+- **Panah terbang menyamping.** Mesh-nya diputar `-sudut + 90°`, jadi setiap panah meluncur
+  melintang seperti batang kayu. Sekarang panah (batang + mata + bulu) menghadap arah terbangnya,
+  dijaga tes yang memeriksa sumbu mesh.
+- **Terlalu cepat untuk dilihat.** 300/420/520 px/dtk = 17 px per frame di 30 fps. Sekarang
+  230/285/340 px/dtk.
+- **Deteksi kena berupa titik**, jadi panah cepat bisa melompati musuh kecil di antara dua frame.
+  Sekarang lintasannya disapu per frame dan musuh dikenai sesuai urutan jalur
+  (`core/combat/arrows.ts`, murni dan dites).
+- **Hero memegang pedang saat memanah.** Sekarang ada model busur (dengan tali yang tertarik
+  sesuai charge dan anak panah terpasang), pose menarik busur, dan tali yang terlepas saat panah
+  dilepas.
+- **Auto-aim busur memakai jangkauan pedang (62 px).** Busur kini punya sendiri: 170 px, kerucut 22°.
+
+Yang ditambahkan:
+- **Garis bidik** di tanah yang memanjang sesuai charge dan berubah emas saat penuh; **cincin
+  target** di bawah musuh yang akan dikunci auto-aim.
+- Gerak melambat saat menarik (45%), bunyi "krek" saat mulai menarik dan "klik" + getar pendek saat
+  charge penuh.
+- Saat lepas: getaran kamera sesuai charge, dan untuk charge penuh hit-stop singkat + **getar HP**
+  (`navigator.vibrate`, diam saja kalau browser tidak mendukung).
+- **Panah menancap** di dinding (dengan debu dan bunyi "tuk") atau di musuh (ikut bergerak, hilang
+  saat musuh mati), lalu mengecil dan hilang. Tembakan tembus (charge penuh) punya jejak cahaya
+  berwarna elemen.
+- **Semua angka di `BOW` + `BOW_SHOTS`** (26 angka: waktu tarik, gerak saat menarik, jangkauan &
+  kerucut bidik, panjang garis, umur panah, lama menancap, getaran, hit-stop, getar HP, dan
+  kecepatan/damage/jeda/pemulihan/tembus tiap tembakan) ada di **Pengaturan → Combat → Setelan
+  Combat**.
+
+Tes: `tests/arrows.test.ts` (10) dan dua tambahan di `tests/combat3d.test.ts`.
