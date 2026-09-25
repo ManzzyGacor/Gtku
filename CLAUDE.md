@@ -40,6 +40,7 @@ npx tsx scripts/plan-stats.ts        # jumlah chunk/instance/draw group/lampu pe
 npx tsx scripts/stream-budget.ts     # anggaran chunk/tekstur/draw per preset untuk ukuran layar apa pun
 npx tsx scripts/preview-textures.ts  # ekspor 12 tekstur 3D ke .preview/textures.png
 npx tsx scripts/ascii-map.ts 3       # cetak dunia sebagai ASCII (periksa tata letak tanpa GPU)
+npx tsx --expose-gc scripts/frame-bench.ts  # biaya JS per frame Game3D di Node (logika, alokasi, bake)
 npx tsx scripts/crop-reference.ts docs/reference/referensi-visual.png 400 0 420 320 2 .preview/x.png
 ```
 
@@ -102,6 +103,8 @@ src/
   render3d/          SEMUA KODE THREE.JS: boot3d, Game3D, PixelRenderer (pipeline pixel),
                      IsoCamera, World3D (streaming), Combat3D, Story3D, Puzzle3D, HeroMesh3D,
                      EnemyMesh3D, NpcMesh3D, Environment, Sky, WaterSurface, InstancePool,
+                     Particles (partikel kombat ber-pool, animasi GPU), Rain (hujan/cipratan/genangan),
+                     BakeWorker + bake.worker (panggang chunk di Web Worker),
                      lightmap, occlusion, PerfProbe, AreaData (paket area), Rain, DevTools,
                      Cutscene3D, Portrait3D (avatar), TitleBackdrop (malam di layar judul),
                      worldPlan + pixelPlan (BEBAS three, jadi bisa dites di Node)
@@ -187,6 +190,10 @@ phaser.
   `onBeforeCompile` **setelah** `#include <uv_vertex>` dan bungkus `#ifdef USE_MAP`.
 - Setiap material yang memakai `onBeforeCompile` **wajib** punya `customProgramCacheKey()`, kalau tidak
   Three akan memakai ulang program milik material lain.
+- **Kabut jarak diukur dari kamera, dan kamera berdiri `CAMERA_DISTANCE` (70) dari hero.** Jangan pernah
+  mengalikan jarak kabut dengan faktor (cuaca, gua): kabut ×0,5 jatuh di depan hero dan seluruh layar
+  jadi abu-abu (pernah terjadi, penyebab "cuaca rusak" dan gua gelap). Pakai `fogDistances()` di
+  `core/systems/weather.ts`, yang mengukur dari hero ke luar; dijaga `tests/weather.test.ts`.
 - Kamera ortografik: kedalaman bersifat linear, jadi outline bisa dibuat dari selisih depth tetangga
   tanpa linearisasi (`PixelRenderer` shader quad).
 - Geometri dibuat prosedural lewat kode; **tidak ada alat desktop** (lihat batasan pemain di atas).
