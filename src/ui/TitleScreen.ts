@@ -121,8 +121,8 @@ export interface TitleHooks {
   auth?: AuthAdapter | null;
   /** The first tap: the one guaranteed user gesture, for the theme music and fullscreen. */
   started?(): void;
-  /** Logged in (or out). The game files saves under this account. */
-  account?(session: AccountSession | null): void;
+  /** Logged in (or out). The game files saves under this account — and may sync it first. */
+  account?(session: AccountSession | null): void | Promise<void>;
   /** Developer builds only: a button past the login. Absent from release builds entirely. */
   devSkip?: { label: string } | undefined;
 }
@@ -277,7 +277,7 @@ export class TitleScreen {
       return;
     }
 
-    if (register) {
+    if (register && auth.kind === 'local') {
       /*
        * The honesty the plan asks for, where it matters: before the player invents a password.
        * Not in small print, and not "secure account".
@@ -312,6 +312,8 @@ export class TitleScreen {
     const user = field('Nama akun', 'text', 'username');
     const pass = field('Kata sandi', 'password', register ? 'new-password' : 'current-password');
     const again = register ? field('Ulangi kata sandi', 'password', 'new-password') : null;
+    // only a server can use an email (to reset a forgotten password); a local account has no use for one
+    const email = register && auth.kind === 'remote' ? field('Email (opsional, untuk lupa sandi)', 'email', 'email') : null;
     if (register) {
       const rules = el('div', {}, `${USERNAME_RULE} ${PASSWORD_RULE}`);
       rules.className = 'lm-title-note';
@@ -330,7 +332,7 @@ export class TitleScreen {
       }
       submit.disabled = true;
       err.textContent = register ? 'Membuat akun…' : 'Memeriksa…';
-      const result = register ? await auth.register(user.value, pass.value) : await auth.login(user.value, pass.value);
+      const result = register ? await auth.register(user.value, pass.value, email?.value) : await auth.login(user.value, pass.value);
       submit.disabled = false;
       if (!result.ok) {
         err.textContent = result.message;
@@ -349,7 +351,7 @@ export class TitleScreen {
     const swap = el('button', {}, register ? 'Sudah punya akun? MASUK' : 'Belum punya akun? DAFTAR');
     swap.className = 'lm-title-link';
     onTap(swap, () => this.showAuth(!register));
-    const where = el('div', {}, 'Akun tersimpan di perangkat ini saja (belum ada server).');
+    const where = el('div', {}, auth.kind === 'local' ? 'Akun tersimpan di perangkat ini saja (belum ada server).' : 'Akun tersimpan di server; progres disinkronkan.');
     where.className = 'lm-title-note';
     box.append(err, submit, swap, where);
     this.appendDevSkip(box);
@@ -369,7 +371,18 @@ export class TitleScreen {
   private enter(session: AccountSession | null): void {
     this.session = session;
     setSaveScope(session?.id ?? null);
-    this.hooks.account?.(session);
+    const pending = this.hooks.account?.(session);
+    if (pending instanceof Promise) {
+      // a remote account fetches its save first, so "Lanjutkan" knows what there is to continue
+      this.setBusy('Menyinkronkan progres\u2026');
+      void pending.finally(() => {
+        this.status?.remove();
+        this.status = null;
+        this.buildMenu();
+        this.setStage('menu');
+      });
+      return;
+    }
     this.buildMenu();
     this.setStage('menu');
   }

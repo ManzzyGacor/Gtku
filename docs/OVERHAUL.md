@@ -96,8 +96,10 @@ Naskah di `docs/STORY.md`. Lore expandable per chapter.
 **Cutscene.** Dijalankan engine (kamera, dialog, animasi, fade, cahaya, partikel, suara), bukan video.
 **Selalu ada tombol Skip.**
 
-**Akun (ManzzyCompany).** Login, Register (username, password, konfirmasi password, email opsional),
-tombol "Main sebagai Tamu". Lalu pemain membuat nama karakter, bisa diganti lewat Profile.
+**Akun (ManzzyCompany).** Login, Register (username, password, konfirmasi password, email opsional
+— hanya untuk akun server). **Akun wajib; opsi "Main sebagai Tamu" dihapus** atas permintaan pemain
+(Batch 7). Lalu pemain membuat nama karakter, bisa diganti lewat Pengaturan. Desain server:
+`docs/BACKEND.md`.
 Data akun dipisah dari data save. Selama backend belum ada: adapter lokal berlabel jelas
 **"mode pengembangan"**, jangan diklaim aman, jangan simpan password plaintext.
 

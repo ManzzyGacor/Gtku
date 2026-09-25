@@ -35,7 +35,8 @@ export type AuthResult = { ok: true; session: AccountSession } | { ok: false; er
 
 export interface AuthAdapter {
   readonly kind: AuthKind;
-  register(username: string, password: string): Promise<AuthResult>;
+  /** `email` is optional and only meaningful to a server (password reset); the local adapter ignores it. */
+  register(username: string, password: string, email?: string): Promise<AuthResult>;
   login(username: string, password: string): Promise<AuthResult>;
   logout(): Promise<void>;
   /** The remembered session, if any — read synchronously so the title can skip the login form. */

@@ -1164,3 +1164,22 @@ Tes: `tests/titlebackdrop.test.ts`.
 - Tes: `tests/worldevents.test.ts` (11) — data valid, sutradara (menunggu, tidak tumpang tindih,
   siang/malam, cooldown, semua event akhirnya muncul), invasi dimenangkan, pedagang, save rusak
   diperbaiki, dan tiap event di game sungguhan termasuk simpan & muat ulang.
+
+## Batch 7 (2/3): backend — dirancang, adapter siap
+
+- **`docs/BACKEND.md`**: API (`/api/v1/auth/*`, `/api/v1/save`), galat, model data SQLite, keamanan
+  (Argon2id di server, cookie sesi HttpOnly/Secure/SameSite=Strict, satu origin tanpa CORS, cek
+  Origin, batas laju, batas ukuran, validasi save di server), dan langkah penerapan di VPS ini
+  (Node + Hono + better-sqlite3, di belakang Cloudflare Tunnel yang sama, cadangan harian).
+- **Klien tidak menyimpan rahasia**: tidak ada API key; hanya alamat API (`VITE_API_URL`). Tes
+  memastikan storage tidak berisi kata sandi atau id sesi.
+- **`RemoteAuth`** (`core/account/remote.ts`) di balik `AuthAdapter` yang sama dengan akun lokal;
+  `main.ts` memilih: ada `VITE_API_URL` → server, tidak ada → lokal. Form Daftar untuk akun server
+  mengganti peringatan "hanya di perangkat ini" dan menambah kolom email opsional.
+- **`SaveSync`** (`core/sync/saveSync.ts`): save lokal dulu, dicerminkan ke server paling sering
+  tiap 20 dtk dan saat `pagehide`; offline disimpan untuk dikirim nanti; revisi + konflik diputuskan
+  oleh **progres** (boss → tahap quest → level → EXP), salinan yang kalah disimpan sebagai cadangan;
+  sesi kedaluwarsa → pemberitahuan masuk lagi. Saat masuk di HP baru, save server dipakai.
+- Tes `tests/backend.test.ts` (8) memakai tiruan API di memori yang mengikuti dokumen itu.
+- **Belum dibangun:** server-nya sendiri. Tanpa `VITE_API_URL`, game memakai akun lokal persis
+  seperti sebelumnya.

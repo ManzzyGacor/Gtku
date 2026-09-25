@@ -20,6 +20,65 @@ import { ensureDebugUi } from './ui/DebugUi';
 import { TitleScreen } from './ui/TitleScreen';
 import { fullscreen } from './ui/fullscreen';
 import { browserAuthDeps, LocalAuth } from './core/account/local';
+import { RemoteAuth } from './core/account/remote';
+import type { AccountSession, AuthAdapter } from './core/account/auth';
+import { adoptSave, loadGame, setSaveMirror } from './core/save';
+import { readRaw, writeRaw, removeRaw } from './core/storage';
+
+/**
+ * Where accounts live. With `VITE_API_URL` set at build time, on the server (docs/BACKEND.md);
+ * without it, on this phone only, and the screens say so. The URL is the only thing the client
+ * knows about the server — no key, no secret: the session is an HttpOnly cookie.
+ */
+const API_URL: string = import.meta.env.VITE_API_URL ?? '';
+
+function makeAuth(): AuthAdapter | null {
+  if (API_URL) {
+    return new RemoteAuth({
+      base: API_URL.replace(/\/$/, ''),
+      fetch: (url, init) => fetch(url, init),
+      now: () => Date.now(),
+      read: (k) => readRaw(k),
+      write: (k, v) => writeRaw(k, v),
+      remove: (k) => removeRaw(k),
+    });
+  }
+  const deps = browserAuthDeps();
+  return deps ? new LocalAuth(deps) : null;
+}
+
+/**
+ * A remote account: fetch the server's save and settle it against this phone's before the menu
+ * shows, then mirror every local save up in the background. A local account does none of this.
+ */
+async function connectCloud(session: AccountSession | null): Promise<void> {
+  setSaveMirror(null);
+  if (!session || session.kind !== 'remote' || !API_URL) return;
+  const { RemoteSaveStore, SaveSync } = await import('./core/sync/saveSync');
+  const sync = new SaveSync(new RemoteSaveStore(API_URL.replace(/\/$/, ''), (url, init) => fetch(url, init)), {
+    backup: (data) => void writeRaw(`lentera-malam/save-backup@${session.id}`, JSON.stringify(data)),
+    remoteWon: () => cloudNotice('Progres dari perangkat lain lebih jauh. Muat ulang untuk memakainya.'),
+    loggedOut: () => cloudNotice('Sesi akun berakhir. Muat ulang dan masuk lagi supaya progres tersinkron.'),
+  });
+  const newer = await sync.reconcile(loadGame());
+  if (newer) adoptSave(newer);
+  setSaveMirror((data) => sync.queue(data));
+  setInterval(() => void sync.tick(performance.now() / 1000), 5000);
+  window.addEventListener('pagehide', () => void sync.tick(performance.now() / 1000, true));
+}
+
+/** A line at the top of the screen for the two things sync cannot fix by itself. */
+function cloudNotice(text: string): void {
+  const box = document.createElement('div');
+  box.textContent = text;
+  Object.assign(box.style, {
+    position: 'fixed', left: '50%', top: 'calc(46px + var(--lm-sat, 0px))', transform: 'translateX(-50%)', zIndex: '95',
+    padding: '8px 12px', borderRadius: '6px', background: 'rgba(70,44,10,0.92)', color: '#ffe0a8', font: '12px ui-monospace, monospace',
+    border: '1px solid rgba(255,176,74,0.6)', maxWidth: '86vw', textAlign: 'center',
+  });
+  document.body.appendChild(box);
+  setTimeout(() => box.remove(), 9000);
+}
 
 installErrorOverlay();
 // Resolve the notch/rounded-corner insets once, up front: every panel's CSS reads the custom
@@ -43,10 +102,11 @@ async function boot(): Promise<void> {
   document.getElementById('boot-msg')?.remove();
   // turning the phone to landscape asks for fullscreen; a refusal shows the Layar Penuh button
   fullscreen().install();
-  const deps = browserAuthDeps();
   const title = new TitleScreen(document.body, {
     settings: () => debug.openSettings(),
-    auth: deps ? new LocalAuth(deps) : null,
+    auth: makeAuth(),
+    // only a remote account has anything to wait for; a local one goes straight to the menu
+    account: (session) => (session?.kind === 'remote' ? connectCloud(session) : setSaveMirror(null)),
     // the first tap is the gesture both of these need
     started: () => {
       void fullscreen().enter();

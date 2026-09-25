@@ -38,7 +38,22 @@ export function saveScope(): string {
   return scope;
 }
 
+/** Where every successful local save is also handed (the cloud sync, when there is one). */
+let mirror: ((data: SaveData) => void) | null = null;
+
+export function setSaveMirror(fn: ((data: SaveData) => void) | null): void {
+  mirror = fn;
+}
+
 export function saveGame(data: SaveData): boolean {
+  if (wiped) return false;
+  const ok = writeRaw(keyOf(), JSON.stringify(data));
+  if (ok) mirror?.(data);
+  return ok;
+}
+
+/** Replace the local save with one from elsewhere (the server), without echoing it back up. */
+export function adoptSave(data: unknown): boolean {
   if (wiped) return false;
   return writeRaw(keyOf(), JSON.stringify(data));
 }
