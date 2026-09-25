@@ -99,6 +99,7 @@ test('the UI layers in the right order, so no panel opens behind another', () =>
     ['TitleScreen', '.lm-title'],
     ['CutsceneOverlay', '.lm-cs'],
     ['SettingsPanel', '.lm-ov'],
+    ['DevMenu', '.lm-dev'],
   ];
   const z = new Map<string, number>();
   for (const [name, selector] of roots) {
@@ -119,6 +120,7 @@ test('the UI layers in the right order, so no panel opens behind another', () =>
   assert.ok(z.get('CutsceneOverlay')! > z.get('TitleScreen')!, 'a cutscene plays over everything in the world');
   assert.ok(z.get('CutsceneOverlay')! > z.get('CharacterPanel')!);
   assert.ok(z.get('TouchControls')! > z.get('Hud')!, 'the stick is above the HUD it sits on');
+  assert.ok(z.get('DevMenu')! > z.get('SettingsPanel')!, 'the developer menu is opened from Settings');
 
   // and the error panel in index.html stays on top of all of it
   const html = readFileSync('index.html', 'utf8');

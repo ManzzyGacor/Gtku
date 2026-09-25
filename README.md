@@ -1,51 +1,72 @@
 # Lentera Malam
 
-Open-world action RPG bergaya pixel art. Semua karakter, nama, cerita, dan aset **original**; seluruh pixel art dan
-geometri dihasilkan lewat kode. Dirancang untuk browser HP Android (landscape); keyboard tetap didukung.
+Open-world action RPG **3D pixel-art** (Three.js). Semua karakter, nama, cerita, dan aset **original**;
+seluruh pixel art, geometri, musik, dan efek suara dihasilkan lewat kode. Dirancang untuk browser
+HP Android (landscape); keyboard tetap didukung.
 
-> **Sedang dioverhaul dari 2D ke 3D pixel-art.** Rencana induk dan urutan batch: [`docs/OVERHAUL.md`](docs/OVERHAUL.md).
+Rencana induk dan urutan batch: [`docs/OVERHAUL.md`](docs/OVERHAUL.md). Naskah cerita:
+[`docs/STORY.md`](docs/STORY.md). Status pekerjaan dan cara mengetesnya: [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
-## Dua mesin tampilan
-
-| Mode | Buka | Isi |
-| --- | --- | --- |
-| **3D** (default) | `?renderer=3d` | Three.js + pipeline pixel, kamera 3/4 isometrik, seluruh dunia greybox bertekstur pixel, player low-poly dengan lentera menyala. Combat, quest, dan NPC menyusul per batch. |
-| **2D** (lengkap) | `?renderer=2d` | Phaser 4 — game utuh: kombat, quest, puzzle, boss, save. Tetap dipertahankan sampai versi 3D menyamainya. |
-
-Ganti mode kapan saja dari **gerigi di pojok kanan atas → Renderer** (halaman dimuat ulang).
-Menu yang sama berisi preset grafik (AUTO + 5 tingkat), penghitung FPS, ukuran/posisi joystick, ukuran tombol,
-ukuran teks, panel error, dan tombol **"Salin laporan"** untuk melaporkan masalah dari HP.
-
-## Cara main (mode 2D)
+## Cara main
 
 | Aksi | Sentuh (HP) | Keyboard |
 | --- | --- | --- |
-| Jalan 8 arah | Joystick virtual — sentuh & geser di separuh kiri layar | `WASD` / panah |
-| Serang (kombo 3 pukulan) | Tombol pedang (kanan bawah) — ketuk berulang | `J` / `Z` / `Spasi` |
-| Dodge roll (kebal sesaat) | Tombol panah melingkar | `K` / `X` / `Shift` |
-| Skill *Ledakan Fajar* (cooldown 7 dtk) | Tombol bintang | `L` / `C` |
-| Bicara / baca / istirahat di altar | Tombol gelembung (muncul saat dekat) | `E` / `Enter` |
-| Lanjut dialog | Ketuk layar | `E` / `Enter` |
+| Jalan 8 arah | Joystick kiri bawah (posisi tetap; atur di Pengaturan) | `WASD` / panah |
+| Serang / kombo (tahan = serangan berat) | Tombol **TEBAS** (berubah jadi **PANAH** saat busur dipegang) | `J` / `Z` / `Spasi` |
+| Tarik busur | Tahan tombol serang saat busur dipegang | tahan `J` |
+| Berguling (kebal sesaat) | **GESER** | `K` / `X` / `Shift` |
+| Skill *Ledakan Lentera* (membawa elemen sekunder) | **SKILL** | `L` / `C` |
+| Ganti senjata | Tombol di atas TEBAS (menyebut senjata tujuan) | `1` / `2` / `Q` |
+| Bicara · Baca · Buka · Berdoa | Tombol yang **muncul saat dekat** objek, labelnya sesuai objek | `E` / `Enter` |
+| Karakter & tas | Tombol 🎒 (kanan atas) | `I` / `Tab` |
+| Menu jeda | Tombol ☰ (kanan atas) | `Esc` / `P` |
+| Pengaturan | Tombol ⚙ (kanan atas) | — |
 
-Tujuan: bicara dengan **Tetua Wulan** di plaza desa → kalahkan 6 monster hutan → masuki **Gua Kelam** (dorong batu ke pelat untuk membuka
-gerbang) → kalahkan **Kolosus Kelam** → bawa **Kristal Fajar** kembali dan nyalakan Lentera Agung.
-Sentuh altar berapi / Lentera Agung untuk memulihkan HP dan menyimpan progres (autosave juga berjalan).
+**Awal permainan:** setelah prolog, berdoa di shrine Ravenhollow (di plaza, satu langkah dari titik
+mulai) untuk mendapat **Inti Bara** dan elemen **Api**, lalu coba pada boneka latihan di sebelah timur
+shrine. Setelah itu quest utama: bicara dengan tetua di plaza.
+
+## Mode Pengembang
+
+Menu untuk mengetes tanpa harus memainkan seluruh game: memberi item/Inti Lentera/koin, membuka
+keempat elemen dan mengatur elemen primer & sekunder, mengatur level & EXP, memunculkan tiap jenis
+musuh dan boneka latihan, log reaksi elemen di layar, teleport ke setiap area & tempat penting
+(termasuk tiap peti), mengatur jam & cuaca, mode kebal, reset status cutscene, dan hapus save.
+
+**Cara membuka** (salah satu):
+
+1. Tambahkan **`?debug=1`** di URL, misalnya `https://game.varesa.mom/?debug=1` — menu langsung terbuka.
+2. Buka **Pengaturan** (⚙), gulir ke paling bawah, lalu **ketuk nomor versi 5 kali dengan cepat**
+   (setelah ketukan kedua muncul hitungan mundur "3 lagi…").
+
+Setelah terbuka sekali, tombol **DEV** hijau muncul di kanan atas dan tetap ada setelah reload.
+Selama menu terbuka, dunia berhenti. Musuh yang dimunculkan dari menu **tidak** dihitung quest dan
+**tidak** tersimpan.
+
+**Tidak pernah ada di build rilis.** Pintu masuknya memakai `import.meta.env.DEV`, yang diganti
+menjadi `false` oleh `vite build`, sehingga kode menunya bahkan tidak ikut dibangun — bukan
+disembunyikan, tapi tidak ada. `tests/devmode.test.ts` membangun versi rilis sungguhan dan memeriksa
+bahwa tidak ada potongan menu pengembang di dalamnya. Untuk build staging yang sengaja membawanya:
+`VITE_DEV_TOOLS=1 npm run build`.
 
 ## Menjalankan
 
 ```bash
 npm install
-npm run dev      # http://127.0.0.1:5173 (di server ini dibuka lewat https://game.varesa.mom)
-npm run build    # typecheck + build produksi ke dist/
-npm test         # tes logika + smoke test terintegrasi (Phaser di-mock)
-npm run assets   # ekspor semua sheet seni & preview dunia ke .preview/*.png
+npm run dev      # Vite di 127.0.0.1:5173 (di server ini dibuka lewat https://game.varesa.mom)
+npm run build    # typecheck + lint + build produksi ke dist/
+npm test         # Vitest: logika inti, playthrough headless, Game3D asli dengan WebGL stub, tata letak
+npm run lint     # oxlint
 ```
 
-Parameter URL untuk pengujian: `?bloom=0` (matikan bloom), `?q=0|1|2` (kunci level kualitas: 0 minimal, 2 penuh).
+Parameter URL: `?fps=1` (penghitung FPS), `?bloom=0`, `?preset=vlow|low|medium|high|ultra`,
+`?debug=1` (Mode Pengembang, hanya build pengembangan).
 
 ## Dokumentasi
 
+- `docs/OVERHAUL.md` — rencana induk & urutan batch
+- `docs/STORY.md` — naskah (nama tokoh utama diambil dari setelan pemain)
+- `docs/PROGRESS.md` — status fitur, bug yang ditemukan, cara mengetes di HP
 - `docs/GAME_DESIGN.md` — ringkasan desain
-- `docs/PROGRESS.md` — status fitur + usulan Fase 2
 - `CLAUDE.md` — stack, struktur folder, konvensi (untuk sesi pengembangan berikutnya)
 - `CREDITS.md` — kredit aset & library

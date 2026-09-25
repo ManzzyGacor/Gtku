@@ -157,6 +157,18 @@ const centreOf = (t: { tx: number; ty: number }): { x: number; y: number } => ({
 });
 
 /**
+ * The nearest point to (x, y), in pixels, where the hero can stand — the centre of a free tile.
+ * Used by the developer menu's teleport, whose targets are landmarks (a shrine, a door) that are
+ * often solid themselves.
+ */
+export function findStandable(world: SaveWorld, x: number, y: number): { x: number; y: number } | null {
+  const tx = clamp(Math.floor(x / TILE), 0, world.widthTiles - 1);
+  const ty = clamp(Math.floor(y / TILE), 0, world.heightTiles - 1);
+  const free = nearestFree(world, tx, ty);
+  return free ? centreOf(free) : null;
+}
+
+/**
  * Put the hero somewhere they can actually stand.
  *
  * Order of preference: where the save says (if free) → the nearest free tile → the saved

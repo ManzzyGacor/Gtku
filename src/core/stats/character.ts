@@ -40,6 +40,12 @@ export class Character {
    * the core comes off — you learned it, you do not lose it by changing jewellery.
    */
   unlocked: ElementId[] = [];
+  /**
+   * Koin. Earned from every monster (a few each) and from chests; nothing spends them *yet* — the
+   * shop is not built. They are a real, saved number rather than a placeholder, so when the shop
+   * arrives the player's balance is already there.
+   */
+  coins = 0;
   primary: ElementId | null = null;
   secondary: ElementId | null = null;
   private cachedMods: Modifier[] = [];
@@ -93,6 +99,12 @@ export class Character {
     if (!this.primary) this.primary = element;
     else if (!this.secondary && this.primary !== element) this.secondary = element;
     return true;
+  }
+
+  /** Add (or, with a negative amount, spend) coins. Never below zero, never NaN. */
+  addCoins(amount: number): void {
+    if (!Number.isFinite(amount)) return;
+    this.coins = Math.max(0, Math.min(99_999_999, Math.floor(this.coins + amount)));
   }
 
   /** Put an element in a hand. Only learned elements; the same element cannot be in both. */
@@ -190,22 +202,26 @@ export class Character {
     exp: number;
     inventory: ReturnType<Inventory['toJSON']>;
     elements: { unlocked: ElementId[]; primary: ElementId | null; secondary: ElementId | null };
+    coins: number;
   } {
     return {
       level: this.level,
       exp: this.exp,
       inventory: this.inventory.toJSON(),
       elements: { unlocked: [...this.unlocked], primary: this.primary, secondary: this.secondary },
+      coins: this.coins,
     };
   }
 
-  load(data: { level?: unknown; exp?: unknown; inventory?: unknown; elements?: unknown } | null | undefined): void {
+  load(data: { level?: unknown; exp?: unknown; inventory?: unknown; elements?: unknown; coins?: unknown } | null | undefined): void {
     const level = typeof data?.level === 'number' && Number.isFinite(data.level) ? Math.floor(data.level) : 1;
     const exp = typeof data?.exp === 'number' && Number.isFinite(data.exp) ? Math.floor(data.exp) : 0;
     this.level = Math.max(1, Math.min(MAX_LEVEL, level));
     this.exp = Math.max(0, exp);
     this.inventory.load((data?.inventory ?? null) as Parameters<Inventory['load']>[0]);
     this.buffs = [];
+    const coins = typeof data?.coins === 'number' && Number.isFinite(data.coins) ? Math.floor(data.coins) : 0;
+    this.coins = Math.max(0, Math.min(99_999_999, coins));
     // elements: only ones that exist and are implemented survive a load
     const el = (data?.elements ?? null) as { unlocked?: unknown; primary?: unknown; secondary?: unknown } | null;
     this.unlocked = Array.isArray(el?.unlocked) ? [...new Set(el.unlocked.filter(known))] : [];

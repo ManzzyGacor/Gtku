@@ -420,7 +420,7 @@ jalan di 3D.
 | Checkpoint + respawn saat mati | — | ✅ **sudah pindah** |
 | Layar judul: Lanjutkan / Main Baru | — | ✅ **sudah pindah** |
 | Tombol fullscreen + lock landscape | — | ✅ **sudah pindah** |
-| Kontrol sentuh (joystick + tombol) | `core/input` | ✅ `ui/TouchControls` (DOM) |
+| Kontrol sentuh (joystick + tombol) | `core/input` | ⚠️ `ui/TouchControls` (DOM) — **tombol interaksi ("gelembung") terlewat saat porting**, baru ditambahkan setelah laporan tes. Baris ini dulu ditandai ✅ padahal salah. |
 | Menu Pengaturan, penghitung FPS, panel error | — | ✅ Fase 0 (DOM, netral renderer) |
 
 **Hasil:** keenam belas fitur sudah pindah dan dibuktikan `tests/playthrough.test.ts` (memainkan
@@ -885,3 +885,44 @@ quest). Status aktifnya tampil di atasnya, diperbarui 5x/detik.
 prolog → objektif tutorial → jalan ke shrine → prompt "Berdoa" → tekan → Inti Bara terpasang, Api
 dipelajari, `hero.element === 'api'` → tebas boneka → status "Terbakar" → selesai → tracker kembali
 ke quest utama → save/reload tetap utuh.
+
+
+### Bagian 3 — Mode Pengembang
+
+Cara membuka ada di `README.md`: **`?debug=1`**, atau **ketuk nomor versi di dasar Pengaturan 5 kali
+cepat**. Setelah itu tombol **DEV** hijau muncul di kanan atas dan bertahan setelah reload.
+
+| Bagian | Isi |
+| --- | --- |
+| Item & Koin | setiap item di katalog pada rarity pilihan, semua Inti Lentera, satu set perlengkapan Legendaris, +100/+1000 koin |
+| Elemen | buka Api/Air/Es/Petir, pilih primer (senjata) dan sekunder (skill) |
+| Level & EXP | atur level 1–30 (HP dipulihkan), tambah EXP |
+| Musuh & Boneka | lendir, pemanah, 3 kelelawar, boss, boneka latihan — di depan hero, di petak yang bisa dicapai; tombol hapus semua |
+| Teleport | titik mulai, Lentera Agung, boneka latihan, 3 shrine, ruang puzzle, pintu & dalam arena boss, **setiap peti** |
+| Jam & Cuaca | pagi/siang/sore/malam; cerah/berkabut/hujan/badai |
+| Lainnya | kebal (serangan terasa, HP tidak berkurang), pulihkan HP, log reaksi nyala/mati, reset status cutscene, hapus save |
+
+**Log reaksi** muncul di kiri layar selama mode pengembang aktif: `Api + Es → Lebur`. **Boneka
+latihan** menampilkan status aktif dan damage yang diterima di atasnya.
+
+Musuh dari menu ditandai `dev_`: memberi EXP dan koin, memicu passive Inti, tapi **tidak** dihitung
+quest, tidak diingat sebagai mati di save, dan boss-nya tidak menutup pintu arena yang asli.
+
+**Tambahan yang dibutuhkan menu ini:**
+- **Koin** — sekarang angka nyata yang tersimpan, didapat dari setiap monster (2–5, boss 120). Belum
+  ada toko yang memakainya; dicatat terus terang, bukan UI palsu.
+- **Cuaca** (`core/systems/weather.ts`) + **hujan** (`render3d/Rain.ts`): satu draw call, dianimasikan
+  seluruhnya di vertex shader (nol kerja CPU per frame), dan **tidak digambar sama sekali** saat
+  cuaca tidak hujan. Belum ada sistem cuaca yang berubah sendiri — itu world event Batch 7.
+
+**Tidak ada di build rilis — dan versi pertamanya salah soal ini.** Gerbang awalnya memanggil fungsi
+`devToolsBuild()`; menunya memang tidak pernah dimuat di rilis, tapi **dua chunk-nya tetap ikut di
+`dist/`**, bisa diunduh siapa pun yang menebak nama berkasnya. Sekarang gerbangnya ekspresi literal
+`import.meta.env.DEV`, yang diganti `false` saat build sehingga bundler membuang impornya. Dijaga
+`tests/devmode.test.ts` yang **membangun versi rilis sungguhan** dan memeriksa outputnya (sudah
+diverifikasi: gerbang lama membuat tes itu merah).
+
+**Tes:** `tests/devmode.test.ts` (11) — pintu masuk, build rilis bersih, dan setiap tombol pada
+`Game3D` asli: item/inti/set/koin, elemen & primer/sekunder sampai ke hero, level/EXP, spawn tiap
+jenis tanpa menyentuh quest/save, **setiap teleport mendarat di petak yang bisa dipijak**, jam,
+cuaca, kebal, reset, dan log reaksi `Api + Es → Lebur` pada boneka.

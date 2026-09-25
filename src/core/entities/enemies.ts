@@ -18,13 +18,13 @@ export type EnemyKind = 'slime' | 'archer' | 'bat' | 'boss' | 'dummy';
  * implemented elements get their identity — a cave bat is a poor conductor, the boss shrugs off
  * fire because it lives beside crystal fire.
  */
-export const ENEMY_STATS: Record<EnemyKind, { def: number; resist: Partial<Record<ElementId, number>>; exp: number }> = {
-  slime: { def: 6, resist: { air: 0.4, api: -0.25 }, exp: EXP_REWARDS.slime },
-  archer: { def: 14, resist: { petir: -0.2 }, exp: EXP_REWARDS.archer },
-  bat: { def: 4, resist: { petir: 0.35, es: -0.3 }, exp: EXP_REWARDS.bat },
-  boss: { def: 45, resist: { api: 0.35, es: 0.2, air: -0.15 }, exp: EXP_REWARDS.boss },
+export const ENEMY_STATS: Record<EnemyKind, { def: number; resist: Partial<Record<ElementId, number>>; exp: number; coins: number }> = {
+  slime: { def: 6, resist: { air: 0.4, api: -0.25 }, exp: EXP_REWARDS.slime, coins: 3 },
+  archer: { def: 14, resist: { petir: -0.2 }, exp: EXP_REWARDS.archer, coins: 5 },
+  bat: { def: 4, resist: { petir: 0.35, es: -0.3 }, exp: EXP_REWARDS.bat, coins: 2 },
+  boss: { def: 45, resist: { api: 0.35, es: 0.2, air: -0.15 }, exp: EXP_REWARDS.boss, coins: 120 },
   // a training dummy teaches nothing if its numbers get in the way: no defence, no resistance
-  dummy: { def: 0, resist: {}, exp: 0 },
+  dummy: { def: 0, resist: {}, exp: 0, coins: 0 },
 };
 
 export interface HeroRef {
@@ -113,6 +113,11 @@ export abstract class EnemyCore {
   /** EXP the hero gets for killing this. */
   get expValue(): number {
     return ENEMY_STATS[this.kind].exp;
+  }
+
+  /** Coins it leaves behind. */
+  get coinValue(): number {
+    return ENEMY_STATS[this.kind].coins;
   }
 
   /** Body centre used for hit tests. */

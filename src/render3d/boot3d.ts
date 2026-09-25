@@ -11,6 +11,9 @@ import { resumeAudio, suspendAudio } from '../core/audio';
 import { loadCombatTuning } from '../core/entities/combatTuning';
 import { Lifecycle } from '../core/lifecycle';
 import { invalidateInsets } from '../ui/safearea';
+import { debugRequested } from '../core/devtools';
+import { readRaw, writeRaw } from '../core/storage';
+import { el, injectStyle, onTap } from '../ui/dom';
 import { recordError } from '../core/errors';
 import type { DebugUi } from '../ui/DebugUi';
 import { TouchControls } from '../ui/TouchControls';
@@ -29,10 +32,10 @@ function notice(text: string | null): void {
     existing?.remove();
     return;
   }
-  const el = existing ?? document.createElement('div');
-  el.id = id;
-  el.textContent = text;
-  Object.assign(el.style, {
+  const box = existing ?? document.createElement('div');
+  box.id = id;
+  box.textContent = text;
+  Object.assign(box.style, {
     position: 'fixed',
     left: '50%',
     top: '50%',
@@ -45,7 +48,7 @@ function notice(text: string | null): void {
     zIndex: '60',
     textAlign: 'center',
   });
-  if (!existing) document.body.appendChild(el);
+  if (!existing) document.body.appendChild(box);
 }
 
 /**
@@ -91,6 +94,9 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
    * starting over really does replay it, while a rebuild after a lost GPU context does not.
    */
   if (!continueGame) game.playCutscene('intro', { auto: true });
+
+  // ── Mode Pengembang ──
+  const dev = installDevMode(() => game, debug);
 
   /**
    * Rebuild everything that lived on the GPU.
@@ -141,10 +147,84 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
     game,
     controls,
     dispose: () => {
+      dev.dispose();
       lifecycle.dispose();
       notice(null);
       controls.destroy();
       game.dispose();
+    },
+  };
+}
+
+
+/** Remembered between reloads so a tester who unlocked it once does not have to tap again. */
+const DEV_KEY = 'lentera-malam/dev';
+
+/**
+ * Whether this build carries the developer menu at all.
+ *
+ * Written as the literal `import.meta.env` expressions, not as a call to `devToolsBuild()`: Vite
+ * replaces these with constants at build time, so in a release build this is the literal `false`,
+ * the bundler proves the dynamic imports below unreachable, and **no DevMenu/DevTools chunk is
+ * emitted at all**. A first version called the helper function instead; the menu was never loaded,
+ * but its two chunks still sat in `dist/`, downloadable by anyone who guessed the file names.
+ * `tests/devmode.test.ts` checks the built output for exactly that.
+ */
+const DEV_TOOLS: boolean = import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1';
+
+/** The developer menu, if this build is allowed one (see `DEV_TOOLS`). */
+function installDevMode(getGame: () => Game3D, debug: DebugUi): { dispose(): void } {
+  if (!DEV_TOOLS) return { dispose: () => undefined };
+
+  let menu: import('../ui/DevMenu').DevMenu | null = null;
+  let button: HTMLButtonElement | null = null;
+  let loading = false;
+
+  /** Load the menu (once) and show the DEV button; open it too unless `quiet`. */
+  const open = async (quiet = false): Promise<void> => {
+    writeRaw(DEV_KEY, '1');
+    if (!menu && !loading) {
+      loading = true;
+      const [{ DevMenu }, { buildDevActions }] = await Promise.all([import('../ui/DevMenu'), import('./DevTools')]);
+      const game = getGame();
+      menu = new DevMenu(buildDevActions(game, () => location.reload()));
+      // the reaction log: every reaction, spelled out, while the developer menu is on
+      game.onReactionLog = (line) => menu?.pushReaction(line);
+      menu.onToggle = (isOpen) => {
+        game.setDevPaused(isOpen);
+      };
+      loading = false;
+      showButton();
+    }
+    if (!quiet) menu?.openMenu();
+  };
+
+  const showButton = (): void => {
+    if (button) return;
+    injectStyle(
+      'lm-ui-devbtn',
+      `.lm-devbtn { position: fixed; z-index: 80; pointer-events: auto; width: 40px; height: 34px; padding: 0;
+        right: calc(158px + var(--lm-sar, 0px)); top: calc(4px + var(--lm-sat, 0px));
+        border: 1px solid #7dffb0; border-radius: 17px; background: rgba(8, 26, 18, 0.85); color: #7dffb0;
+        font: 11px/1 ui-monospace, monospace; letter-spacing: 1px; cursor: pointer; touch-action: manipulation; }`,
+    );
+    button = el('button', {}, 'DEV');
+    button.className = 'lm-devbtn';
+    onTap(button, () => void open());
+    document.body.appendChild(button);
+  };
+
+  // unlocked by the URL, by a previous session, or by five taps on the version number
+  debug.onDevUnlock = () => void open();
+  const search = typeof location !== 'undefined' ? location.search : '';
+  // ?debug=1 opens the menu straight away; a tester who unlocked it before just gets the button
+  if (debugRequested(search)) void open();
+  else if (readRaw(DEV_KEY) === '1') void open(true);
+
+  return {
+    dispose: () => {
+      menu?.destroy();
+      button?.remove();
     },
   };
 }

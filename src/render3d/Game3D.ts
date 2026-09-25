@@ -29,6 +29,8 @@ import { BOW_SHOTS } from '../core/combat/weapons';
 import { ELEMENTS, type ElementId } from '../core/combat/elements';
 import { KILLS_NEEDED } from '../core/state/GameState';
 import { DUMMY_TILE, settleTutorial } from '../core/systems/tutorial';
+import { WEATHER, type Weather } from '../core/systems/weather';
+import { Rain } from './Rain';
 import { Cutscene3D } from './Cutscene3D';
 import { CUTSCENES, playerName } from '../core/story/cutscenes';
 import { ambient as ambientPlayer, ambientFor, audioReady, bus, fadeFor, music, musicFor } from '../core/audio';
@@ -119,6 +121,9 @@ export class Game3D {
   private tintOverride: [number, number, number] | null = null;
   /** An actor being walked from A to B by a cutscene. */
   private actorMove: { id: string; fromX: number; fromY: number; toX: number; toY: number; t: number; dur: number } | null = null;
+  /** Current weather (developer menu only, until Batch 7 gives the world its own). */
+  private weather: Weather = 'cerah';
+  private rain: Rain | null = null;
   /** What the mixer was last told to play, so nothing is re-requested every frame. */
   private nowMusic = '';
   private nowAmbient = '';
@@ -249,6 +254,7 @@ export class Game3D {
         this.dropLoot(kind, x, y);
       },
       exp: (amount, x, y) => this.gainExp(amount, x, y),
+      coins: (amount) => this.character.addCoins(amount),
       elementHit: (kind, element) => {
         if (kind === 'dummy') this.story.tutorialEvent({ type: 'element-hit', element, target: 'dummy' });
       },
@@ -654,6 +660,51 @@ export class Game3D {
     this.saveNow(true);
   }
 
+  // ───────────────────────── developer menu ─────────────────────────
+
+  /** The developer menu holds the world still while it is open, like the pause menu. */
+  setDevPaused(on: boolean): void {
+    this.paused = on || this.pause.isOpen || this.sheet.isOpen;
+    input.enabled = !this.paused && !this.dialogue.open;
+    if (on) input.reset();
+    this.hud.setVisible(!on);
+  }
+
+  /** Current time of day, 0..1 (0 = midnight, 0.5 = noon). */
+  get timeOfDay(): number {
+    return this.dayTime;
+  }
+
+  /** Jump the clock. The day keeps running from there. */
+  setTimeOfDay(t: number): void {
+    if (!Number.isFinite(t)) return;
+    this.dayTime = ((t % 1) + 1) % 1;
+    this.state.dayTime = this.dayTime;
+  }
+
+  get currentWeather(): Weather {
+    return this.weather;
+  }
+
+  /**
+   * Set the weather. The rain mesh is created on first use, so a session that never touches the
+   * weather never allocates it.
+   */
+  setWeather(w: Weather): void {
+    this.weather = w;
+    if (WEATHER[w].rain > 0 && !this.rain) this.rain = new Rain(this.pixels.scene);
+    // the ambience follows: force the soundtrack to re-pick next frame
+    this.nowAmbient = '';
+  }
+
+  /** Put the hero somewhere, and bring the world with them without a frame of emptiness. */
+  teleport(x: number, y: number): void {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    this.hero.reset(x, y, this.hero.hp);
+    this.camera.snap(u(x), u(y));
+    this.scene3d.preload(u(x), u(y), 1);
+  }
+
   // ───────────────────────── cutscenes ─────────────────────────
 
   /**
@@ -962,8 +1013,9 @@ export class Game3D {
      */
     const [rawNear, rawFar] = this.camera.fogRange();
     const loadedReach = CAMERA_DISTANCE + this.chunkRadius() * 16 * 0.92;
-    const fogFar = Math.min(rawFar, loadedReach);
-    const fogNear = Math.min(rawNear, fogFar - 8);
+    const look = WEATHER[this.weather];
+    const fogFar = Math.min(rawFar, loadedReach) * look.fogScale;
+    const fogNear = Math.min(rawNear * look.fogScale, fogFar - 8);
     if (this.dayTimeOverride !== null) this.dayTime = this.dayTimeOverride;
     const night = nightAmount(this.dayTime);
     this.sky.update(this.dayTime, cave, fogNear, fogFar, night, this.clock);
@@ -978,6 +1030,8 @@ export class Game3D {
     this.scene3d.waterUniforms.uFogColor.value.copy(this.sky.haze);
     this.scene3d.waterUniforms.uFogRange.value.set(this.sky.fog.near, this.sky.fog.far);
     this.environment.update(dt, this.camera.target, nightAmount(this.dayTime), cave, this.forestWeight(), this.sky.haze);
+    // no rain underground, whatever the sky is doing
+    this.rain?.update(dt, this.camera.target, this.camera.yawRadians, WEATHER[this.weather].rain * (1 - cave));
     this.pixels.render(this.camera.camera);
   }
 
@@ -1001,7 +1055,7 @@ export class Game3D {
       bus.music(track, fadeFor(this.nowMusic, track));
       this.nowMusic = track;
     }
-    const bed = ambientFor(situation);
+    const bed = WEATHER[this.weather].ambient ?? ambientFor(situation);
     if (bed !== this.nowAmbient) {
       bus.ambient(bed);
       this.nowAmbient = bed;
@@ -1013,7 +1067,12 @@ export class Game3D {
     const g = gradeAt(this.dayTime, cave);
     // A cutscene can push the whole picture toward a colour. It goes into the grade's lift, which
     // is the one knob that tints the shadows without washing the highlights out.
-    const tint = this.tintOverride;
+    const w = WEATHER[this.weather].tint;
+    const tint: [number, number, number] | null = this.tintOverride
+      ? [this.tintOverride[0] + w[0], this.tintOverride[1] + w[1], this.tintOverride[2] + w[2]]
+      : w[0] || w[1] || w[2]
+        ? w
+        : null;
     const p = profileOf(settings.get('preset'));
     const allow = settings.get('bloom') && p.bloom ? 1 : 0;
     this.pixels.setGrade({
@@ -1224,6 +1283,7 @@ export class Game3D {
     this.story.dispose();
     this.puzzle.dispose();
     this.minimap.destroy();
+    this.rain?.dispose();
     this.csOverlay.destroy();
     this.pause.destroy();
     this.sheet.destroy();

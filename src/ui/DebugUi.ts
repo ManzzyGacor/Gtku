@@ -41,12 +41,20 @@ export class DebugUi {
     this.gear.style.color = bad ? '#ff8a7a' : '#ffd98a';
   }
 
-  /** The active renderer calls this once it is running. */
   /** Open the settings overlay from somewhere else (the pause menu's Pengaturan entry). */
   openSettings(): void {
     this.panel.setOpen(true);
   }
 
+  /**
+   * Fired when the version number in Settings has been tapped five times in a row. The game decides
+   * whether that means anything — in a release build it does not.
+   */
+  set onDevUnlock(fn: () => void) {
+    this.panel.onDevUnlock = fn;
+  }
+
+  /** The active renderer calls this once it is running. */
   attach(source: DiagnosticsSource): void {
     this.source = source;
     if (this.panel.open) source.setPaused(true);

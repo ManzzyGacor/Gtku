@@ -57,6 +57,8 @@ export interface CombatHooks {
   exp(amount: number, x: number, y: number): void;
   /** HP the hero gets back (lifesteal, the `tideMend` core passive). */
   heal(amount: number): void;
+  /** Coins from a kill. */
+  coins?(amount: number): void;
   /** An elemental hit landed (the tutorial listens for the one on the training dummy). */
   elementHit?(kind: string, element: ElementId): void;
   /** A reaction fired: `on` is the element whose status was already there. For the on-screen log. */
@@ -103,6 +105,43 @@ export class Combat3D {
   }
 
   // ───────────────────────── spawning ─────────────────────────
+
+  /**
+   * Spawn a monster next to a point, for the developer menu.
+   *
+   * Tagged `dev_` so its death is kept out of the quest and the save (see the `died` handler). The
+   * boss is included on purpose — testing a fight should not require replaying to the cave.
+   */
+  devSpawn(kind: 'slime' | 'archer' | 'bat' | 'boss', x: number, y: number): EnemyCore[] {
+    const id = `dev_${kind}_${++this.devCounter}`;
+    let made: EnemyCore[];
+    if (kind === 'slime') made = [this.world.add(new Slime(x, y))];
+    else if (kind === 'archer') made = [this.world.add(new Archer(x, y))];
+    else if (kind === 'bat') made = this.world.spawnBats(x, y, 3, id);
+    else {
+      const b = this.world.add(new Boss(x, y));
+      // a dev boss wakes at once: nobody is going to walk it into its arena
+      b.wake({ emit: (e) => this.world.events.push(e) });
+      made = [b];
+    }
+    for (const e of made) e.spawnId = id;
+    return made;
+  }
+
+  private devCounter = 0;
+
+  /** Remove everything the developer menu spawned (and every extra dummy). */
+  devClear(): number {
+    let n = 0;
+    for (let i = this.world.enemies.length - 1; i >= 0; i--) {
+      const e = this.world.enemies[i];
+      if (!e.spawnId.startsWith('dev_')) continue;
+      this.world.remove(e);
+      this.dropMesh(e);
+      n++;
+    }
+    return n;
+  }
 
   /** Put a training dummy in the world (the tutorial's, or the developer menu's). */
   addDummy(x: number, y: number): TrainingDummy {
@@ -490,18 +529,27 @@ export class Combat3D {
           this.hooks.spark(ev.enemy.x, ev.enemy.cy, 0xffe9a8, true);
           this.hooks.shake(2, 0.12);
           sfx.die();
-          this.state.markKilled(ev.enemy.spawnId || `${ev.enemy.kind}`);
           this.hooks.exp(ev.enemy.expValue, ev.enemy.x, ev.enemy.y - ev.enemy.h);
+          this.hooks.coins?.(ev.enemy.coinValue);
           // `tideMend`: the Lantern Core of the tide gives a little back for every enemy felled
+          // (dev spawns included — testing the passive is exactly what they are for)
           const mend = this.character?.healPerKill() ?? 0;
           if (mend > 0) this.hooks.heal(mend);
+          /*
+           * Something the developer menu spawned is a test subject, not part of the world: it
+           * gives EXP and coins (useful for testing levels) but must not count toward the quest,
+           * stay dead in the save, or — for a spawned boss — end the story.
+           */
+          if (ev.enemy.spawnId.startsWith('dev_')) break;
+          this.state.markKilled(ev.enemy.spawnId || `${ev.enemy.kind}`);
           this.hooks.killed(ev.enemy.kind, ev.enemy.x, ev.enemy.y);
           if (ev.enemy.kind === 'boss') this.hooks.bossDefeated(ev.enemy.x, ev.enemy.cy);
           break;
         }
         case 'roar':
-          // the boss's wake-up roar: the arena doors slam on this
-          if (ev.enemy.kind === 'boss') this.hooks.bossWoke();
+          // the boss's wake-up roar: the arena doors slam on this — but not for a boss the developer
+          // menu dropped in the village, which would otherwise shut the real arena from afar
+          if (ev.enemy.kind === 'boss' && !ev.enemy.spawnId.startsWith('dev_')) this.hooks.bossWoke();
           break;
         case 'removed':
           this.dropMesh(ev.enemy);

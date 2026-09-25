@@ -168,6 +168,8 @@ export class HeroCore {
   rollCd = 0;
   skillCd = 0;
   invuln = 0;
+  /** Developer menu: take no damage. Never set in normal play. */
+  invincible = false;
   /** Set true while the roll's i-frames are running. */
   rolling = false;
   events: HeroEvent[] = [];
@@ -282,6 +284,9 @@ export class HeroCore {
 
   takeDamage(dmg: number, fromX: number, fromY: number, knock = 110): boolean {
     if (!this.canBeHit) return false;
+    // the developer menu's "kebal": hits still register (so hit-stop and sparks can be tested),
+    // they just take nothing off
+    if (this.invincible) dmg = 0;
     /*
      * Damage is clamped into [0, maxHp] before it is applied, for two reasons that are about to
      * matter a lot more: a defence modifier that overshoots would otherwise *heal* the hero (and

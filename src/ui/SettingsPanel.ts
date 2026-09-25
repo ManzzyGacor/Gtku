@@ -9,6 +9,8 @@
  * dead control (audio volumes wait for Batch 5).
  */
 import { formatErrors, recentErrors } from '../core/errors';
+import { GAME_VERSION } from '../config';
+import { TapUnlock } from '../core/devtools';
 
 /** Loaded on demand by `toggleCombat` — see the comment there. */
 let tuning: typeof import('../core/entities/combatTuning') | null = null;
@@ -130,7 +132,7 @@ const CSS = `
  *
  *   66 HUD        70 kontrol sentuh   72 dialog      80 tombol sudut (gear/tas/jeda/fullscreen)
  *   86 menu jeda  88 lembar karakter  90 layar judul  94 overlay cutscene
- *   96 pengaturan (ini)               99 panel error (index.html)
+ *   96 pengaturan (ini)  97 mode pengembang  99 panel error (index.html)
  */
 .lm-ov { position: fixed; inset: 0; z-index: 96; display: none; background: rgba(9, 7, 18, 0.72);
          font: 13px/1.45 ui-monospace, monospace; color: #e7e0ff; -webkit-tap-highlight-color: transparent; }
@@ -213,8 +215,36 @@ export class SettingsPanel {
     parent.appendChild(this.overlay);
 
     this.build();
+    this.buildVersion();
     this.unsubscribe = settings.on(() => this.refresh());
     this.refresh();
+  }
+
+  /** Fired on the fifth quick tap on the version line. */
+  onDevUnlock: () => void = () => undefined;
+  private readonly taps = new TapUnlock(5, 1.5);
+
+  /**
+   * The version line at the bottom of Settings — and the hidden door to the developer menu.
+   *
+   * Five quick taps. It says nothing about being tappable, because for a player it is only a
+   * version number; the door is for the person testing on a phone with no URL bar to type
+   * `?debug=1` into. After the second tap it counts down, so the tester knows it is working.
+   */
+  private buildVersion(): void {
+    const row = el('div', {}, `Lentera Malam v${GAME_VERSION}`);
+    row.className = 'lm-note lm-version';
+    onTap(row, () => {
+      const now = typeof performance !== 'undefined' ? performance.now() / 1000 : Date.now() / 1000;
+      if (this.taps.tap(now)) {
+        row.textContent = `Lentera Malam v${GAME_VERSION}`;
+        this.onDevUnlock();
+        return;
+      }
+      const left = this.taps.remaining;
+      row.textContent = left <= 3 ? `Lentera Malam v${GAME_VERSION}  (${left} lagi)` : `Lentera Malam v${GAME_VERSION}`;
+    });
+    this.body.appendChild(row);
   }
 
   // ───────────────────────── building ─────────────────────────
