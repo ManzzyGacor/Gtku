@@ -26,6 +26,8 @@ import { Dialogue } from '../ui/Dialogue';
 import { Hud, type Projector } from '../ui/Hud';
 import { Minimap } from '../ui/Minimap';
 import { CharacterPanel } from '../ui/CharacterPanel';
+import { Portrait3D } from './Portrait3D';
+import { gearLook } from '../core/items/look';
 import { CutsceneOverlay } from '../ui/CutsceneOverlay';
 import { PauseMenu, type InfoLine } from '../ui/PauseMenu';
 import { BOW, BOW_SHOTS } from '../core/combat/weapons';
@@ -206,6 +208,8 @@ export class Game3D {
       },
       // no rummaging through the bag while dead — respawn first
       blocked: () => !this.hero.alive,
+      // built the first time the panel is actually opened, not at boot
+      portrait: () => (this.sheet?.isOpen ? this.ensurePortrait().canvas : null),
     });
     const dataSource = this.makeDataSource();
     this.downloads = new DownloadManager(dataSource);
@@ -566,10 +570,27 @@ export class Game3D {
    */
   applySheet(): void {
     this.applyHeroStats();
+    // gear shows on the hero, in the world and in the portrait
+    const look = gearLook(this.character.inventory.equipped);
+    this.heroMesh.setGear(look);
+    this.portrait?.setGear(look);
     this.announceElement();
     this.combat.character = this.character;
     this.heroMesh.setLanternRange(this.character.stats.lanternRange / 100);
     this.hud.setLevel(this.character.level, this.character.exp, this.character.expNeeded);
+  }
+
+  /** The Karakter panel's portrait, made on first use (see `Portrait3D` for what it costs). */
+  private portrait: Portrait3D | null = null;
+
+  private ensurePortrait(): Portrait3D {
+    if (!this.portrait) {
+      this.portrait = new Portrait3D(this.pixels.renderer);
+      this.portrait.setGear(gearLook(this.character.inventory.equipped));
+      this.portrait.setWeaponSlot(this.hero.slot, this.hero.loadout);
+      this.portrait.update(0, true);
+    }
+    return this.portrait;
   }
 
   /**
@@ -1168,6 +1189,10 @@ export class Game3D {
       this.updateAuto(dt);
     }
     this.heroMesh.update(simDt, dt, this.hero, this.clock);
+    if (this.portrait) {
+      this.portrait.setWeaponSlot(this.hero.slot, this.hero.loadout);
+      this.portrait.update(dt, this.sheet.showingCharacter);
+    }
     this.onWeaponState(
       WEAPONS[this.hero.loadout[this.hero.slot === 0 ? 1 : 0]].name.toUpperCase(),
       this.hero.charge,
@@ -1489,6 +1514,7 @@ export class Game3D {
     this.sky.dispose();
     this.environment.dispose();
     this.heroMesh.dispose();
+    this.portrait?.dispose();
     this.scene3d.dispose();
     this.pixels.dispose();
   }

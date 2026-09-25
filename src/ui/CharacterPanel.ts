@@ -54,6 +54,13 @@ const CSS = `
 .lm-col { flex: 1 1 0; min-width: 0; }
 .lm-h { color: #ffd98a; letter-spacing: 2px; margin: 0 0 5px; font-size: 11px; }
 
+/* the portrait: a live render of the hero model, scaled up with hard pixel edges */
+.lm-portrait { flex: 0 0 auto; width: 168px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 6px 6px 5px; border-radius: 6px; border: 1px solid rgba(255,217,138,0.45);
+  background: radial-gradient(90% 75% at 50% 38%, rgba(255,200,120,0.28), rgba(52,40,96,0.55) 55%, rgba(12,9,24,0.9)); }
+.lm-portrait-img { width: 156px; height: 193px; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+.lm-portrait-cap { font-size: 10.5px; color: #b9b0d8; letter-spacing: 1px; }
+
 /* equipment: two columns of slots */
 .lm-slots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
 .lm-slot { display: flex; align-items: center; gap: 6px; min-height: 46px; padding: 4px 6px;
@@ -165,6 +172,11 @@ export interface CharacterPanelHooks {
   use(def: ItemDef): void;
   /** True while the panel should refuse to open (dead, in a cutscene). */
   blocked?(): boolean;
+  /**
+   * The hero's portrait: a canvas the renderer keeps drawn (a live render of the hero model). The
+   * panel only places it; it never draws into it.
+   */
+  portrait?(): HTMLCanvasElement | null;
 }
 
 export class CharacterPanel {
@@ -302,7 +314,25 @@ export class CharacterPanel {
 
   // ───────────────────────── karakter ─────────────────────────
 
+  /** True while the Karakter tab is actually on screen — the only time the portrait animates. */
+  get showingCharacter(): boolean {
+    return this.open && this.tab === 'char';
+  }
+
   private renderCharacter(): void {
+    const canvas = this.hooks.portrait?.();
+    if (canvas) {
+      const frame = el('div');
+      frame.className = 'lm-portrait';
+      canvas.className = 'lm-portrait-img';
+      frame.appendChild(canvas);
+      const core = this.character.inventory.lanternCore();
+      const caption = el('div', {}, core?.def.element ? `Inti ${ELEMENTS[core.def.element].name}` : 'Tanpa Inti');
+      caption.className = 'lm-portrait-cap';
+      if (core?.def.element) caption.style.color = `#${ELEMENTS[core.def.element].color.toString(16).padStart(6, '0')}`;
+      frame.appendChild(caption);
+      this.body.appendChild(frame);
+    }
     const left = el('div');
     left.className = 'lm-col';
     left.appendChild(heading('PERLENGKAPAN'));

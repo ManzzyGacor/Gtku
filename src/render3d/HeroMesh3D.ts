@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { HERO_LOOK } from '../art/characters';
 import { P, shade } from '../art/palette';
 import { mix } from '../art/pixmap';
+import type { GearLook } from '../core/items/look';
 import { HeroCore, HERO_STATS } from '../core/entities/HeroCore';
 import { u } from './worldPlan';
 
@@ -71,6 +72,9 @@ interface Joint {
   mesh: THREE.Mesh;
 }
 
+/** Recolour one of the model's boxes (each has its own material, so this touches only that box). */
+const paint = (m: THREE.Mesh, c: number): void => void (m.material as THREE.MeshLambertMaterial).color.setHex(c);
+
 const flat = (color: number): THREE.MeshLambertMaterial => new THREE.MeshLambertMaterial({ color });
 
 export class HeroMesh3D {
@@ -96,6 +100,18 @@ export class HeroMesh3D {
   private nockHead!: THREE.Mesh;
   /** How far the string is drawn, eased (0..1). */
   private pull = 0;
+  // ── equipment that shows (setGear) ──
+  private readonly helmet = new THREE.Group();
+  private helmetGem!: THREE.Mesh;
+  private readonly pauldrons: THREE.Mesh[] = [];
+  private readonly mittens: THREE.Mesh[] = [];
+  private readonly boots: THREE.Mesh[] = [];
+  private readonly bootCuffs: THREE.Mesh[] = [];
+  private guard!: THREE.Mesh;
+  /** The lantern's colour: gold without a core, the core's element with one. */
+  private lanternColor = 0xffe066;
+  /** Last applied look, so an unchanged sheet does not repaint. */
+  gearKey = '';
   private slash!: THREE.Mesh;
   private slashMaterial!: THREE.MeshBasicMaterial;
   private slashGeometry!: THREE.PlaneGeometry;
@@ -163,8 +179,8 @@ export class HeroMesh3D {
     this.legL = this.joint(0.19, legLen, 0.22, L.pants, new THREE.Vector3(-0.13, hipY, 0));
     this.legR = this.joint(0.19, legLen, 0.22, L.pants, new THREE.Vector3(0.13, hipY, 0));
     for (const leg of [this.legL, this.legR]) {
-      this.box(0.22, 0.17, 0.3, L.boots, leg.pivot, -legLen + 0.085, 0.03);
-      this.box(0.23, 0.05, 0.31, shade(L.boots, 0.35), leg.pivot, -legLen + 0.17, 0.03);
+      this.boots.push(this.box(0.22, 0.17, 0.3, L.boots, leg.pivot, -legLen + 0.085, 0.03));
+      this.bootCuffs.push(this.box(0.23, 0.05, 0.31, shade(L.boots, 0.35), leg.pivot, -legLen + 0.17, 0.03));
     }
 
     // torso: a wide coat with a belt and a lit collar
@@ -173,6 +189,13 @@ export class HeroMesh3D {
     this.box(0.5, 0.05, 0.32, shade(L.tunic[2], 0.2), this.body, hipY + torsoH * 0.72);
     // strap across the chest, the way the reference slings its sword
     this.box(0.52, 0.07, 0.33, shade(L.boots, 0.1), this.body, hipY + torsoH * 0.5, 0.005);
+    // armour: a pair of pauldrons, only while something is worn in the body slot
+    for (const side of [-1, 1]) {
+      const pad = this.box(0.2, 0.12, 0.26, 0x8a93ad, this.body, shoulderY + 0.03);
+      pad.position.x = side * 0.31;
+      pad.visible = false;
+      this.pauldrons.push(pad);
+    }
     // scarf
     this.box(0.44, 0.12, 0.34, L.scarf![1], this.body, shoulderY + 0.02);
     this.box(0.44, 0.05, 0.34, shade(L.scarf![1], 0.3), this.body, shoulderY + 0.07);
@@ -190,6 +213,11 @@ export class HeroMesh3D {
     // hair: a cap plus spikes, which is the reference's silhouette
     this.box(headS * 1.06, headS * 0.42, headS * 0.98, L.hair[1], this.head, headY + headS * 0.32);
     this.box(headS * 1.04, headS * 0.3, headS * 0.5, L.hair[0], this.head, headY + headS * 0.1, -headS * 0.28);
+    // helmet: a steel circlet over the hair with a gem in the rarity's colour
+    this.head.add(this.helmet);
+    this.helmet.visible = false;
+    this.box(headS * 1.12, headS * 0.2, headS * 1.02, 0x9aa3bd, this.helmet, headY + headS * 0.3);
+    this.helmetGem = this.box(0.09, 0.09, 0.03, 0xffffff, this.helmet, headY + headS * 0.3, headS * 0.52, true);
     const spikes: [number, number, number, number][] = [
       [-0.17, 0.3, -0.04, 0.13],
       [0.0, 0.34, -0.02, 0.15],
@@ -225,13 +253,13 @@ export class HeroMesh3D {
     // arms: short and thick, chibi mittens rather than hands
     this.armL = this.joint(0.15, 0.34, 0.15, L.tunic[1], new THREE.Vector3(-0.3, shoulderY, 0));
     this.armR = this.joint(0.15, 0.34, 0.15, L.tunic[1], new THREE.Vector3(0.3, shoulderY, 0));
-    for (const arm of [this.armL, this.armR]) this.box(0.17, 0.14, 0.17, shade(L.boots, 0.15), arm.pivot, -0.34);
+    for (const arm of [this.armL, this.armR]) this.mittens.push(this.box(0.17, 0.14, 0.17, shade(L.boots, 0.15), arm.pivot, -0.34));
 
     // sword in the right hand: a long steel blade with a wrapped grip and a gold guard
     this.armR.pivot.add(this.sword);
     this.box(0.07, 0.86, 0.13, 0xbcc4dc, this.sword, -0.34 - 0.48);
     this.box(0.03, 0.86, 0.05, P.white, this.sword, -0.34 - 0.48, 0.05);
-    this.box(0.2, 0.07, 0.16, P.y3, this.sword, -0.34 - 0.06);
+    this.guard = this.box(0.2, 0.07, 0.16, P.y3, this.sword, -0.34 - 0.06);
     this.box(0.08, 0.16, 0.1, P.o0, this.sword, -0.34 + 0.04);
 
     /*
@@ -369,7 +397,29 @@ export class HeroMesh3D {
     // the lamp always burns, with a small flicker
     const flicker = 0.9 + Math.sin(time * 9) * 0.06 + Math.sin(time * 23) * 0.04;
     this.lantern.intensity = core.alive ? 2.4 * flicker : 0;
-    (this.lanternBox.material as THREE.MeshBasicMaterial).color.setHex(core.state === 'cast' ? 0xfff6b0 : 0xffe066);
+    (this.lanternBox.material as THREE.MeshBasicMaterial).color.setHex(core.state === 'cast' ? 0xfff6b0 : this.lanternColor);
+  }
+
+  /**
+   * Paint the equipped gear onto the model (`core/items/look.ts`). Cheap — a handful of colour
+   * writes and visibility flags — and skipped entirely when nothing changed.
+   */
+  setGear(look: GearLook): void {
+    if (look.key === this.gearKey) return;
+    this.gearKey = look.key;
+    const L = HERO_LOOK;
+    this.helmet.visible = look.helmet !== null;
+    if (look.helmet !== null) paint(this.helmetGem, look.helmet);
+    for (const pad of this.pauldrons) {
+      pad.visible = look.armor !== null;
+      if (look.armor !== null) paint(pad, mix(0x8a93ad, look.armor, 0.45));
+    }
+    for (const m of this.mittens) paint(m, look.gloves !== null ? mix(shade(L.boots, 0.15), look.gloves, 0.55) : shade(L.boots, 0.15));
+    for (const m of this.boots) paint(m, look.boots !== null ? mix(L.boots, look.boots, 0.45) : L.boots);
+    for (const m of this.bootCuffs) paint(m, look.boots !== null ? look.boots : shade(L.boots, 0.35));
+    paint(this.guard, look.weapon ?? P.y3);
+    this.lanternColor = look.core !== null ? mix(0xffe066, look.core, 0.55) : 0xffe066;
+    this.lantern.color.setHex(look.core !== null ? mix(0xffd9a0, look.core, 0.35) : 0xffd9a0);
   }
 
   /** Exponential approach, so the rate is frame-rate independent. */

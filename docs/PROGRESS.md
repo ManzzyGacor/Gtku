@@ -1081,3 +1081,22 @@ Yang ditambahkan:
   Combat**.
 
 Tes: `tests/arrows.test.ts` (10) dan dua tambahan di `tests/combat3d.test.ts`.
+
+## Avatar hero di panel Karakter + perlengkapan yang terlihat
+
+- **Avatar 3D langsung** (`render3d/Portrait3D.ts`): model hero yang sama, di scene kecil sendiri
+  dengan framing setengah badan, cahaya kunci hangat, rim biru, lentera hero sendiri, dan latar
+  gradien. Dirender 84x104 lalu diperbesar tanpa haluskan (pixelated) supaya cocok dengan gaya game.
+  Bernapas (animasi idle), memegang senjata yang sedang aktif (pedang atau busur).
+- **Biaya:** dibuat hanya saat panel pertama kali dibuka; hanya merender saat tab Karakter tampil,
+  10 fps; ukuran baca-balik 35 KB. Di luar panel tidak ada biaya. Saat perlengkapan berganti, satu
+  frame digambar walaupun panel tertutup, supaya sudah benar saat dibuka lagi. Kalau driver menolak
+  baca-balik, potret berhenti di gambar terakhir (tidak crash).
+- **Perlengkapan kini terlihat di hero** (di dunia dan di avatar) — sebelumnya model hero sama
+  saja apa pun yang dipakai: helm = lingkar besi dengan permata warna rarity; badan = pelindung
+  bahu; sarung tangan & sepatu diwarnai rarity; pelindung gagang pedang warna rarity senjata;
+  lentera bercahaya warna elemen Inti Lentera. `core/items/look.ts` (murni) memetakan slot →
+  warna.
+- Tes: `tests/portrait.test.ts` (3) — warna dari rarity, helm/pelindung bahu muncul/hilang, potret
+  masuk ke panel, 10 gambar/dtk saat tampil, nol saat tertutup, satu gambar saat gear berganti.
+  (Piksel sungguhan hanya bisa dicek di HP: stub GL tidak bisa mengompilasi shader.)
