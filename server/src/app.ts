@@ -40,6 +40,7 @@ import { DuplicateError, type CharacterDoc, type Repos, type UserDoc } from './r
 import { checkProgression, checkSaveIntegrity } from '../../shared/saveRules';
 import { isGrant, parseDevAction } from '../../shared/devActions';
 import { applyGrant } from './devGrants';
+import { registerCoop } from './coop/ws';
 
 export const REFRESH_COOKIE = 'lm_refresh';
 /** How long after a rotation the old refresh token is still accepted (two tabs refreshing at once). */
@@ -60,6 +61,9 @@ export interface AppDeps {
   now?: (() => number) | undefined;
   /** Pino logging; off in tests. */
   logger?: boolean | undefined;
+  /** Co-op rooms over WebSocket (on unless a test turns them off). */
+  coop?: boolean | undefined;
+  coopSeed?: number | undefined;
 }
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
@@ -179,26 +183,26 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const authResponse = async (u: UserDoc, sid: string): Promise<AuthResponse> => ({ accessToken: await issueAccess(u, sid), expiresIn: config.accessTtl, user: publicUser(u) });
 
   /** The account behind a Bearer access token, or null (and a 401 already sent). */
-  const requireUser = async (req: FastifyRequest, reply: FastifyReply): Promise<UserDoc | null> => {
-    const h = req.headers.authorization;
-    if (!h || !h.startsWith('Bearer ')) {
-      fail(reply, 401, 'unauthorized');
-      return null;
-    }
+  /** The account behind an access token — signature, expiry, and a still-live login — or why not. */
+  const verifyToken = async (token: string): Promise<UserDoc | 'expired' | null> => {
     try {
-      const { payload } = await jwtVerify(h.slice(7), config.jwtSecret, { issuer: 'lentera-malam', algorithms: ['HS256'], currentDate: new Date(now()) });
+      const { payload } = await jwtVerify(token, config.jwtSecret, { issuer: 'lentera-malam', algorithms: ['HS256'], currentDate: new Date(now()) });
       const u = typeof payload.sub === 'string' ? await repos.users.byId(payload.sub) : null;
       // the login this token came from must still be alive (logout, theft revocation)
       const live = u && typeof payload.sid === 'string' ? await repos.sessions.familyActive(payload.sid, new Date(now())) : false;
-      if (!u || !live) {
-        fail(reply, 401, 'unauthorized');
-        return null;
-      }
-      return u;
+      return u && live ? u : null;
     } catch (e) {
-      fail(reply, 401, (e as { code?: string }).code === 'ERR_JWT_EXPIRED' ? 'token_expired' : 'unauthorized');
-      return null;
+      return (e as { code?: string }).code === 'ERR_JWT_EXPIRED' ? 'expired' : null;
     }
+  };
+
+  /** The account behind a Bearer access token, or null (and a 401 already sent). */
+  const requireUser = async (req: FastifyRequest, reply: FastifyReply): Promise<UserDoc | null> => {
+    const h = req.headers.authorization;
+    const u = h && h.startsWith('Bearer ') ? await verifyToken(h.slice(7)) : null;
+    if (u && u !== 'expired') return u;
+    fail(reply, 401, u === 'expired' ? 'token_expired' : 'unauthorized');
+    return null;
   };
 
   /**
@@ -426,6 +430,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return { rev: next.rev, updatedAt: at.getTime() };
     },
   );
+
+  // ───────────────────────── co-op ─────────────────────────
+
+  if (deps.coop !== false) await registerCoop(app, { repos, now, corsOrigin: config.corsOrigin, verifyToken, clientIp, seed: deps.coopSeed });
 
   // ───────────────────────── developer ─────────────────────────
 
