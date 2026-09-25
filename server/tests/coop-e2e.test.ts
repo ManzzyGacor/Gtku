@@ -17,6 +17,7 @@ let app: Awaited<ReturnType<typeof buildApp>>;
 let repos: Repos;
 let url = '';
 const sockets: WebSocket[] = [];
+const clients: CoopClient[] = [];
 
 beforeEach(async () => {
   repos = memoryRepos();
@@ -25,6 +26,9 @@ beforeEach(async () => {
   url = `ws://127.0.0.1:${(app.server.address() as { port: number }).port}/ws`;
 });
 afterEach(async () => {
+  // stop the clients first, or they keep reconnecting to a server that is gone
+  for (const c of clients) c.leave();
+  clients.length = 0;
   for (const s of sockets) s.terminate();
   sockets.length = 0;
   await app.close();
@@ -48,7 +52,7 @@ async function account(name: string, level = 6): Promise<string> {
 }
 
 function client(token: string): CoopClient {
-  return new CoopClient({
+  const c = new CoopClient({
     url,
     makeSocket: (u) => {
       const ws = new WebSocket(u, { origin: 'https://game.varesa.mom' });
@@ -60,6 +64,8 @@ function client(token: string): CoopClient {
     now: () => performance.now() / 1000,
     later: (fn, ms) => void setTimeout(fn, ms),
   });
+  clients.push(c);
+  return c;
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

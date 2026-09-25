@@ -176,6 +176,9 @@ export class CoopClient {
       });
     });
     ws.addEventListener('message', (ev) => this.receive(String(ev.data)));
+    // a failed connect is followed by 'close', which is where the retry happens; this only keeps
+    // the error from being reported as unhandled
+    ws.addEventListener('error', () => undefined);
     ws.addEventListener('close', () => {
       // only the socket in use counts: an old one closing late must not trigger a reconnect
       if (this.socket === ws) this.dropped();
