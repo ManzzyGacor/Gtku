@@ -12,7 +12,7 @@ g.localStorage = {
 
 const { SettingsStore, parseUrlOverrides, quantize, DEFAULTS } = await import('../src/core/settings');
 const { PerfMeter } = await import('../src/core/perf');
-const { AdaptiveQuality, suggestPreset, lowerPreset, higherPreset, PROFILES, FPS_FLOOR, FPS_CEIL, QUALITY_LADDER, rungIndexOf } = await import('../src/core/graphics');
+const { suggestPreset, lowerPreset, higherPreset, PROFILES } = await import('../src/core/graphics');
 const { SETTINGS_KEY } = await import('../src/config');
 
 test('URL overrides are parsed and lock their keys', () => {
@@ -74,96 +74,7 @@ test('the FPS meter reports a smoothed average and the worst half-second', () =>
   assert.ok(m.low > 1);
 });
 
-test('AUTO walks a ladder of preset + render scale, and settles instead of flapping', () => {
-  const m = new PerfMeter();
-  const q = new AdaptiveQuality(m);
-  const changes: string[] = [];
-  let rung: { preset: string; renderScale: number } = { preset: 'ultra', renderScale: 1 };
-  q.onChange = (to, why) => {
-    changes.push(`${why}:${to.preset}@${to.renderScale}`);
-    rung = to;
-  };
-  const run = (fps: number, seconds: number): void => {
-    for (let i = 0; i < Math.round(fps * seconds); i++) {
-      m.push(1 / fps);
-      q.update(1 / fps, rung.preset as never, rung.renderScale);
-    }
-  };
-
-  run(60, 6);
-  assert.equal(changes.length, 0, 'a healthy phone is left alone');
-
-  // A bad frame rate steps down the ladder one rung at a time, and the *first* step is the cheap
-  // one (render scale) rather than a whole preset — that is the point of the interleaved ladder.
-  run(25, 12);
-  assert.equal(changes.length, 1, `one step, then a cooldown (got ${changes.join(', ')})`);
-  assert.equal(changes[0], 'drop:ultra@0.85');
-
-  run(25, 60);
-  assert.ok(changes.length >= 4, `still bad: keeps stepping down (${changes.join(', ')})`);
-  const presets = changes.map((c) => c.split(':')[1].split('@')[0]);
-  assert.ok(presets.includes('high'), 'and eventually drops the preset too');
-  for (const c of changes) assert.ok(c.startsWith('drop:'), 'never raises while the frame rate is bad');
-
-  // The ladder has a bottom, and the watchdog stops there instead of spinning.
-  run(25, 300);
-  const atBottom = changes[changes.length - 1];
-  assert.equal(atBottom, `drop:${QUALITY_LADDER[QUALITY_LADDER.length - 1].preset}@${QUALITY_LADDER[QUALITY_LADDER.length - 1].renderScale}`);
-  assert.ok(FPS_FLOOR >= 45 && FPS_CEIL > FPS_FLOOR);
-});
-
-test('AUTO climbs back up when the phone proves it can cope, cheapest change first', () => {
-  const m = new PerfMeter();
-  const q = new AdaptiveQuality(m);
-  const changes: string[] = [];
-  let rung = { preset: 'low', renderScale: 1 } as { preset: string; renderScale: number };
-  q.onChange = (to) => {
-    changes.push(`${to.preset}@${to.renderScale}`);
-    rung = to;
-  };
-  const run = (fps: number, seconds: number): void => {
-    for (let i = 0; i < Math.round(fps * seconds); i++) {
-      m.push(1 / fps);
-      q.update(1 / fps, rung.preset as never, rung.renderScale);
-    }
-  };
-  run(60, 4);
-  assert.equal(changes.length, 0, 'a raise has to be earned over several seconds');
-  run(60, 20);
-  assert.deepEqual(changes, ['medium@0.8'], 'one rung up');
-  run(52, 60);
-  assert.deepEqual(changes, ['medium@0.8'], '52 fps is fine but not good enough to climb further');
-});
-
-test('the quality ladder is ordered and every rung is reachable from its own values', () => {
-  assert.ok(QUALITY_LADDER.length >= 8);
-  const order = ['ultra', 'high', 'medium', 'low', 'vlow'];
-  let lastPreset = -1;
-  for (const r of QUALITY_LADDER) {
-    const idx = order.indexOf(r.preset);
-    assert.ok(idx >= lastPreset, `ladder must never climb back up: ${r.preset}`);
-    lastPreset = idx;
-    assert.ok(r.renderScale > 0.5 && r.renderScale <= 1);
-  }
-  QUALITY_LADDER.forEach((r, i) => {
-    assert.equal(rungIndexOf(r.preset, r.renderScale), i, `rung ${i} must find itself`);
-  });
-  // an off-ladder combination still resolves to the nearest rung of the same preset
-  assert.equal(QUALITY_LADDER[rungIndexOf('high', 0.93)].preset, 'high');
-});
-
-test('a pinned preset is never touched by the watchdog', () => {
-  const m = new PerfMeter();
-  const q = new AdaptiveQuality(m);
-  q.auto = false;
-  let changed = false;
-  q.onChange = () => (changed = true);
-  for (let i = 0; i < 30 * 40; i++) {
-    m.push(1 / 20);
-    q.update(1 / 20, 'ultra', 1);
-  }
-  assert.equal(changed, false);
-});
+// The per-component AUTO that replaced the whole-preset ladder is tested in tests/autotune.test.ts.
 
 test('preset suggestion follows the device, and never picks ultra by itself', () => {
   const base = { screenW: 2340, screenH: 1080, dpr: 3, touch: true, ua: '' };

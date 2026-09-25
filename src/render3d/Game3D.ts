@@ -7,7 +7,10 @@
  * of the game — it is a second *view* of it.
  */
 import { buildTileSheet } from '../art/tiles';
-import { AdaptiveQuality, probeDevice, profileOf, suggestPreset } from '../core/graphics';
+import { higherPreset, lowerPreset, probeDevice, profileOf, suggestPreset, PROFILES } from '../core/graphics';
+import { AUTO_PATH, AutoTuner, COMPONENT_LABEL, FULL, type ComponentId } from '../core/autotune';
+
+const AUTO_STEPS = AUTO_PATH.length;
 import { input } from '../core/input';
 import { PerfMeter } from '../core/perf';
 import { settings } from '../core/settings';
@@ -91,7 +94,10 @@ export class Game3D {
   /** Level, EXP, bag, equipment and the resolved stats every hit is calculated from (Batch 4). */
   readonly character = new Character();
 
-  private adaptive = new AdaptiveQuality(this.perf);
+  /** AUTO, per component (see core/autotune.ts). */
+  readonly autoTuner = new AutoTuner(this.perf);
+  /** Set while AUTO itself is changing the preset, so that change does not reset AUTO's dials. */
+  private autoMovingPreset = false;
   private tileSheet = buildTileSheet();
   private raf = 0;
   private lastFrame = 0;
@@ -312,14 +318,19 @@ export class Game3D {
     if (settings.firstRun && settings.get('presetAuto') && !settings.isLocked('preset')) {
       settings.set('preset', suggestPreset(probeDevice()));
     }
-    this.adaptive.auto = settings.get('presetAuto') && !settings.isLocked('preset');
-    this.adaptive.onChange = (rung) => {
-      settings.set('preset', rung.preset);
-      settings.set('renderScale', rung.renderScale);
-    };
+    this.autoTuner.auto = settings.get('presetAuto') && !settings.isLocked('preset');
     this.unsubscribe = settings.on((key) => {
-      if (key === 'presetAuto') this.adaptive.auto = settings.get('presetAuto') && !settings.isLocked('preset');
-      if (key === 'preset' || key === 'renderScale') this.applyProfile();
+      if (key === 'presetAuto') {
+        this.autoTuner.auto = settings.get('presetAuto') && !settings.isLocked('preset');
+        // switching AUTO off gives every dial back to the preset
+        if (!this.autoTuner.auto) this.autoTuner.reset();
+        this.applyProfile();
+      }
+      if (key === 'preset' || key === 'renderScale') {
+        // a preset the *player* picked starts from full dials; one AUTO picked keeps AUTO's
+        if (key === 'preset' && !this.autoMovingPreset) this.autoTuner.reset();
+        this.applyProfile();
+      }
     });
 
     // Now that the HUD, the combat and the meshes exist, push the whole character sheet through.
@@ -351,28 +362,79 @@ export class Game3D {
       window.innerHeight,
       window.devicePixelRatio || 1,
       p.pixelHeight,
-      p.renderScale * settings.get('renderScale'),
+      p.renderScale * settings.get('renderScale') * (this.autoTuner.auto ? this.autoTuner.levels.resolution : 1),
     );
     this.camera.setAspect(plan.pixelW / plan.pixelH);
   }
 
+  /**
+   * Apply the preset, then let AUTO's dials pull individual components *below* it.
+   *
+   * Every component is `min(what the preset allows, what AUTO allows)`: AUTO can only ever take away
+   * from the preset the player sees in Settings, never add to it.
+   */
   private applyProfile(): void {
     const p = profileOf(settings.get('preset'));
-    this.pixels.setOutline(p.outline);
-    this.scene3d.setLightBudget(LIGHT_BUDGET[p.id] ?? 2);
+    const a = this.autoTuner.auto ? this.autoTuner.levels : FULL;
+    this.pixels.setOutline(p.outline && a.outline > 0);
+    this.scene3d.setLightBudget(Math.min(LIGHT_BUDGET[p.id] ?? 2, a.lights));
     // The bottom preset stands still: swaying every blade costs vertex work.
-    this.scene3d.setWind(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.6 : 1);
-    this.scene3d.setWater(p.id !== 'vlow');
-    this.bloomScale = p.id === 'vlow' ? 0 : p.id === 'low' ? 0.6 : 1;
+    this.scene3d.setWind(Math.min(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.6 : 1, a.wind));
+    this.scene3d.setWater(p.id !== 'vlow' && a.water > 0);
+    this.bloomScale = Math.min(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.6 : 1, a.bloom);
     // Baked pools are almost free, so even the bottom preset keeps them — they are what makes
     // the village look lit at night.
     this.scene3d.setLightPools(p.id === 'vlow' ? 1.2 : 1.6);
-    this.scene3d.setGroundDetail(p.id === 'vlow' ? 0 : 1);
+    this.scene3d.setGroundDetail(p.id === 'vlow' ? 0 : a.detail);
     this.scene3d.setRim(p.id === 'vlow' ? 0.4 : 1);
-    this.environment.setBudget(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.5 : 1);
+    this.environment.setBudget(Math.min(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.5 : 1, a.particles));
     this.scene3d.setShadows(p.shadows);
     this.resize();
     this.scene3d.setRenderDistance(this.chunkRadius());
+  }
+
+  /**
+   * The AUTO section of "Salin laporan": which dials are below the preset right now, and the last
+   * decisions with the frame rate that caused each one. Written for a tester reading it on a phone:
+   * "why does it look worse than an hour ago" should be answerable from these lines alone.
+   */
+  private autoReport(): string[] {
+    const t = this.autoTuner;
+    const lines = [
+      `AUTO: ${t.auto ? 'nyala' : 'mati (preset dikunci pemain)'}   langkah ${t.rung}/${AUTO_STEPS}   preset ${PROFILES[settings.get('preset')].name}`,
+    ];
+    if (t.auto) {
+      const lvl = t.levels;
+      const lowered = (Object.keys(FULL) as ComponentId[]).filter((c) => lvl[c] !== FULL[c]);
+      lines.push(`  diturunkan: ${lowered.length ? lowered.map((c) => `${COMPONENT_LABEL[c]} ${lvl[c]}`).join(', ') : 'tidak ada (semua sesuai preset)'}`);
+    }
+    if (t.decisions.length) {
+      lines.push('  keputusan terakhir (detik sejak mulai, arah, apa, fps rata-rata/terendah):');
+      for (const d of [...t.decisions].reverse()) {
+        lines.push(`   ${String(d.at).padStart(5)}s  ${d.dir === 'drop' ? 'TURUN' : 'NAIK '}  ${d.what}   (${d.fps}/${d.low} fps)`);
+      }
+    } else {
+      lines.push('  belum ada keputusan');
+    }
+    return lines;
+  }
+
+  /** One frame of AUTO: turn a dial, or — with every dial down — move the preset. */
+  private updateAuto(dt: number): void {
+    const preset = settings.get('preset');
+    const result = this.autoTuner.update(dt, lowerPreset(preset) !== null, higherPreset(preset) !== null, PROFILES[preset].name);
+    if (!result) return;
+    if (result.preset) {
+      const next = result.preset === 'drop' ? lowerPreset(preset) : higherPreset(preset);
+      if (next) {
+        this.autoMovingPreset = true;
+        settings.set('preset', next);
+        this.autoMovingPreset = false;
+      }
+    }
+    this.applyProfile();
+    const last = this.autoTuner.decisions[this.autoTuner.decisions.length - 1];
+    if (last) this.hud.toast(`AUTO: ${last.what}`, 1.6);
   }
 
   /**
@@ -381,7 +443,9 @@ export class Game3D {
    * on a weak phone cannot ask for a hundred ground textures at once.
    */
   private chunkRadius(): number {
-    return Math.max(1, profileOf(settings.get('preset')).chunkMargin + 1);
+    // AUTO's "jarak pandang" dial drops the preset's extra margin, never the visible chunks themselves
+    const margin = this.autoTuner.auto && this.autoTuner.levels.distance === 0 ? 0 : profileOf(settings.get('preset')).chunkMargin;
+    return Math.max(1, margin + 1);
   }
 
   // ───────────────────────── loop ─────────────────────────
@@ -987,7 +1051,7 @@ export class Game3D {
       this.camera.follow(u(this.hero.x), u(this.hero.y), dt);
       this.camera.tick(dt);
       this.perf.push(dt);
-      this.adaptive.update(dt, settings.get('preset'), settings.get('renderScale'));
+      this.updateAuto(dt);
     }
     this.heroMesh.update(simDt, dt, this.hero, this.clock);
     this.onWeaponState(
@@ -1270,6 +1334,7 @@ export class Game3D {
       `kamera: sudut ${this.camera.pitch}\u00b0  zoom ${this.camera.zoom.toFixed(2)}x  ` +
         `target (${this.camera.target.x.toFixed(1)}, ${this.camera.target.z.toFixed(1)})  radius pandang ${this.camera.viewRadius.toFixed(1)} unit`,
       `kabut: ${this.sky.fog.near.toFixed(0)} - ${this.sky.fog.far.toFixed(0)} (gua ${(this.caveWeight() * 100).toFixed(0)}%)`,
+      ...this.autoReport(),
       ...(probe.length ? ['', '[UJI PERFORMA] (baseline = setelanmu sendiri, satu fitur dimatikan per baris)', ...probe] : []),
     ];
   }
