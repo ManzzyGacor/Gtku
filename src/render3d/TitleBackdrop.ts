@@ -15,7 +15,8 @@ import { profileOf } from '../core/graphics';
 import { settings } from '../core/settings';
 import { GeneratedWorld } from '../core/world/worldgen';
 import { Environment } from './Environment';
-import { IsoCamera } from './IsoCamera';
+import { CAMERA_DISTANCE, IsoCamera } from './IsoCamera';
+import { fogDistances, WEATHER, type WeatherLook } from '../core/systems/weather';
 import { PixelRenderer } from './PixelRenderer';
 import { Sky } from './Sky';
 import { World3D } from './World3D';
@@ -26,7 +27,8 @@ const NIGHT = 0.93;
 /** How far the camera drifts from the lantern, px, and how slowly (radians per second). */
 const DRIFT = { x: 56, y: 30, sx: 0.045, sy: 0.031 };
 /** Thicker fog than the game uses, pulled in: the title is about atmosphere, not reading the map. */
-const FOG_SCALE = 0.62;
+const TITLE_FOG: WeatherLook = { ...WEATHER.berkabut, fogNear: -0.2, fogFar: 0.8 };
+const fogOut: [number, number] = [0, 0];
 
 export class TitleBackdrop {
   private readonly pixels: PixelRenderer;
@@ -88,8 +90,8 @@ export class TitleBackdrop {
     this.camera.tick(dt);
 
     const night = nightAmount(NIGHT);
-    const [near, far] = this.camera.fogRange();
-    this.sky.update(NIGHT, 0, near * FOG_SCALE, far * FOG_SCALE, night, this.time);
+    const [near, far] = fogDistances(CAMERA_DISTANCE, this.camera.viewRadius, Infinity, TITLE_FOG, night, 0, fogOut);
+    this.sky.update(NIGHT, 0, near, far, night, this.time);
     this.pixels.renderer.setClearColor(this.sky.haze, 1);
     const g = gradeAt(NIGHT, 0);
     this.pixels.setGrade({

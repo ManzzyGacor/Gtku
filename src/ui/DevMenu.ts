@@ -91,6 +91,7 @@ export interface DevActions {
   setTime(which: 'pagi' | 'siang' | 'sore' | 'malam'): Reply;
   weathers(): DevOption[];
   weather(): string;
+  /** A weather id, or 'petir' for one lightning strike now. */
   setWeather(id: string): Reply;
   /** World events: every one by id, which is running, and start / end. */
   worldEvents(): DevOption[];
@@ -380,7 +381,8 @@ export class DevMenu {
           b.classList.toggle('on', w.id === now);
           return b;
         })));
-        this.main.appendChild(this.note('Cuaca juga berubah sendiri saat event Badai, Kabut, atau Purnama berjalan.'));
+        this.main.appendChild(this.row(this.btn('Petir sekarang', () => a.setWeather('petir'))));
+        this.main.appendChild(this.note('Hujan membuat genangan yang terisi ± 25 dtk dan mengering ± 60 dtk setelah reda. Badai: petir tiap ± 9 dtk. Angka kabut & hujan ada di Salin laporan. Cuaca juga berubah sendiri saat event Badai, Kabut, atau Purnama berjalan.'));
         this.main.appendChild(this.h('EVENT DUNIA'));
         const running = a.activeEvent();
         this.main.appendChild(this.row(...a.worldEvents().map((w) => {

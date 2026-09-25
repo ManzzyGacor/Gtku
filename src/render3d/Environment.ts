@@ -114,16 +114,23 @@ uniform sampler2D tNoise;
 uniform float uTime;
 uniform float uOpacity;
 uniform vec3 uColor;
+uniform vec2 uCenter;
 varying vec2 vWorldXz;
 void main() {
+  // thin around the hero, thick further out: the mist has depth instead of lying on the lens
+  float clear = mix(0.3, 1.0, smoothstep(2.5, 12.0, distance(vWorldXz, uCenter)));
+  // and it fades before the plane's edge, so the square never shows
+  float edge = 1.0 - smoothstep(34.0, 44.0, distance(vWorldXz, uCenter));
   // two layers drifting at different speeds: the fog churns instead of sliding
   float a = texture2D(tNoise, vWorldXz * 0.02 + vec2(uTime * 0.004, uTime * 0.0021)).a;
   float b = texture2D(tNoise, vWorldXz * 0.037 - vec2(uTime * 0.0027, uTime * 0.0045)).a;
   float m = a * 0.6 + b * 0.4;
-  float alpha = smoothstep(0.35, 0.95, m) * uOpacity;
+  float alpha = smoothstep(0.35, 0.95, m) * uOpacity * clear * edge;
   if (alpha < 0.01) discard;
   gl_FragColor = vec4(uColor, alpha);
 }`;
+
+const WHITE = new THREE.Color(0xffffff);
 
 export class Environment {
   private flies: THREE.InstancedMesh;
@@ -192,6 +199,7 @@ export class Environment {
         uTime: { value: 0 },
         uOpacity: { value: 0 },
         uColor: { value: new THREE.Color(0xd8d0e8) },
+        uCenter: { value: new THREE.Vector2() },
       },
     });
     this.fog = new THREE.Mesh(this.fogGeometry, this.fogMaterial);
@@ -268,8 +276,9 @@ export class Environment {
    * @param cave    0..1 how deep underground
    * @param forest  0..1 how deep into the forest
    * @param haze    the current fog colour, so the mist matches the sky
+   * @param mist    extra ground mist from the weather, 0..1
    */
-  update(realDt: number, focus: THREE.Vector3, night: number, cave: number, forest: number, haze: THREE.Color): void {
+  update(realDt: number, focus: THREE.Vector3, night: number, cave: number, forest: number, haze: THREE.Color, mist = 0): void {
     this.clock += realDt;
     this.flyMaterial.uniforms.uTime.value = this.clock;
     this.fogMaterial.uniforms.uTime.value = this.clock;
@@ -285,12 +294,14 @@ export class Environment {
 
     // Fog: thickest underground, then in the forest at night, and a thin veil at dawn.
     const dawn = Math.max(0, 1 - Math.abs(night - 0.55) * 4);
-    const fogAmount = Math.min(1, cave * 0.8 + forest * night * 0.6 + dawn * 0.3) * this.budget;
+    // (the weather's mist stays even on the lowest budget: it is the weather, not decoration)
+    const fogAmount = Math.min(1, (cave * 0.8 + forest * night * 0.6 + dawn * 0.3) * this.budget + mist * Math.max(0.5, this.budget));
     this.fog.visible = fogAmount > 0.02;
     if (this.fog.visible) {
       this.fog.position.set(Math.round(focus.x), 0.35 + cave * 0.15, Math.round(focus.z));
       this.fogMaterial.uniforms.uOpacity.value = fogAmount * 0.5;
-      (this.fogMaterial.uniforms.uColor.value as THREE.Color).copy(haze).lerp(new THREE.Color(0xffffff), 0.25);
+      (this.fogMaterial.uniforms.uCenter.value as THREE.Vector2).set(focus.x, focus.z);
+      (this.fogMaterial.uniforms.uColor.value as THREE.Color).copy(haze).lerp(WHITE, 0.25);
     }
   }
 

@@ -158,7 +158,12 @@ export function buildDevActions(game: Game3D, server: DevServer, reload: () => v
     weathers: () => WEATHER_IDS.map((id) => ({ id, label: WEATHER[id].label })),
     weather: () => game.currentWeather,
     setWeather: (id) =>
-      id in WEATHER
+      id === 'petir'
+        ? tool({ type: 'weather', to: id }, () => {
+            game.strikeLightning();
+            return 'Petir menyambar.';
+          })
+        : id in WEATHER
         ? tool({ type: 'weather', to: id }, () => {
             game.setWeather(id as Weather);
             return `Cuaca: ${WEATHER[id as Weather].label}.`;

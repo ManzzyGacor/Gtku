@@ -88,6 +88,31 @@ export const BEDS: Record<string, BedDef> = {
     events: [{ every: 11, jitter: 0.7, kind: 'rumble', gain: 0.07 }],
   },
 
+  /** Rain on the world: a steady hiss with a softer patter under it, no thunder. */
+  rain: {
+    id: 'rain',
+    name: 'Hujan',
+    layers: [
+      { freq: 2600, q: 0.3, gain: 0.05 },
+      { freq: 650, q: 0.5, gain: 0.02, sweep: 150, sweepRate: 0.3 },
+    ],
+    // drops off the eaves and leaves
+    events: [{ every: 0.9, jitter: 0.8, kind: 'drip', hz: [900, 1600], gain: 0.018 }],
+  },
+
+  /** A storm's downpour. The thunder is not here: it follows each lightning flash (Game3D). */
+  'rain-heavy': {
+    id: 'rain-heavy',
+    name: 'Hujan Deras',
+    layers: [
+      { freq: 3000, q: 0.25, gain: 0.08 },
+      { freq: 800, q: 0.4, gain: 0.035, sweep: 250, sweepRate: 0.45 },
+      { freq: 160, q: 0.6, gain: 0.03, sweep: 60, sweepRate: 0.15 },
+    ],
+    // the wind throws the rain in gusts
+    events: [{ every: 5, jitter: 0.6, kind: 'gust', gain: 0.05 }],
+  },
+
   /** The same storm, heard from inside or from further away. */
   'storm-far': {
     id: 'storm-far',

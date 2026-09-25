@@ -107,7 +107,7 @@ export class Sky {
   /**
    * @param dayTime  day fraction (0 = midnight)
    * @param cave     0..1 how deep inside the cave the camera is
-   * @param near     where fog starts, in world units
+   * @param near     where fog starts, distance from the camera (see `fogDistances`)
    * @param far      where fog reaches the backdrop colour — keep this inside the streamed radius
    */
   update(dayTime: number, cave: number, near: number, far: number, night = 0, clock = 0): void {
@@ -121,14 +121,9 @@ export class Sky {
     // Stars fade in with the night and are invisible underground.
     this.material.uniforms.uStars.value = Math.max(0, (night - 0.35) / 0.65) * (1 - cave);
     this.material.uniforms.uTime.value = clock;
-    /*
-     * Inside the cave the fog closes in — you should never see the whole cavern at once. Outdoors
-     * it is deliberately gentle in daylight (a washed-out world was the complaint) and stronger at
-     * night, where it hides the streamed edge behind darkness rather than behind grey.
-     */
-    const reach = 1 + (1 - night) * 0.45;
-    this.fog.near = near * reach * (1 - cave * 0.55);
-    this.fog.far = far * reach * (1 - cave * 0.5);
+    // final distances, already shaped by weather, night and cave (core/systems/weather fogDistances)
+    this.fog.near = near;
+    this.fog.far = far;
   }
 
   dispose(): void {

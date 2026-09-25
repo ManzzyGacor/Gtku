@@ -1384,3 +1384,31 @@ Tes: `tests/cavelight.test.ts` (4).
   preset (Sangat Rendah 35% … Ultra 130%) dan dial partikel AUTO, tapi tidak pernah nol.
 
 Tes: `tests/weaponstyle.test.ts` (5).
+
+## Cuaca diperbaiki: penyebab layar abu-abu, hujan sungguhan, badai, kabut berlapis
+
+**Penyebab "cuaca cuma abu-abu":** kabut jarak Three diukur dari kamera, dan kamera ortografik berdiri
+70 unit dari hero. Kode lama mengalikan **seluruh** jarak kabut dengan faktor cuaca (kabut ×0,45,
+hujan ×0,7, badai ×0,5), jadi batas "kabut penuh" jatuh **di depan hero** — setiap piksel di sekitar
+hero tergambar warna kabut. Diukur (`tests/weather.test.ts`): kabut di hero **100%** pada kabut & badai
+kapan pun, hujan di malam hari, **dan di gua dalam walau cuaca cerah** (pengali gua ×0,5 dengan
+kesalahan yang sama) — itu sebagian besar sebab gua terlihat gelap pekat: gua tergambar warna kabut
+gua yang gelap. Layar judul juga terkena (×0,62).
+
+Perbaikan:
+- `fogDistances()` (`core/systems/weather.ts`, murni): jarak kabut diukur **dari hero ke luar**, dalam
+  satuan radius pandang, dan kabut di hero dijepit maks 30%. Sekarang: kabut 30%, badai 13–18%,
+  hujan/cerah/gua 0% di hero; tebal di kejauhan.
+- **Hujan** (`render3d/Rain.ts`, 3 draw call, semuanya dianimasikan GPU): garis hujan selebar ± 1 piksel
+  (dulu 0,035 unit = setengah piksel, kebanyakan tidak tergambar), berjangkar ke dunia (tidak ikut
+  bergeser dengan hero), miring mengikuti angin; **cipratan** di tanah; **genangan** yang terisi ± 25 dtk
+  dan mengering ± 60 dtk setelah reda, memantulkan langit dan beriak saat hujan. Jumlah mengikuti
+  preset/AUTO, tidak pernah nol. **Suara hujan** sendiri (`rain`, `rain-heavy`) — bukan badai prolog.
+- **Badai**: angin lebih kuat (hujan miring), sedikit lebih gelap (gain ×0,8, tetap terbaca),
+  **petir** ± tiap 9 dtk: kilat ganda di seluruh gambar + guntur 0,2–1,6 dtk kemudian. Tidak ada di gua.
+- **Kabut**: kabut jarak + kabut tanah yang bergerak, **tipis di sekitar hero dan tebal di kejauhan**
+  (bukan lapisan rata), tepinya memudar.
+- **Panel pengembang → CUACA**: Cerah/Berkabut/Hujan/Badai + **Petir sekarang**. Laporan memuat baris
+  `cuaca:` (jarak kabut, basah, jumlah garis/cipratan, jumlah petir).
+
+Tes: `tests/weather.test.ts` (7).

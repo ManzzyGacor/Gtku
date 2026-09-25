@@ -45,7 +45,7 @@ import { WORLD_EVENTS, WorldEventDirector, type EventChange, type WorldEventId }
 import { ShopPanel } from '../ui/ShopPanel';
 import { findStandable } from '../core/saveMigrate';
 import { makeRng } from '../core/rng';
-import { WEATHER, type Weather } from '../core/systems/weather';
+import { fogDistances, Lightning, WEATHER, wetnessStep, type Weather } from '../core/systems/weather';
 import { Rain } from './Rain';
 import { AreaData } from './AreaData';
 import { DataRequired, DownloadManager, type DataAreaView, type DataSource } from '../ui/DownloadManager';
@@ -206,6 +206,8 @@ export class Game3D {
   readonly stages = new StageTimer();
   /** Combat and movement particles (pooled, GPU-animated). */
   readonly particles: Particles;
+  /** Particle density from the preset and AUTO (combat particles, rain). */
+  private particleBudget = 1;
   private unsubscribe: () => void;
   private disposed = false;
   /** What the save migration had to change on load, shown in the report so it is never silent. */
@@ -213,6 +215,10 @@ export class Game3D {
   /** While a cutscene is framing the shot, the day/night clock holds at this time. */
   private dayTimeOverride: number | null = null;
   private tintOverride: [number, number, number] | null = null;
+  /** Storm lightning (flash + delayed thunder) and how wet the ground is (puddles). */
+  private readonly lightning = new Lightning();
+  private wetness = 0;
+  private readonly fogOut: [number, number] = [0, 0];
   /** An actor being walked from A to B by a cutscene. */
   private actorMove: { id: string; fromX: number; fromY: number; toX: number; toY: number; t: number; dur: number } | null = null;
   /** Area data packs (Batch 6): downloads, and pre-baked chunk ground. */
@@ -544,7 +550,8 @@ export class Game3D {
     this.scene3d.setRim(p.id === 'vlow' ? 0.4 : 1);
     this.environment.setBudget(Math.min(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.5 : 1, a.particles));
     // combat particles never go to zero: a hit needs to read even on the weakest phone
-    this.particles.setBudget(Math.max(0.3, Math.min(p.id === 'vlow' ? 0.35 : p.id === 'low' ? 0.6 : p.id === 'ultra' ? 1.3 : 1, a.particles + 0.3)));
+    this.particleBudget = Math.max(0.3, Math.min(p.id === 'vlow' ? 0.35 : p.id === 'low' ? 0.6 : p.id === 'ultra' ? 1.3 : 1, a.particles + 0.3));
+    this.particles.setBudget(this.particleBudget);
     this.scene3d.setShadows(p.shadows);
     this.resize();
     this.scene3d.setRenderDistance(this.chunkRadius());
@@ -1158,6 +1165,11 @@ export class Game3D {
     this.nowAmbient = '';
   }
 
+  /** A lightning strike now, whatever the weather (developer menu: see what a storm looks like). */
+  strikeLightning(): void {
+    this.lightning.strike(Math.random);
+  }
+
   /** Put the hero somewhere, and bring the world with them without a frame of emptiness. */
   teleport(x: number, y: number): void {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -1679,13 +1691,17 @@ export class Game3D {
      * ~64 units of world existed around the hero, so the fog was doing nothing to hide the
      * streaming edge — and the chunk radius was paying for ground the fog should have swallowed.
      */
-    const [rawNear, rawFar] = this.camera.fogRange();
     const loadedReach = CAMERA_DISTANCE + this.chunkRadius() * 16 * 0.92;
     const look = WEATHER[this.weather];
-    const fogFar = Math.min(rawFar, loadedReach) * look.fogScale;
-    const fogNear = Math.min(rawNear * look.fogScale, fogFar - 8);
     if (this.dayTimeOverride !== null) this.dayTime = this.dayTimeOverride;
     const night = nightAmount(this.dayTime);
+    // fog measured from the hero outward — the old "whole distance × weather" fogged the hero too
+    const [fogNear, fogFar] = fogDistances(CAMERA_DISTANCE, this.camera.viewRadius, loadedReach, look, night, cave, this.fogOut);
+    // no weather underground: no rain, no lightning, and the puddles dry
+    const rainNow = look.rain * (1 - cave);
+    this.wetness = wetnessStep(this.wetness, rainNow, this.paused ? 0 : dt);
+    this.lightning.update(this.paused ? 0 : dt, look.lightning, Math.random);
+    if (this.lightning.takeThunder() && cave < 0.8) sfx.thunder();
     this.sky.update(this.dayTime, cave, fogNear, fogFar, night, this.clock);
     this.pixels.renderer.setClearColor(this.sky.haze, 1);
     this.applyGrade(cave);
@@ -1699,9 +1715,9 @@ export class Game3D {
     this.scene3d.waterUniforms.uFogRange.value.set(this.sky.fog.near, this.sky.fog.far);
     this.stages.lap(1);
     this.particles.update(dt);
-    this.environment.update(dt, this.camera.target, nightAmount(this.dayTime), cave, this.forestWeight(), this.sky.haze);
-    // no rain underground, whatever the sky is doing
-    this.rain?.update(dt, this.camera.target, this.camera.yawRadians, WEATHER[this.weather].rain * (1 - cave));
+    this.environment.update(dt, this.camera.target, nightAmount(this.dayTime), cave, this.forestWeight(), this.sky.haze, look.mist * (1 - cave));
+    if ((rainNow > 0 || this.wetness > 0.02) && !this.rain) this.rain = new Rain(this.pixels.scene);
+    this.rain?.update(dt, this.camera.target, this.camera.yawRadians, rainNow, look.wind, this.wetness * (1 - cave), this.particleBudget, this.sky.haze);
     this.stages.lap(3);
     this.pixels.render(this.camera.camera);
     this.stages.add(4, this.pixels.frameStats.sceneMs);
@@ -1741,7 +1757,8 @@ export class Game3D {
     const g = gradeAt(this.dayTime, cave);
     // A cutscene can push the whole picture toward a colour. It goes into the grade's lift, which
     // is the one knob that tints the shadows without washing the highlights out.
-    const w = WEATHER[this.weather].tint;
+    const look = WEATHER[this.weather];
+    const w = look.tint;
     const tint: [number, number, number] | null = this.tintOverride
       ? [this.tintOverride[0] + w[0], this.tintOverride[1] + w[1], this.tintOverride[2] + w[2]]
       : w[0] || w[1] || w[2]
@@ -1752,6 +1769,9 @@ export class Game3D {
     const bright = settings.get('brightness');
     // brighter also lifts the shadows a little, or a dark cave only gets brighter where it was lit
     const shadowLift = Math.max(0, bright - 1) * 0.035;
+    // a storm darkens (never to unreadable), a lightning flash lights everything for an instant
+    const flash = this.lightning.flash * (1 - cave);
+    const gain = bright * (look.darken + (1 - look.darken) * cave) * (1 + flash * 0.9);
     const lr = g.lift[0] + (tint ? tint[0] : 0) + shadowLift;
     const lg = g.lift[1] + (tint ? tint[1] : 0) + shadowLift;
     const lb = g.lift[2] + (tint ? tint[2] : 0) + shadowLift;
@@ -1760,7 +1780,7 @@ export class Game3D {
       vignette: g.vignette * (p.outline ? 1 : 0.6),
       lift: this.gradeLift.setRGB(lr, lg, lb),
       // the player's brightness (Pengaturan → Tampilan), on top of the time of day
-      gain: this.gradeGain.setRGB(g.gain[0] * bright, g.gain[1] * bright, g.gain[2] * bright),
+      gain: this.gradeGain.setRGB(g.gain[0] * gain, g.gain[1] * gain, g.gain[2] * (gain + flash * 0.15)),
     });
   }
 
@@ -2039,6 +2059,9 @@ export class Game3D {
       `kabut: ${this.sky.fog.near.toFixed(0)} - ${this.sky.fog.far.toFixed(0)} (gua ${(this.caveWeight() * 100).toFixed(0)}%)`,
       ...this.autoReport(),
       this.areaData.describe(),
+      `cuaca: ${WEATHER[this.weather].label}, kabut ${this.sky.fog.near.toFixed(0)}–${this.sky.fog.far.toFixed(0)} (hero di ${CAMERA_DISTANCE}), basah ${(this.wetness * 100).toFixed(0)}%` +
+        (this.rain ? `, hujan ${this.rain.parts.streaks} garis / ${this.rain.parts.splashes} cipratan${this.rain.parts.puddles ? ' + genangan' : ''}` : '') +
+        (this.lightning.strikes ? `, petir ${this.lightning.strikes}×` : ''),
       `tanah chunk: ${this.scene3d.groundStats.fromPack} dari paket, ${this.scene3d.groundStats.worker} dipanggang di worker (di luar frame), ${this.scene3d.groundStats.baked} dipanggang di thread utama${this.scene3d.baker ? (this.scene3d.baker.available ? '' : ' (worker gagal dimulai)') : ' (worker tidak tersedia)'}`,
       ...(probe.length ? ['', '[UJI PERFORMA] (baseline = setelanmu sendiri, satu fitur dimatikan per baris)', ...probe] : []),
     ];
