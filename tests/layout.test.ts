@@ -101,6 +101,10 @@ test('the UI layers in the right order, so no panel opens behind another', () =>
     ['SettingsPanel', '.lm-ov'],
     ['DevMenu', '.lm-dev'],
   ];
+  // the two data panels live in one file, so read them by their own selectors
+  const dm = readFileSync('src/ui/DownloadManager.ts', 'utf8');
+  const dmCss = /const CSS = `([\s\S]*?)`;/.exec(dm)?.[1] ?? '';
+  const zOf = (sel: string): number => Number(/z-index:\s*(\d+)/.exec(new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`).exec(dmCss)?.[1] ?? '')?.[1] ?? 0);
   const z = new Map<string, number>();
   for (const [name, selector] of roots) {
     const src = readFileSync(`src/ui/${name}.ts`, 'utf8');
@@ -121,6 +125,8 @@ test('the UI layers in the right order, so no panel opens behind another', () =>
   assert.ok(z.get('CutsceneOverlay')! > z.get('CharacterPanel')!);
   assert.ok(z.get('TouchControls')! > z.get('Hud')!, 'the stick is above the HUD it sits on');
   assert.ok(z.get('DevMenu')! > z.get('SettingsPanel')!, 'the developer menu is opened from Settings');
+  assert.ok(zOf('.lm-dm') > z.get('SettingsPanel')!, 'the Download Manager is opened from Settings');
+  assert.ok(zOf('.lm-dr') > z.get('CharacterPanel')! && zOf('.lm-dr') < z.get('SettingsPanel')!, 'the data prompt covers the game but not Settings');
 
   // and the error panel in index.html stays on top of all of it
   const html = readFileSync('index.html', 'utf8');

@@ -136,7 +136,7 @@ chunk streaming, jumlah cahaya dinamis & bayangan dibatasi.
 | 3 | Migrasi combat, dua senjata, sistem elemen (4 elemen) | ✅ selesai |
 | 4 | Stats, equipment, Lantern Core, inventaris, progresi | ✅ selesai |
 | 5 | Cutscene pembuka + sistem cutscene, audio, UI/HUD, menu | ✅ selesai |
-| 6 | World streaming, Download Manager, grafik AUTO lengkap | ⬜ |
+| 6 | World streaming, Download Manager, grafik AUTO lengkap | ✅ selesai |
 | 7 | Akun & backend, world event, optimasi performa, dokumentasi akhir | ⬜ |
 
 ### Batch 1 — rincian

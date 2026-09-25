@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import { CHUNK_PX, CHUNK_TILES } from '../config';
 import { bakeChunk, bakeWaterMask } from '../art/bake';
+import type { Pixmap } from '../art/pixmap';
 import { buildGreyboxTextures, buildGroundDetail, type GreyboxTexture } from '../art/greybox';
 import type { Sheet } from '../art/sheet';
 import { ambientAt, blendAmbient, nightAmount, sunDirection } from '../core/systems/daynight';
@@ -231,6 +232,8 @@ const MAX_DYNAMIC_LIGHTS = 3;
  * hold. Chunks are 16 tiles wide, so 2 is still an order of magnitude finer than the decision.
  */
 const STREAM_STEP = 2;
+/** How long a chunk may wait for its pre-baked ground to inflate before the phone bakes it itself. */
+const GROUND_WAIT = 0.35;
 
 const keyOf = (cx: number, cy: number): number => cy * 1000 + cx;
 
@@ -483,17 +486,60 @@ export class World3D {
       changed = true;
     }
     this.queue.length = 0;
-    for (const c of want) if (!this.loaded.has(keyOf(c.cx, c.cy))) this.queue.push(c);
+    for (const c of want) {
+      if (this.loaded.has(keyOf(c.cx, c.cy))) continue;
+      this.queue.push(c);
+      // start inflating its pre-baked ground now, so it is ready when the queue gets to it
+      this.groundSource?.(c.cx, c.cy);
+    }
     if (changed) this.rebuildLightList();
   }
 
   /** Bake at most `budget` queued chunks. Baking a 256x256 ground texture is the expensive part. */
-  step(budget = 1): void {
+  step(budget = 1, noWait = false): void {
     for (let i = 0; i < budget && this.queue.length; i++) {
       const t = this.queue.shift()!;
-      if (!this.loaded.has(keyOf(t.cx, t.cy))) this.loadChunk(t.cx, t.cy);
+      if (this.loaded.has(keyOf(t.cx, t.cy))) continue;
+      const pre = this.groundSource?.(t.cx, t.cy) ?? null;
+      // a teleport or the first frame cannot wait for an inflate: the ground has to be there now
+      if (pre === 'pending' && noWait) {
+        this.loadChunk(t.cx, t.cy, null);
+        continue;
+      }
+      if (pre === 'pending') {
+        /*
+         * Its pre-baked ground is still inflating. Wait rather than baking it here — baking is the
+         * very cost the pack exists to avoid — but not for long: after GROUND_WAIT seconds the
+         * phone bakes it anyway, so a slow inflate can never leave a hole in the world.
+         *
+         * The limit is in *time*, not in queue visits. A first version counted visits, and with
+         * fifteen chunks queued and one loaded per frame each chunk was only visited every
+         * fifteenth frame — so "twenty visits" meant five seconds of missing ground.
+         */
+        const key = keyOf(t.cx, t.cy);
+        const since = this.groundWaits.get(key);
+        if (since === undefined) this.groundWaits.set(key, this.clock);
+        if (since === undefined || this.clock - since < GROUND_WAIT) {
+          this.queue.push(t);
+          continue;
+        }
+        this.groundWaits.delete(key);
+        this.loadChunk(t.cx, t.cy, null);
+        continue;
+      }
+      this.groundWaits.delete(keyOf(t.cx, t.cy));
+      this.loadChunk(t.cx, t.cy, pre);
     }
   }
+
+  /**
+   * Where pre-baked chunk ground comes from (the area data packs), or null to always bake.
+   * Returns a pixmap, `'pending'` while one is being inflated, or null when none exists for the chunk.
+   */
+  groundSource: ((cx: number, cy: number) => Pixmap | 'pending' | null) | null = null;
+  private readonly groundWaits = new Map<number, number>();
+  /** How many chunks came from packs vs were baked on the device, for the report. */
+  readonly groundStats = { fromPack: 0, baked: 0 };
 
   /**
    * Load what is around `focus` right now (first frame, teleports).
@@ -506,16 +552,19 @@ export class World3D {
     const full = this.radiusChunks;
     if (radius !== undefined) this.radiusChunks = Math.max(1, radius);
     this.stream(focusX, focusZ, true);
-    this.step(this.queue.length);
+    this.step(this.queue.length, true);
     this.radiusChunks = full;
     // The warm-up deliberately used a smaller radius, so the next frame has to re-decide with the
     // real one — otherwise standing still after a teleport would never load the rest.
     if (radius !== undefined) this.lastStreamX = Infinity;
   }
 
-  private loadChunk(cx: number, cy: number): void {
+  private loadChunk(cx: number, cy: number, prebaked: Pixmap | null = null): void {
     const plan = this.chunkPlan(cx, cy);
-    const pm = bakeChunk(this.world, this.tileSheet, cx, cy, 0);
+    // from a downloaded pack if there is one; otherwise baked here, as it always was
+    const pm = prebaked ?? bakeChunk(this.world, this.tileSheet, cx, cy, 0);
+    if (prebaked) this.groundStats.fromPack++;
+    else this.groundStats.baked++;
     // Pixmap row 0 is north; a flat plane has v = 1 there, so the rows are flipped on upload.
     const texture = pixmapTexture(pm, { flipRows: true });
     const material = new THREE.MeshLambertMaterial({ map: texture });

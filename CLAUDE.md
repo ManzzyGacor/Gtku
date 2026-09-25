@@ -72,6 +72,9 @@ src/
                      character (level + equipment + buff -> satu StatBlock + passive Inti Lentera)
     items/           items (8 slot, 6 rarity, katalog), inventory (grid 48 sel + equipped),
                      drops (tabel loot)
+    download/        pack (format paket area), manifest, downloader (aman & bisa dilanjutkan),
+                     gate (area mana yang butuh data)
+    (akar)           autotune (AUTO per komponen), devtools (gerbang Mode Pengembang)
     (akar)           progression (level/EXP), lifecycle (pause/context-lost/orientasi), saveMigrate
     systems/         quest, puzzleLogic, daynight, interactables
     state/           GameState (quest, kill, flag, waktu) + serialisasi save
@@ -88,7 +91,8 @@ src/
                      lightmap, occlusion, PerfProbe,
                      worldPlan + pixelPlan (BEBAS three, jadi bisa dites di Node)
 tests/               Vitest: logika inti, playthrough headless, dan penjaga lapisan
-scripts/             skrip node (ekspor sheet, preview dunia, ascii-map, plan-stats,
+scripts/             skrip node — termasuk areaPacks.ts (paket data area; dipakai plugin Vite),
+                     ekspor sheet, preview dunia, ascii-map, plan-stats,
                      stream-budget, preview-textures, crop-reference, debug-puzzle)
 docs/                OVERHAUL.md (rencana induk), GAME_DESIGN.md, PROGRESS.md, STORY.md
 docs/reference/      TARGET VISUAL (referensi-visual.png). Buka dengan scripts/crop-reference.ts
@@ -124,6 +128,9 @@ phaser.
 - **Nama tokoh utama datang dari setelan pemain** (`settings.playerName`, fallback `Pengembara`).
   Naskah di `docs/STORY.md` memanggilnya Arka, tapi setiap baris yang dibaca pemain ditulis dengan
   placeholder `{nama}`. Jangan pernah menulis "Arka" di teks yang tampil di game.
+- **Mode Pengembang tidak boleh ada di build rilis.** Gerbangnya harus ekspresi literal
+  `import.meta.env.DEV`, bukan panggilan fungsi — kalau tidak, chunk-nya tetap ter-emit ke `dist/`.
+  Dijaga `tests/devmode.test.ts`, yang membangun versi rilis sungguhan.
 - **Efek layar penuh (blur) hanya di preset Tinggi ke atas** (`ui/fx.ts` `blurAllowed()`).
 - **Semua panel UI wajib menghormati safe area** lewat `var(--lm-sa*)` di CSS, atau `safeInsets()`
   kalau memposisikan dengan JavaScript. Dijaga `tests/layout.test.ts` di 2318x759.

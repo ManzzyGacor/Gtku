@@ -23,6 +23,8 @@ export interface DiagnosticsSource {
   cutsceneSeen?(id: string): boolean;
   /** Replay a cutscene from the settings menu. */
   playCutscene?(id: string): void;
+  /** Open the Download Manager (Batch 6). */
+  openDownloads?(): void;
 }
 
 /** Stand-in used before a renderer has started (title screen, boot). */

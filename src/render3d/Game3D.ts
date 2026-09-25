@@ -34,6 +34,8 @@ import { KILLS_NEEDED } from '../core/state/GameState';
 import { DUMMY_TILE, settleTutorial } from '../core/systems/tutorial';
 import { WEATHER, type Weather } from '../core/systems/weather';
 import { Rain } from './Rain';
+import { AreaData } from './AreaData';
+import { DataRequired, DownloadManager, type DataAreaView, type DataSource } from '../ui/DownloadManager';
 import { Cutscene3D } from './Cutscene3D';
 import { CUTSCENES, playerName } from '../core/story/cutscenes';
 import { ambient as ambientPlayer, ambientFor, audioReady, bus, fadeFor, music, musicFor } from '../core/audio';
@@ -127,6 +129,13 @@ export class Game3D {
   private tintOverride: [number, number, number] | null = null;
   /** An actor being walked from A to B by a cutscene. */
   private actorMove: { id: string; fromX: number; fromY: number; toX: number; toY: number; t: number; dur: number } | null = null;
+  /** Area data packs (Batch 6): downloads, and pre-baked chunk ground. */
+  readonly areaData = new AreaData();
+  readonly downloads: DownloadManager;
+  private readonly dataRequired: DataRequired;
+  /** Where the hero last stood in an area they were allowed into — the gate sends them back here. */
+  private readonly lastSafe = { x: 0, y: 0, area: '' };
+  private gatePromptT = 0;
   /** Current weather (developer menu only, until Batch 7 gives the world its own). */
   private weather: Weather = 'cerah';
   private rain: Rain | null = null;
@@ -183,6 +192,9 @@ export class Game3D {
       // no rummaging through the bag while dead — respawn first
       blocked: () => !this.hero.alive,
     });
+    const dataSource = this.makeDataSource();
+    this.downloads = new DownloadManager(dataSource);
+    this.dataRequired = new DataRequired(dataSource);
     this.csOverlay = new CutsceneOverlay();
     this.cutscene = new Cutscene3D(this.camera, {
       setDayTime: (t) => {
@@ -348,6 +360,19 @@ export class Game3D {
     // fog over the next few frames rather than freezing the boot.
     this.scene3d.preload(u(start.x), u(start.y), 1);
     window.addEventListener('resize', this.onResize);
+
+    // ── area data: ground from the packs, and the core area fetched quietly in the background ──
+    this.lastSafe.x = this.hero.x;
+    this.lastSafe.y = this.hero.y;
+    this.lastSafe.area = areaAtTile(Math.floor(this.hero.x / 16));
+    this.scene3d.groundSource = (cx, cy) => this.areaData.ground(cx, cy);
+    void this.areaData.init().then(() => {
+      const core = this.areaData.manifest?.core;
+      if (!core) return;
+      const st = this.areaData.status(core);
+      // Ravenhollow is never gated; it just arrives when it arrives, and until then the phone bakes it
+      if (st === 'belum' || st === 'versi-baru') void this.areaData.download(core).catch(() => undefined);
+    });
   }
 
   /** The HUD listens for which weapon is next and how far the bow is drawn. */
@@ -724,6 +749,76 @@ export class Game3D {
     this.saveNow(true);
   }
 
+  // ───────────────────────── area data ─────────────────────────
+
+  /**
+   * Keep the hero out of an area whose data is not on the phone yet.
+   *
+   * Only *crossing into* one is stopped: a game loaded inside the cave on a phone without the cave's
+   * data stays where it is (the ground is baked locally), because sending someone back to the
+   * village from their own save would be worse than a slower chunk load.
+   */
+  private enforceAreaGate(dt: number): void {
+    this.gatePromptT = Math.max(0, this.gatePromptT - dt);
+    const area = areaAtTile(Math.floor(this.hero.x / 16));
+    if (area === this.lastSafe.area || !this.areaData.blocked(area)) {
+      this.lastSafe.x = this.hero.x;
+      this.lastSafe.y = this.hero.y;
+      this.lastSafe.area = area;
+      return;
+    }
+    // back to the last spot outside it, and stop the run so it does not immediately try again
+    this.hero.x = this.lastSafe.x;
+    this.hero.y = this.lastSafe.y;
+    this.hero.vx = 0;
+    this.hero.vy = 0;
+    this.camera.snap(u(this.hero.x), u(this.hero.y));
+    if (!this.dataRequired.isOpen && this.gatePromptT <= 0) {
+      this.gatePromptT = 3;
+      void this.dataRequired.show(area);
+    }
+  }
+
+  /** The adapter the two data panels read. Everything in it comes from `AreaData`. */
+  private makeDataSource(): DataSource {
+    const listeners = new Set<() => void>();
+    this.areaData.onChange = () => {
+      for (const fn of listeners) fn();
+    };
+    return {
+      available: this.areaData.available,
+      manifestError: () => this.areaData.manifestError,
+      areas: async (): Promise<DataAreaView[]> => {
+        const m = this.areaData.manifest;
+        if (!m) return [];
+        return Promise.all(
+          Object.keys(m.areas).map(async (id) => {
+            const p = this.areaData.progress(id);
+            const status = this.areaData.status(id);
+            const done = p && status === 'mengunduh' ? p.done : await this.areaData.cachedBytes(id);
+            return {
+              id,
+              name: AREAS[id as keyof typeof AREAS]?.name ?? id,
+              status,
+              bytes: this.areaData.sizeOf(id),
+              done,
+              error: status === 'gagal' ? p?.error : undefined,
+              core: id === m.core,
+            };
+          }),
+        );
+      },
+      download: (id) => this.areaData.download(id),
+      remove: (id) => this.areaData.remove(id),
+      storage: () => this.areaData.storage(),
+      requestPersist: () => this.areaData.requestPersist(),
+      subscribe: (fn) => {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+    };
+  }
+
   // ───────────────────────── developer menu ─────────────────────────
 
   /** The developer menu holds the world still while it is open, like the pause menu. */
@@ -1047,6 +1142,7 @@ export class Game3D {
     if (!this.paused && dt > 0) {
       this.dayTime = (this.dayTime + simDt / DAY_SECONDS) % 1;
       this.updateHero(simDt);
+      this.enforceAreaGate(dt);
       this.combat.update(simDt, dt, this.hero);
       this.camera.follow(u(this.hero.x), u(this.hero.y), dt);
       this.camera.tick(dt);
@@ -1294,6 +1390,7 @@ export class Game3D {
       report: () => this.extraReport(),
       startPerfProbe: () => this.startPerfProbe(),
       cutsceneSeen: (id) => this.state.hasSeen(id),
+      openDownloads: () => this.downloads.show(),
       playCutscene: (id) => {
         this.playCutscene(id);
       },
@@ -1335,6 +1432,8 @@ export class Game3D {
         `target (${this.camera.target.x.toFixed(1)}, ${this.camera.target.z.toFixed(1)})  radius pandang ${this.camera.viewRadius.toFixed(1)} unit`,
       `kabut: ${this.sky.fog.near.toFixed(0)} - ${this.sky.fog.far.toFixed(0)} (gua ${(this.caveWeight() * 100).toFixed(0)}%)`,
       ...this.autoReport(),
+      this.areaData.describe(),
+      `tanah chunk: ${this.scene3d.groundStats.fromPack} dari paket, ${this.scene3d.groundStats.baked} dipanggang di HP`,
       ...(probe.length ? ['', '[UJI PERFORMA] (baseline = setelanmu sendiri, satu fitur dimatikan per baris)', ...probe] : []),
     ];
   }
@@ -1348,6 +1447,8 @@ export class Game3D {
     this.story.dispose();
     this.puzzle.dispose();
     this.minimap.destroy();
+    this.downloads.destroy();
+    this.dataRequired.destroy();
     this.rain?.dispose();
     this.csOverlay.destroy();
     this.pause.destroy();

@@ -78,6 +78,14 @@ const ROWS: Row[] = [
   { kind: 'number', label: 'Tempur', key: 'combatVol', fmt: pct },
   { kind: 'number', label: 'Efek', key: 'sfxVol', fmt: pct },
   { kind: 'number', label: 'Antarmuka', key: 'uiVol', fmt: pct },
+  { kind: 'header', label: 'Data dunia' },
+  {
+    kind: 'action',
+    label: 'Download Manager',
+    button: 'Buka',
+    note: () => 'Status tiap area, unduh/hapus, dan sisa penyimpanan',
+    run: (p) => p.openDownloads(),
+  },
   { kind: 'header', label: 'Cerita' },
   {
     kind: 'action',
@@ -483,6 +491,16 @@ export class SettingsPanel {
   showErrors(): void {
     const lines = formatErrors();
     this.showDump(lines.length ? [...lines].reverse().join('\n') : 'Belum ada error yang tercatat.');
+  }
+
+  /** Open the Download Manager on top of Settings. */
+  openDownloads(): void {
+    const src = this.source();
+    if (!src.openDownloads) {
+      this.showDump('Download Manager tersedia setelah dunia dimuat.');
+      return;
+    }
+    src.openDownloads();
   }
 
   /**

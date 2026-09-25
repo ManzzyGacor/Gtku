@@ -926,3 +926,86 @@ diverifikasi: gerbang lama membuat tes itu merah).
 `Game3D` asli: item/inti/set/koin, elemen & primer/sekunder sampai ke hero, level/EXP, spawn tiap
 jenis tanpa menyentuh quest/save, **setiap teleport mendarat di petak yang bisa dipijak**, jam,
 cuaca, kebal, reset, dan log reaksi `Api + Es → Lebur` pada boneka.
+
+
+## Batch 6 — data area, Download Manager, AUTO per komponen
+
+### AUTO per komponen
+
+AUTO lama berjalan di satu tangga **preset utuh**: saat FPS turun, seluruh tampilan turun sekaligus.
+Sekarang (`core/autotune.ts`) AUTO memutar **satu dial satu takik**, kerugian visual termurah dulu,
+dan baru menurunkan preset saat semua dial sudah minimum. Urutan 16 langkahnya (dari uji performa
+A/B di HPmu): partikel → angin rumput → grain tanah → bloom → … → lampu dinamis → resolusi → air →
+jarak pandang → … → **outline paling terakhir**. Setiap komponen = min(preset, AUTO): AUTO hanya bisa
+mengurangi dari preset yang tampil di Pengaturan.
+
+**Di laporan tes** ("Salin laporan"): AUTO nyala/mati, langkah ke berapa dari 16, komponen mana
+saja yang sedang diturunkan, dan 12 keputusan terakhir dengan waktu, arah, apa, dan fps
+rata-rata/terendah yang memicunya. Toast "AUTO: bloom 1 → 0.6" muncul saat terjadi.
+
+### Data area dan kenapa ada
+
+Dunia ini digenerate, jadi sebenarnya tidak ada yang *harus* diunduh — dan itu kutulis terus terang.
+Tapi `bakeChunk` (memanggang tekstur tanah satu chunk) adalah kerja paling mahal saat berjalan:
+**11–22 ms per chunk di Node**, beberapa kali lipat di HP, tepat saat chunk baru dimuat. Paket area
+berisi tanah yang **sudah dipanggang saat build** dan dikompres:
+
+| Area | Chunk | Ukuran |
+| --- | --- | --- |
+| Ravenhollow (inti) | 48 | 439 KB |
+| Hutan Noctis | 48 | 545 KB |
+| Gua Lumen | 32 | 180 KB |
+
+Jadi paket mengubah hitch di setiap chunk menjadi sekadar lookup, sekaligus menjadi jalur kirim untuk
+aset buatan tangan per area nanti. Dijaga tes bahwa paket yang didekode **identik byte-per-byte**
+dengan yang akan dipanggang HP, dan bahwa build dua kali menghasilkan berkas identik (supaya build
+ulang tidak memaksa unduh ulang).
+
+- **Format** (`core/download/pack.ts`): kontainer sederhana, satu payload deflate per chunk; berkas
+  terpotong / format asing / berlebih ditolak, tidak dibaca setengah.
+- **Manifest** (`core/download/manifest.ts`): versi per area = hash isi; URL berkas = hash berkas
+  (tidak pernah berubah di bawah URL yang sama); maks **20 MB per berkas** (area besar dipecah).
+  URL absolut / `..` / bukan `.bin` ditolak.
+- **Dibangun oleh plugin Vite** (`scripts/areaPacks.ts`): dev server membuatnya saat start dan
+  menyajikan dari memori; `vite build` menulisnya ke `dist/data/`. Tidak di-commit ke git.
+
+### Download Manager
+
+Pengaturan → **Data dunia → Download Manager**:
+- status tiap area (Terpasang / Belum diunduh / Versi baru tersedia / Mengunduh / Gagal)
+- progres **"x KB dari y KB"** dengan bar, tombol Unduh / Perbarui / Coba lagi / Hapus
+- **sisa penyimpanan** dari `navigator.storage.estimate()`
+- **penyimpanan permanen**: status + tombol "Minta izin" (`navigator.storage.persist()`)
+
+### "Data Dunia Diperlukan"
+
+Melangkah ke Hutan Noctis / Gua Lumen tanpa datanya → hero dikembalikan ke tepi area, muncul prompt
+dengan nama area, ukuran, bar progres, tombol **Unduh** (atau **Coba lagi**), dan **Nanti** /
+**Lanjut di latar**. Begitu terpasang, prompt tertutup sendiri dan hero bisa masuk.
+
+Aturannya (`core/download/gate.ts`): **Ravenhollow tidak pernah digerbang** (diunduh diam-diam di
+latar; sampai tiba, HP memanggang sendiri); versi lama tetap boleh masuk (pembaruan ditawarkan, tidak
+dipaksa di tengah jalan); **save yang sudah berada di dalam area tanpa data tidak dilempar keluar**;
+dan kalau browser tidak punya Cache Storage, tidak ada gerbang sama sekali — dunia selalu bisa
+digenerate lokal, dan mengunci dua pertiga game karena browser tidak bisa menyimpan berkas adalah
+pertukaran yang salah.
+
+### Unduhan yang aman
+
+`core/download/downloader.ts`, dites dengan fetch & cache palsu:
+- berkas ditulis ke cache **hanya setelah lengkap dan SHA-256-nya cocok** — koneksi putus di 40%
+  tidak meninggalkan apa pun untuk berkas itu, sedangkan berkas yang sudah selesai tetap ada, jadi
+  **coba lagi melanjutkan dari berkas pertama yang hilang**;
+- penanda "terpasang" ditulis **terakhir** — area setengah jadi tidak pernah dianggap siap;
+- data yang sudah ada tidak diunduh ulang kecuali versinya berubah;
+- versi lama dihapus **setelah** versi baru lengkap — pembaruan yang gagal meninggalkan versi lama yang
+  masih bekerja.
+
+### Bug yang ketangkap tes di bagian ini
+
+Batas tunggu chunk yang tekstur paketnya masih di-inflate dihitung **per kunjungan antrean**. Dengan
+~15 chunk antre dan 1 chunk/frame, tiap chunk baru dikunjungi setiap frame ke-15, jadi "20 kunjungan"
+berarti **5 detik tanah kosong** kalau paketnya lambat. Sekarang batasnya waktu: 0,35 dtk, lalu HP
+memanggang sendiri. Teleport dan frame pertama tidak menunggu sama sekali.
+
+**Tes baru Batch 6:** `autotune` (10), `download` (13), `areadata` (9), `downloadui` (5).
