@@ -70,6 +70,11 @@ export interface ItemDef {
   note: string;
   /** Lantern Cores: the element they empower. */
   element?: ElementId | undefined;
+  /**
+   * Melee weapons: how they fight (`MELEE_STYLES` in combat/weapons.ts) and what the hero holds.
+   * Absent = a sword.
+   */
+  style?: 'sword' | 'dagger' | 'hammer' | 'spear' | undefined;
   /** Lantern Cores: a named passive, described in `note`. Behaviour lives in `passives.ts`. */
   passive?: PassiveId | undefined;
   /** Materials and consumables stack; equipment does not. */
@@ -133,6 +138,43 @@ export const ITEMS: Record<string, ItemDef> = {
     mods: [
       { stat: 'atk', flat: 4, source: 'Busur Bisik' },
       { stat: 'speed', pct: 4, source: 'Busur Bisik' },
+    ],
+  },
+
+  dagger_mist: {
+    id: 'dagger_mist',
+    name: 'Belati Kabut',
+    kind: 'weapon',
+    style: 'dagger',
+    rarity: 'uncommon',
+    note: 'Ringan dan cepat: tiga tusukan sebelum musuh sempat menoleh.',
+    mods: [
+      { stat: 'atk', flat: 3, source: 'Belati Kabut' },
+      { stat: 'crit', flat: 8, source: 'Belati Kabut' },
+    ],
+  },
+  hammer_ember: {
+    id: 'hammer_ember',
+    name: 'Palu Bara',
+    kind: 'weapon',
+    style: 'hammer',
+    rarity: 'rare',
+    note: 'Lambat diayun, tapi tanah ikut bergetar saat ia jatuh.',
+    mods: [
+      { stat: 'atk', flat: 10, source: 'Palu Bara' },
+      { stat: 'speed', pct: -6, source: 'Palu Bara' },
+    ],
+  },
+  spear_tide: {
+    id: 'spear_tide',
+    name: 'Tombak Arus',
+    kind: 'weapon',
+    style: 'spear',
+    rarity: 'rare',
+    note: 'Menjangkau jauh dalam satu garis lurus, seperti arus sungai.',
+    mods: [
+      { stat: 'atk', flat: 6, source: 'Tombak Arus' },
+      { stat: 'crit', flat: 3, source: 'Tombak Arus' },
     ],
   },
 

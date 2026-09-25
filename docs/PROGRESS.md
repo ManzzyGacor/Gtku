@@ -1364,3 +1364,23 @@ Penyebab gua gelap: ambient gua 0,22 dikali intensitas langit 0,55 (matahari 0),
   bayangan.
 
 Tes: `tests/cavelight.test.ts` (4).
+
+## Senjata terlihat di tangan, efek tebasan per senjata, partikel
+
+- **Empat gaya senjata jarak dekat** (`MELEE_STYLES` di `core/combat/weapons.ts`, data): Pedang
+  (acuan), Belati (cepat ×0,68, ringan, jangkauan pendek), Palu (lambat ×1,45, damage ×1,7, knockback
+  besar, hit-stop & getar lebih kuat), Tombak (jangkauan ×1,5, busur sempit, tusukan lurus). DPS semua
+  gaya sengaja setara. Gaya datang dari item yang dipakai (`ItemDef.style`); item baru: **Belati Kabut**,
+  **Palu Bara**, **Tombak Arus** (drop pemanah/peti, Palu & Tombak juga loot co-op).
+- **Model senjata di tangan** per gaya, lebih besar supaya terbaca di HP, dengan bagian berwarna
+  rarity yang menyala. Busur tetap model sendiri. Potret di panel Karakter ikut memegang gaya yang dipakai.
+- **Tebasan per gaya**: pedang busur lebar, belati tipis cepat, palu pendek tebal + cincin hantaman +
+  debu + getar layar, tombak garis lurus ke depan, panah tetap garis terbang. **Warna tebasan mengikuti
+  elemen aktif.**
+- **Partikel** (`render3d/Particles.ts`): dua pool `InstancedMesh` (bersinar & debu), animasi
+  sepenuhnya di GPU — tanpa alokasi dan tanpa kerja CPU per frame. Saat kena (percikan), kritikal
+  (ledakan besar), langkah kaki (debu), dodge (kepulan ke belakang), hantaman palu. Elemen: **Api** bara
+  naik + asap, **Air** cipratan, **Es** serpihan kristal, **Petir** percikan listrik. Kepadatan mengikuti
+  preset (Sangat Rendah 35% … Ultra 130%) dan dial partikel AUTO, tapi tidak pernah nol.
+
+Tes: `tests/weaponstyle.test.ts` (5).

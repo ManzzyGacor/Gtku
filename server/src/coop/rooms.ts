@@ -79,7 +79,7 @@ interface Room {
 export const COOP_LOOT = {
   exp: 150,
   coins: 120,
-  pool: ['sword_dawn', 'armor_emberplate', 'charm_still', 'boots_striding', 'ring_thorn', 'core_storm', 'core_frost'],
+  pool: ['sword_dawn', 'hammer_ember', 'spear_tide', 'armor_emberplate', 'charm_still', 'boots_striding', 'ring_thorn', 'core_storm', 'core_frost'],
   rarity: [
     ['rare', 0.5],
     ['epic', 0.35],

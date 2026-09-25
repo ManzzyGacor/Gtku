@@ -13,6 +13,8 @@ import { HERO_LOOK } from '../art/characters';
 import { P, shade } from '../art/palette';
 import { mix } from '../art/pixmap';
 import type { GearLook } from '../core/items/look';
+import type { MeleeStyle } from '../core/combat/weapons';
+import { ELEMENTS } from '../core/combat/elements';
 import { HeroCore, HERO_STATS } from '../core/entities/HeroCore';
 import { u } from './worldPlan';
 
@@ -63,6 +65,9 @@ function resetPose(p: PoseTarget): void {
   Object.assign(p, blankPose());
 }
 
+/** Seconds a hammer's ground ring lasts. */
+const IMPACT_TIME = 0.4;
+
 /** How much further and brighter the lantern is underground. */
 export const CAVE_LANTERN = { range: 1.1, brightness: 0.6 };
 
@@ -79,6 +84,14 @@ interface Joint {
 const paint = (m: THREE.Mesh, c: number): void => void (m.material as THREE.MeshLambertMaterial).color.setHex(c);
 
 const flat = (color: number): THREE.MeshLambertMaterial => new THREE.MeshLambertMaterial({ color });
+
+/** A slash arc lying flat around the hero, opening forward (+Z); the pivot turns it through the swing. */
+function slashArc(inner: number, outer: number, sweep: number): THREE.BufferGeometry {
+  const g = new THREE.RingGeometry(inner, outer, 20, 1, -Math.PI / 2 - sweep / 2, sweep);
+  g.rotateX(-Math.PI / 2);
+  g.rotateY(Math.PI);
+  return g;
+}
 
 export class HeroMesh3D {
   readonly root = new THREE.Group();
@@ -115,9 +128,21 @@ export class HeroMesh3D {
   private lanternColor = 0xffe066;
   /** Last applied look, so an unchanged sheet does not repaint. */
   gearKey = '';
-  private slash!: THREE.Mesh;
+  /** The swing trail: one mesh per weapon style, turned by a pivot at shoulder height. */
+  private slashPivot = new THREE.Group();
+  private readonly slashes = new Map<MeleeStyle, THREE.Mesh>();
   private slashMaterial!: THREE.MeshBasicMaterial;
-  private slashGeometry!: THREE.PlaneGeometry;
+  private slashGeometries: THREE.BufferGeometry[] = [];
+  /** The model in the hand for each melee style. */
+  private readonly weapons = new Map<MeleeStyle, THREE.Group>();
+  /** Parts painted in the weapon's rarity colour, per style. */
+  private readonly weaponAccents: THREE.Mesh[] = [];
+  /** A hammer's landing: a ring that spreads over the ground. */
+  private impactRing!: THREE.Mesh;
+  private impactMat!: THREE.MeshBasicMaterial;
+  private impactT = 0;
+  private style: MeleeStyle = 'sword';
+  private wasActive = false;
   private materials: THREE.Material[] = [];
   private geometries: THREE.BufferGeometry[] = [];
 
@@ -258,12 +283,43 @@ export class HeroMesh3D {
     this.armR = this.joint(0.15, 0.34, 0.15, L.tunic[1], new THREE.Vector3(0.3, shoulderY, 0));
     for (const arm of [this.armL, this.armR]) this.mittens.push(this.box(0.17, 0.14, 0.17, shade(L.boots, 0.15), arm.pivot, -0.34));
 
-    // sword in the right hand: a long steel blade with a wrapped grip and a gold guard
+    /*
+     * The melee weapons, one model per style, in the right hand. Sized to read on a phone — a
+     * blade one pixel wide at this distance is not a blade — with a bright edge that stays visible
+     * in the dark (unlit), and a part in the weapon's rarity colour.
+     */
+    const hand = -0.34;
+    // sword: a long steel blade, a wrapped grip and a guard
     this.armR.pivot.add(this.sword);
-    this.box(0.07, 0.86, 0.13, 0xbcc4dc, this.sword, -0.34 - 0.48);
-    this.box(0.03, 0.86, 0.05, P.white, this.sword, -0.34 - 0.48, 0.05);
-    this.guard = this.box(0.2, 0.07, 0.16, P.y3, this.sword, -0.34 - 0.06);
-    this.box(0.08, 0.16, 0.1, P.o0, this.sword, -0.34 + 0.04);
+    this.box(0.1, 0.98, 0.14, 0xbcc4dc, this.sword, hand - 0.55);
+    this.box(0.035, 0.98, 0.05, 0xf4f8ff, this.sword, hand - 0.55, 0.06, true);
+    this.guard = this.box(0.26, 0.08, 0.18, P.y3, this.sword, hand - 0.06);
+    this.weaponAccents.push(this.guard);
+    this.box(0.08, 0.16, 0.1, P.o0, this.sword, hand + 0.04);
+    this.weapons.set('sword', this.sword);
+    // dagger: short and thin, held low
+    const dagger = new THREE.Group();
+    this.armR.pivot.add(dagger);
+    this.box(0.07, 0.46, 0.1, 0xc8d0e6, dagger, hand - 0.3);
+    this.box(0.03, 0.46, 0.04, 0xf4f8ff, dagger, hand - 0.3, 0.05, true);
+    this.weaponAccents.push(this.box(0.18, 0.06, 0.14, P.y3, dagger, hand - 0.05));
+    this.box(0.07, 0.13, 0.08, P.o0, dagger, hand + 0.03);
+    this.weapons.set('dagger', dagger);
+    // hammer: a long handle and a heavy head
+    const hammer = new THREE.Group();
+    this.armR.pivot.add(hammer);
+    this.box(0.07, 0.95, 0.07, 0x7a5236, hammer, hand - 0.35);
+    this.box(0.4, 0.26, 0.26, 0x8a93ad, hammer, hand - 0.86);
+    this.weaponAccents.push(this.box(0.42, 0.07, 0.28, P.y3, hammer, hand - 0.86));
+    this.box(0.08, 0.26, 0.28, 0xf4f8ff, hammer, hand - 0.86, 0, true).position.x = 0.2;
+    this.weapons.set('hammer', hammer);
+    // spear: a shaft through the hand, a bright point beyond the fist
+    const spear = new THREE.Group();
+    this.armR.pivot.add(spear);
+    this.box(0.055, 1.6, 0.055, 0x8a5a36, spear, hand - 0.3);
+    this.box(0.1, 0.3, 0.12, 0xf4f8ff, spear, hand - 1.2, 0, true);
+    this.weaponAccents.push(this.box(0.12, 0.07, 0.12, P.y3, spear, hand - 1.02));
+    this.weapons.set('spear', spear);
 
     /*
      * The bow, in the same hand, shown instead of the sword while it is the active weapon. Until
@@ -295,10 +351,9 @@ export class HeroMesh3D {
     this.box(0.26, 0.06, 0.26, 0x4a4e6f, this.armL.pivot, -0.34 - 0.44);
 
     /*
-     * The glowing blue slash trail from the reference's skill art. One additive quad, hidden
-     * except during the active frames of a swing — the full combat effects arrive with Batch 3.
+     * The slash trail: one additive shape per weapon style, hidden except during the active frames
+     * of a swing, coloured by the active element.
      */
-    this.slashGeometry = new THREE.PlaneGeometry(1.5, 0.95);
     this.slashMaterial = new THREE.MeshBasicMaterial({
       color: 0x7cc4ff,
       transparent: true,
@@ -307,12 +362,34 @@ export class HeroMesh3D {
       depthWrite: false,
       side: THREE.DoubleSide,
     });
-    this.slash = new THREE.Mesh(this.slashGeometry, this.slashMaterial);
-    this.slash.position.set(0, shoulderY - 0.1, 0.5);
-    this.slash.rotation.x = -Math.PI / 2.6;
-    this.slash.visible = false;
-    this.slash.renderOrder = 9;
-    this.body.add(this.slash);
+    const shapes: [MeleeStyle, THREE.BufferGeometry][] = [
+      ['sword', slashArc(0.45, 1.15, Math.PI * 0.85)], // wide sweep
+      ['dagger', slashArc(0.4, 0.72, Math.PI * 0.55)], // thin and quick
+      ['hammer', slashArc(0.3, 1.0, Math.PI * 0.45)], // short and thick
+    ];
+    const thrust = new THREE.PlaneGeometry(0.16, 1.7);
+    thrust.rotateX(-Math.PI / 2);
+    thrust.translate(0, 0, 1.0);
+    shapes.push(['spear', thrust]); // one straight line forward
+    for (const [st, geo] of shapes) {
+      this.slashGeometries.push(geo);
+      const mesh = new THREE.Mesh(geo, this.slashMaterial);
+      mesh.visible = false;
+      mesh.renderOrder = 9;
+      this.slashPivot.add(mesh);
+      this.slashes.set(st, mesh);
+    }
+    this.slashPivot.position.set(0, shoulderY - 0.18, 0);
+    this.body.add(this.slashPivot);
+
+    const ring = new THREE.RingGeometry(0.8, 1, 28);
+    ring.rotateX(-Math.PI / 2);
+    this.slashGeometries.push(ring);
+    this.impactMat = new THREE.MeshBasicMaterial({ color: 0xffe0b0, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+    this.impactRing = new THREE.Mesh(ring, this.impactMat);
+    this.impactRing.position.set(0, 0.04, 0.7);
+    this.impactRing.visible = false;
+    this.root.add(this.impactRing);
   }
 
   // ───────────────────────── animation ─────────────────────────
@@ -383,8 +460,22 @@ export class HeroMesh3D {
 
     // the weapon in hand, and the bowstring: it follows the charge back and snaps forward on release
     const ranged = core.isRanged;
-    this.sword.visible = !ranged;
+    this.style = core.meleeStyle;
+    for (const [st, g] of this.weapons) g.visible = !ranged && st === this.style;
     this.bow.visible = ranged;
+    // the swing trail takes the colour of the element on the weapon
+    this.slashMaterial.color.setHex(core.element ? ELEMENTS[core.element].color : 0x7cc4ff);
+    // a hammer's blow lands: a ring spreads over the ground in front
+    const active = core.state === 'attack' && core.stateT >= core.attackDef.windup && core.stateT < core.attackDef.windup + core.attackDef.active;
+    if (active && !this.wasActive && this.style === 'hammer') this.impactT = IMPACT_TIME;
+    this.wasActive = active;
+    if (this.impactT > 0) {
+      this.impactT = Math.max(0, this.impactT - realDt);
+      const k = 1 - this.impactT / IMPACT_TIME;
+      this.impactRing.visible = true;
+      this.impactRing.scale.setScalar(0.3 + k * 1.3);
+      this.impactMat.opacity = (1 - k) * 0.8;
+    } else this.impactRing.visible = false;
     if (ranged) {
       const drawing = core.charge > 0;
       const want = drawing ? 0.25 + core.charge * 0.75 : 0;
@@ -420,7 +511,7 @@ export class HeroMesh3D {
     for (const m of this.mittens) paint(m, look.gloves !== null ? mix(shade(L.boots, 0.15), look.gloves, 0.55) : shade(L.boots, 0.15));
     for (const m of this.boots) paint(m, look.boots !== null ? mix(L.boots, look.boots, 0.45) : L.boots);
     for (const m of this.bootCuffs) paint(m, look.boots !== null ? look.boots : shade(L.boots, 0.35));
-    paint(this.guard, look.weapon ?? P.y3);
+    for (const m of this.weaponAccents) paint(m, look.weapon ?? P.y3);
     this.lanternColor = look.core !== null ? mix(0xffe066, look.core, 0.55) : 0xffe066;
     this.lantern.color.setHex(look.core !== null ? mix(0xffd9a0, look.core, 0.35) : 0xffd9a0);
   }
@@ -444,10 +535,11 @@ export class HeroMesh3D {
     this.legL.pivot.rotation.set(p.legLX, 0, 0);
     this.legR.pivot.rotation.set(p.legRX, 0, 0);
     this.cloak.pivot.rotation.set(p.cloakX, 0, 0);
-    this.slash.visible = p.slashOpacity > 0.02;
+    for (const [st, mesh] of this.slashes) mesh.visible = st === this.style && p.slashOpacity > 0.02;
     this.slashMaterial.opacity = Math.max(0, p.slashOpacity);
-    this.slash.rotation.z = p.slashRotZ;
-    this.slash.scale.setScalar(Math.max(0.01, p.slashScale));
+    // the spear's line does not sweep; everything else turns through the swing
+    this.slashPivot.rotation.y = this.style === 'spear' ? 0 : p.slashRotZ;
+    this.slashPivot.scale.setScalar(Math.max(0.01, p.slashScale));
   }
 
   private poseIdle(): void {
@@ -637,8 +729,9 @@ export class HeroMesh3D {
 
   dispose(): void {
     this.root.removeFromParent();
-    this.slashGeometry.dispose();
+    for (const g of this.slashGeometries) g.dispose();
     this.slashMaterial.dispose();
+    this.impactMat.dispose();
     for (const g of this.geometries) g.dispose();
     for (const m of this.materials) m.dispose();
     this.lantern.dispose();

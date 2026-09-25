@@ -108,3 +108,32 @@ export function shotForCharge(charge: number): ShotDef {
  * in `BOW.fullCharge` so it can be tuned at runtime.
  */
 export const fullChargeTime = (): number => Math.max(0.05, BOW.fullCharge);
+
+export type MeleeStyle = 'sword' | 'dagger' | 'hammer' | 'spear';
+
+/**
+ * How each kind of melee weapon fights, as multipliers on the sword combo (`ATTACKS` in
+ * HeroCore). The equipped weapon item decides the style (`ItemDef.style`); its look, its swing
+ * trail and its hit feel follow (render3d: HeroMesh3D, Game3D).
+ */
+export interface StyleDef {
+  /** Windup, active and recovery times. Below 1 = faster. */
+  time: number;
+  dmg: number;
+  range: number;
+  arc: number;
+  knock: number;
+  lunge: number;
+  /** Camera shake and hit-stop on a hit. */
+  impact: number;
+}
+
+export const MELEE_STYLES: Record<MeleeStyle, StyleDef> = {
+  sword: { time: 1, dmg: 1, range: 1, arc: 1, knock: 1, lunge: 1, impact: 1 },
+  // quick and thin: more hits, each lighter, a little shorter
+  dagger: { time: 0.68, dmg: 0.7, range: 0.82, arc: 0.75, knock: 0.55, lunge: 1.25, impact: 0.6 },
+  // slow and heavy: the ground shakes
+  hammer: { time: 1.45, dmg: 1.7, range: 1.05, arc: 1.2, knock: 1.7, lunge: 0.55, impact: 2 },
+  // one straight line, far
+  spear: { time: 1.1, dmg: 1.1, range: 1.5, arc: 0.4, knock: 1.1, lunge: 1.35, impact: 1.1 },
+};

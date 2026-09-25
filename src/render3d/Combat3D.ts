@@ -17,7 +17,7 @@ import { Archer, Boss, EnemyCore, EnemyWorld, inArc, Slime, TrainingDummy, type 
 import type { HeroCore, ShootEvent, SwingEvent } from '../core/entities/HeroCore';
 import { ATTACKS, HERO_STATS } from '../core/entities/HeroCore';
 import { makeArrow, stepArrow, type Arrow } from '../core/combat/arrows';
-import { BOW } from '../core/combat/weapons';
+import { BOW, MELEE_STYLES } from '../core/combat/weapons';
 import { sfx } from '../core/audio';
 import { computeDamage } from '../core/stats/damage';
 import type { Character } from '../core/stats/character';
@@ -56,6 +56,8 @@ export interface CombatHooks {
   coins?(amount: number): void;
   /** An elemental hit landed (the tutorial listens for the one on the training dummy). */
   elementHit?(kind: string, element: ElementId): void;
+  /** A hit's particles: sparks, a crit burst, the element's own effect (Particles.hit). */
+  hitFx?(x: number, y: number, element: ElementId | undefined, crit: boolean): void;
   /** An invasion monster fell (world events). */
   invaderDown?(): void;
   /** Extra multiplier for hits of an element (the elemental storm), 1 when nothing applies. */
@@ -351,15 +353,19 @@ export class Combat3D {
       this.meshes.get(e)?.flash();
       const colour = res.reaction ? `#${res.reaction.color.toString(16).padStart(6, '0')}` : rolled.crit ? '#ff9f43' : hero.isHeavy ? '#ffd15a' : '#ffffff';
       this.hooks.damage(e.x, e.y - e.h - 2, dmg, colour, hero.isHeavy || rolled.crit || !!res.reaction);
-      this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : el ? ELEMENTS[el].color : 0xffe9a8, hero.isHeavy);
+      if (this.hooks.hitFx) this.hooks.hitFx(e.x, e.cy, el, rolled.crit || hero.isHeavy);
+      else this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : el ? ELEMENTS[el].color : 0xffe9a8, hero.isHeavy);
+      if (res.reaction) this.hooks.spark(e.x, e.cy, res.reaction.color, true);
       if (res.reaction) {
         reacted = true;
         this.burst(e, res.reaction.burst, res.reaction.element, dmg);
       }
     }
     if (hits > 0) {
-      this.hooks.freeze(HERO_STATS.hitStopMs * (hero.isHeavy ? 1.6 : 1));
-      this.hooks.shake(HERO_STATS.hitShake * (hero.isHeavy ? 1.7 : 1), 0.14);
+      // a hammer lands harder than a dagger: hit-stop and shake follow the weapon style
+      const impact = MELEE_STYLES[hero.meleeStyle].impact;
+      this.hooks.freeze(HERO_STATS.hitStopMs * (hero.isHeavy ? 1.6 : 1) * Math.min(1.6, impact));
+      this.hooks.shake(HERO_STATS.hitShake * (hero.isHeavy ? 1.7 : 1) * impact, 0.14);
       sfx.hit(hero.isHeavy);
       if (reacted) sfx.reaction();
     }
@@ -389,13 +395,15 @@ export class Combat3D {
       // the skill carries the SECONDARY element, which is what makes a second element useful
       const el = hero.skillElement ?? hero.element;
       const res = el ? applyElement(bag, el) : { damageMult: 1, reaction: null };
-      const blastDmg = this.hit(e, dmg, el, res.damageMult).amount;
+      const blastHit = this.hit(e, dmg, el, res.damageMult);
+      const blastDmg = blastHit.amount;
       if (!e.hurt(blastDmg, x, y, knock, stun, { emit: (ev) => this.world.events.push(ev) })) continue;
       hits++;
       this.noteElement(e, el, res);
       this.meshes.get(e)?.flash();
       this.hooks.damage(e.x, e.y - e.h - 2, blastDmg, '#ffe066', true);
-      this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : 0xffe066, true);
+      if (this.hooks.hitFx) this.hooks.hitFx(e.x, e.cy, el, true);
+      else this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : 0xffe066, true);
       if (res.reaction) this.burst(e, res.reaction.burst, res.reaction.element, dmg);
     }
     // a blast also swats enemy projectiles out of the air
@@ -447,14 +455,16 @@ export class Combat3D {
      * number by the reaction and stop there, which meant levels, ATK, crits and the target's
      * DEF all did nothing for the bow — half the weapons ignored the whole of Batch 4.
      */
-    const dmg = this.hit(e, a.dmg, a.element, res.damageMult).amount;
+    const rolled = this.hit(e, a.dmg, a.element, res.damageMult);
+    const dmg = rolled.amount;
     const len = Math.hypot(a.vx, a.vy) || 1;
     if (!e.hurt(dmg, e.x - (a.vx / len) * 8, e.cy - (a.vy / len) * 8, 90 + a.charge * 60, 0.16, { emit: (x) => this.world.events.push(x) })) return false;
     this.noteElement(e, a.element, res);
     this.meshes.get(e)?.flash();
     const pierced = a.pierce > 1 || a.charge >= 1;
     this.hooks.damage(e.x, e.y - e.h - 2, dmg, res.reaction ? '#ffe066' : '#ffe9a8', pierced);
-    this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : a.element ? ELEMENTS[a.element].color : 0xffe9a8, pierced);
+    if (this.hooks.hitFx) this.hooks.hitFx(e.x, e.cy, a.element, rolled.crit);
+    else this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : a.element ? ELEMENTS[a.element].color : 0xffe9a8, pierced);
     this.hooks.freeze(HERO_STATS.hitStopMs * BOW.hitStop * (pierced ? 1.3 : 1));
     if (pierced) this.hooks.shake(1.5, 0.08);
     sfx.arrowHit(pierced);

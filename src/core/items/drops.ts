@@ -47,6 +47,7 @@ export const DROP_TABLES: Record<string, DropEntry[]> = {
     { id: 'potion_small', chance: 0.12 },
     { id: 'gloves_grip', chance: 0.04, upgrade: 0.3, maxUp: 2 },
     { id: 'bow_whisper', chance: 0.03, upgrade: 0.3, maxUp: 2 },
+    { id: 'dagger_mist', chance: 0.04, upgrade: 0.3, maxUp: 2 },
   ],
   boss: [
     { id: 'core_ember', chance: 1 },
@@ -60,6 +61,8 @@ export const DROP_TABLES: Record<string, DropEntry[]> = {
     { id: 'ring_thorn', chance: 0.14, upgrade: 0.3, maxUp: 2 },
     { id: 'armor_woven', chance: 0.16, upgrade: 0.3, maxUp: 3 },
     { id: 'sword_village', chance: 0.12, upgrade: 0.3, maxUp: 3 },
+    { id: 'hammer_ember', chance: 0.07, upgrade: 0.25, maxUp: 2 },
+    { id: 'spear_tide', chance: 0.07, upgrade: 0.25, maxUp: 2 },
   ],
 };
 

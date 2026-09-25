@@ -79,9 +79,10 @@ export class Portrait3D {
   }
 
   /** The weapon in hand (0 = sword slot, 1 = bow slot), copied from the real hero. */
-  setWeaponSlot(slot: 0 | 1, loadout: HeroCore['loadout']): void {
-    if (this.core.slot === slot && this.core.loadout[0] === loadout[0] && this.core.loadout[1] === loadout[1]) return;
+  setWeaponSlot(slot: 0 | 1, loadout: HeroCore['loadout'], style: HeroCore['meleeStyle'] = this.core.meleeStyle): void {
+    if (this.core.slot === slot && this.core.loadout[0] === loadout[0] && this.core.loadout[1] === loadout[1] && this.core.meleeStyle === style) return;
     this.core.slot = slot;
+    this.core.meleeStyle = style;
     this.core.loadout[0] = loadout[0];
     this.core.loadout[1] = loadout[1];
     this.fresh = false;

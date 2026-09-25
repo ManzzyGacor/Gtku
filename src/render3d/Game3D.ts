@@ -30,6 +30,7 @@ import { CharacterPanel } from '../ui/CharacterPanel';
 import { Portrait3D } from './Portrait3D';
 import { Coop3D } from './Coop3D';
 import { BakeWorker } from './BakeWorker';
+import { Particles } from './Particles';
 import { CoopPanel, type CoopView } from '../ui/CoopPanel';
 import { CoopClient, type CoopStatus, type Result, type RoomView, type SocketLike } from '../core/coop/client';
 import { BTN_ATTACK, BTN_DODGE, BTN_SKILL, type ClientMsg, type CoopError, type SnapEvent } from '../../shared/coop/protocol';
@@ -203,6 +204,8 @@ export class Game3D {
   /** Frame times for the report, in ms. */
   /** CPU milliseconds per frame, stage by stage (the report's "rincian waktu"). */
   readonly stages = new StageTimer();
+  /** Combat and movement particles (pooled, GPU-animated). */
+  readonly particles: Particles;
   private unsubscribe: () => void;
   private disposed = false;
   /** What the save migration had to change on load, shown in the report so it is never silent. */
@@ -232,6 +235,7 @@ export class Game3D {
     this.sky = new Sky(this.pixels.scene);
     this.scene3d = new World3D(this.pixels.scene, this.world, this.tileSheet);
     this.environment = new Environment(this.pixels.scene);
+    this.particles = new Particles(this.pixels.scene);
 
     const start = this.world.markers.playerStart;
     this.hero = new HeroCore(start.x, start.y);
@@ -349,6 +353,7 @@ export class Game3D {
       freeze: (ms) => this.freeze(ms),
       shake: (amount, seconds) => this.camera.shake(amount, seconds),
       spark: (x, y, color, big) => this.environment.spark(u(x), u(y), color, big),
+      hitFx: (x, y, element, crit) => this.particles.hit(u(x), u(y), element, crit),
       damage: (x, y, amount, color, big) => this.hud.float(u(x), 0.9, u(y), String(amount), color, big),
       killed: (kind, x, y) => {
         this.story.questEvent({ type: 'kill', kind });
@@ -538,6 +543,8 @@ export class Game3D {
     this.scene3d.setGroundDetail(p.id === 'vlow' ? 0 : a.detail);
     this.scene3d.setRim(p.id === 'vlow' ? 0.4 : 1);
     this.environment.setBudget(Math.min(p.id === 'vlow' ? 0 : p.id === 'low' ? 0.5 : 1, a.particles));
+    // combat particles never go to zero: a hit needs to read even on the weakest phone
+    this.particles.setBudget(Math.max(0.3, Math.min(p.id === 'vlow' ? 0.35 : p.id === 'low' ? 0.6 : p.id === 'ultra' ? 1.3 : 1, a.particles + 0.3)));
     this.scene3d.setShadows(p.shadows);
     this.resize();
     this.scene3d.setRenderDistance(this.chunkRadius());
@@ -835,7 +842,7 @@ export class Game3D {
     if (!this.portrait) {
       this.portrait = new Portrait3D(this.pixels.renderer);
       this.portrait.setGear(gearLook(this.character.inventory.equipped));
-      this.portrait.setWeaponSlot(this.hero.slot, this.hero.loadout);
+      this.portrait.setWeaponSlot(this.hero.slot, this.hero.loadout, this.hero.meleeStyle);
       this.portrait.update(0, true);
     }
     return this.portrait;
@@ -885,6 +892,9 @@ export class Game3D {
      */
     this.hero.element = this.character.primary ?? undefined;
     this.hero.skillElement = this.character.secondary ?? this.character.primary ?? undefined;
+    // the equipped weapon decides how the melee slot fights, and what the hero holds
+    const weapon = this.character.inventory.equipped.weapon;
+    this.hero.meleeStyle = (weapon && itemDef(weapon.id)?.style) || 'sword';
   }
 
   /**
@@ -1642,7 +1652,7 @@ export class Game3D {
     }
     this.heroMesh.update(simDt, dt, this.hero, this.clock);
     if (this.portrait) {
-      this.portrait.setWeaponSlot(this.hero.slot, this.hero.loadout);
+      this.portrait.setWeaponSlot(this.hero.slot, this.hero.loadout, this.hero.meleeStyle);
       this.portrait.update(dt, this.sheet.showingCharacter);
     }
     this.onWeaponState(
@@ -1688,6 +1698,7 @@ export class Game3D {
     this.scene3d.waterUniforms.uFogColor.value.copy(this.sky.haze);
     this.scene3d.waterUniforms.uFogRange.value.set(this.sky.fog.near, this.sky.fog.far);
     this.stages.lap(1);
+    this.particles.update(dt);
     this.environment.update(dt, this.camera.target, nightAmount(this.dayTime), cave, this.forestWeight(), this.sky.haze);
     // no rain underground, whatever the sky is doing
     this.rain?.update(dt, this.camera.target, this.camera.yawRadians, WEATHER[this.weather].rain * (1 - cave));
@@ -1798,6 +1809,11 @@ export class Game3D {
           break;
         case 'swing':
           this.combat.applySwing(this.hero, e);
+          if (this.hero.meleeStyle === 'hammer') {
+            // the head hits the ground whether or not it hit anything: dust and a jolt
+            this.particles.burst('impact', u(e.x + Math.cos(e.angle) * 18), u(e.y + Math.sin(e.angle) * 18), -1, this.hero.isHeavy ? 1.4 : 1);
+            this.camera.shake(this.hero.isHeavy ? 3.5 : 2.2, 0.16);
+          }
           break;
         case 'shoot': {
           this.combat.spawnArrow(e);
@@ -1821,7 +1837,11 @@ export class Game3D {
           break;
         case 'roll':
           sfx.roll();
-          this.environment.spark(u(e.x), u(e.y), 0xd8cfff, false);
+          this.particles.burst('dodge', u(e.x), u(e.y), -1, 1, e.angle + Math.PI);
+          break;
+        case 'step':
+          // a little dust at each footfall (the preset decides how much)
+          this.particles.burst('dust', u(e.x), u(e.y));
           break;
         case 'blast':
           this.environment.spark(u(e.x), u(e.y), 0xffe4a0, true);
@@ -2049,6 +2069,7 @@ export class Game3D {
     this.camera.dispose();
     this.sky.dispose();
     this.environment.dispose();
+    this.particles.dispose();
     this.heroMesh.dispose();
     this.portrait?.dispose();
     this.scene3d.baker?.dispose();

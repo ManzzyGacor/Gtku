@@ -5,7 +5,7 @@
 import { clamp } from '../rng';
 import type { Collision } from '../world/collision';
 import type { ElementId } from '../combat/elements';
-import { BOW, DEFAULT_LOADOUT, fullChargeTime, shotForCharge, WEAPONS, type ShotDef, type WeaponId } from '../combat/weapons';
+import { BOW, DEFAULT_LOADOUT, fullChargeTime, MELEE_STYLES, shotForCharge, type MeleeStyle, WEAPONS, type ShotDef, type WeaponId } from '../combat/weapons';
 
 export type HeroState = 'free' | 'attack' | 'roll' | 'hurt' | 'cast' | 'dead' | 'shoot' | 'swap';
 export type Dir4 = 'd' | 'u' | 's';
@@ -192,8 +192,25 @@ export class HeroCore {
     return this.state !== 'dead';
   }
 
+  /** How the melee weapon in hand fights (from the equipped weapon item). */
+  meleeStyle: MeleeStyle = 'sword';
+  /** Filled by `attackDef` — read every frame, so it is reused rather than allocated. */
+  private readonly styled: AttackDef = { ...ATTACKS[0] };
+
+  /** The current swing, shaped by the weapon style. The object is reused: read, do not keep. */
   get attackDef(): AttackDef {
-    return ATTACKS[Math.min(this.combo, ATTACKS.length - 1)];
+    const a = ATTACKS[Math.min(this.combo, ATTACKS.length - 1)];
+    const st = MELEE_STYLES[this.meleeStyle];
+    const o = this.styled;
+    o.windup = a.windup * st.time;
+    o.active = a.active * st.time;
+    o.recover = a.recover * st.time;
+    o.dmg = a.dmg * st.dmg;
+    o.range = a.range * st.range;
+    o.arc = a.arc * st.arc;
+    o.knock = a.knock * st.knock;
+    o.lunge = a.lunge * st.lunge;
+    return o;
   }
 
   /** Attack phase 0 = windup, 1 = active, 2 = recovery. */
