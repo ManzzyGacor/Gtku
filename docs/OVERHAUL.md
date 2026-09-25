@@ -139,7 +139,7 @@ chunk streaming, jumlah cahaya dinamis & bayangan dibatasi.
 | 4 | Stats, equipment, Lantern Core, inventaris, progresi | ✅ selesai |
 | 5 | Cutscene pembuka + sistem cutscene, audio, UI/HUD, menu | ✅ selesai |
 | 6 | World streaming, Download Manager, grafik AUTO lengkap | ✅ selesai |
-| 7 | Akun & backend, world event, optimasi performa, dokumentasi akhir | ⬜ |
+| 7 | Akun & backend, world event, optimasi performa, dokumentasi akhir | ✅ selesai (server: dirancang, `docs/BACKEND.md`) |
 
 ### Batch 1 — rincian
 

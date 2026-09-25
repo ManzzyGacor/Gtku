@@ -1183,3 +1183,23 @@ Tes: `tests/titlebackdrop.test.ts`.
 - Tes `tests/backend.test.ts` (8) memakai tiruan API di memori yang mengikuti dokumen itu.
 - **Belum dibangun:** server-nya sendiri. Tanpa `VITE_API_URL`, game memakai akun lokal persis
   seperti sebelumnya.
+
+## Batch 7 (3/3): optimasi akhir & dokumentasi
+
+Optimasi (semuanya alokasi/pekerjaan per frame yang ditemukan saat meninjau jalur frame, dan
+masing-masing kini dijaga `tests/frametime.test.ts`):
+- `Hud.setQuest` membangun ulang teks quest (join + template) **setiap frame** walau isinya sama;
+  sekarang dikenali lewat referensi objek yang sudah di-cache.
+- `onWeaponState` membuat objek baru dan meng-uppercase nama senjata setiap frame; sekarang konstanta.
+- `TouchControls.setWeaponState` menulis ulang 6 properti style cincin charge setiap frame (memicu
+  kerja layout di browser) walau busur tidak ditarik; sekarang hanya saat charge/ukuran berubah.
+- Portrait avatar: salinan piksel tanpa subarray per baris; latar judul dibuang sebelum dunia dibuat
+  (tidak pernah dua konteks WebGL).
+
+Dokumentasi diperbarui: `README.md` (memulai, akun, event, variabel build), `CLAUDE.md` (struktur
+folder baru, aturan nama class CSS, aturan akun), `docs/GAME_DESIGN.md` (ditulis ulang untuk game
+3D — versi lama masih menggambarkan game 2D Phaser), `docs/OVERHAUL.md` (Batch 7 ✅, akun tanpa tamu),
+`docs/BACKEND.md` (baru).
+
+**Semua batch 0–7 selesai.** Yang secara jujur belum ada: server akun/sinkronisasi (dirancang dan
+klien siap, belum dibangun), lupa sandi lewat email, dan override PNG untuk tekstur 3D.

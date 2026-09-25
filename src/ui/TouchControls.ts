@@ -110,6 +110,9 @@ export class TouchControls {
   private pointerId = -1;
   private center = { x: 0, y: 0 };
   private buttons: ActionButton[] = [];
+  /** Looked up once: the renderer asks for them every frame. */
+  private swapButton: ActionButton | null = null;
+  private attackButton: ActionButton | null = null;
   private chargeRing!: HTMLDivElement;
   private unsubscribe: () => void;
   enabled = true;
@@ -209,9 +212,9 @@ export class TouchControls {
    * drawn. Called every frame by the renderer; the DOM writes are two strings and an opacity.
    */
   setWeaponState(nextWeapon: string, charge: number, held: { label: string; ranged: boolean } | null = null): void {
-    const swap = this.buttons.find((b) => b.action === 'swap');
+    const swap = this.swapButton ?? (this.swapButton = this.buttons.find((b) => b.action === 'swap') ?? null);
     if (swap && swap.node.textContent !== nextWeapon) swap.node.textContent = nextWeapon;
-    const attack = this.buttons.find((b) => b.action === 'attack');
+    const attack = this.attackButton ?? (this.attackButton = this.buttons.find((b) => b.action === 'attack') ?? null);
     if (!attack) return;
     if (held) {
       if (attack.node.textContent !== held.label) attack.node.textContent = held.label;
@@ -219,16 +222,32 @@ export class TouchControls {
       attack.node.classList.toggle('ranged', held.ranged);
     }
     const bs = settings.get('buttonScale');
+    /*
+     * The ring only changes while the bow is drawn. It used to be restyled — a fresh object, four
+     * template strings and six style writes — on every frame of the game, drawn or not; now an
+     * unchanged charge on an unchanged button costs nothing.
+     */
+    const left = attack.node.style.left;
+    const top = attack.node.style.top;
+    if (charge === this.ringCharge && bs === this.ringScale && left === this.ringLeft && top === this.ringTop) return;
+    this.ringCharge = charge;
+    this.ringScale = bs;
+    this.ringLeft = left;
+    this.ringTop = top;
     const r = (attack.r + 7) * bs * (0.75 + charge * 0.25);
-    Object.assign(this.chargeRing.style, {
-      left: attack.node.style.left,
-      top: attack.node.style.top,
-      width: `${r * 2}px`,
-      height: `${r * 2}px`,
-      opacity: charge > 0.02 ? String(0.35 + charge * 0.65) : '0',
-      borderColor: charge >= 1 ? 'rgba(255, 224, 102, 0.95)' : 'rgba(124, 196, 255, 0.9)',
-    });
+    const st = this.chargeRing.style;
+    st.left = left;
+    st.top = top;
+    st.width = `${r * 2}px`;
+    st.height = `${r * 2}px`;
+    st.opacity = charge > 0.02 ? String(0.35 + charge * 0.65) : '0';
+    st.borderColor = charge >= 1 ? 'rgba(255, 224, 102, 0.95)' : 'rgba(124, 196, 255, 0.9)';
   }
+
+  private ringCharge = -1;
+  private ringScale = -1;
+  private ringLeft = '';
+  private ringTop = '';
 
   /**
    * Show or hide the contextual interact button, with the label the world supplied.

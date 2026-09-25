@@ -301,6 +301,10 @@ export class Hud {
   // ───────────────────────── text ─────────────────────────
 
   setQuest(title: string, lines: string[]): void {
+    // called every frame with the same cached object: compare the references before building text
+    if (title === this.questTitle && lines === this.questLines) return;
+    this.questTitle = title;
+    this.questLines = lines;
     const body = lines.join('\n');
     const wanted = `${title}\n${body}`;
     if (this.quest.dataset.text === wanted) return;
@@ -310,6 +314,9 @@ export class Hud {
     this.quest.append(b, document.createTextNode(body ? `\n${body}` : ''));
     this.quest.style.display = title || body ? 'block' : 'none';
   }
+
+  private questTitle = '';
+  private questLines: string[] | null = null;
 
   banner(text: string, seconds = 2.6): void {
     this.bannerEl.textContent = text;

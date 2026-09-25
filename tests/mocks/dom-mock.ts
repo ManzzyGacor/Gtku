@@ -186,6 +186,7 @@ export interface FakeDocument {
   createElement(tag: string): FakeEl;
   getElementById(id: string): FakeEl | null;
   execCommand(cmd: string): boolean;
+  createTextNode(text: string): FakeEl;
 }
 
 /** Install a fake `document` on globalThis and hand it back. */
@@ -197,6 +198,11 @@ export function installDom(): FakeDocument {
     createElement: (tag) => (tag === 'canvas' ? makeCanvas() : makeElement(tag)),
     getElementById: (id) => byId.get(id) ?? null,
     execCommand: () => true,
+    createTextNode: (text) => {
+      const node = makeElement('#text');
+      node.textContent = text;
+      return node;
+    },
   };
   (globalThis as Record<string, unknown>).document = doc;
   return doc;

@@ -197,3 +197,33 @@ test('enemyCount does not build an array for the HUD each frame', () => {
   assert.equal(combat.enemyCount, n);
   combat.dispose();
 });
+
+test('the HUD does not rebuild the quest text when the same cached lines come in', async () => {
+  const { Hud } = await import('../src/ui/Hud');
+  const hud = new Hud(doc.body as unknown as HTMLElement);
+  const lines = ['Kalahkan 3/6 monster'];
+  let joins = 0;
+  lines.join = function (this: string[], sep?: string): string {
+    joins++;
+    return Array.prototype.join.call(this, sep);
+  };
+  for (let i = 0; i < 120; i++) hud.setQuest('Quest', lines);
+  assert.equal(joins, 1, 'built once, then recognised by reference');
+  hud.setQuest('Quest', ['baru']);
+  hud.destroy();
+});
+
+test('the touch controls do not restyle the charge ring on frames where nothing changed', async () => {
+  (globalThis as Record<string, unknown>).localStorage ??= { getItem: () => null, setItem: () => undefined, removeItem: () => undefined };
+  const { TouchControls } = await import('../src/ui/TouchControls');
+  const tc = new TouchControls();
+  const ring = (tc as unknown as { chargeRing: { style: Record<string, string> } }).chargeRing;
+  const held = { label: 'TEBAS', ranged: false };
+  tc.setWeaponState('BUSUR', 0, held);
+  ring.style.width = 'sentinel';
+  for (let i = 0; i < 60; i++) tc.setWeaponState('BUSUR', 0, held);
+  assert.equal(ring.style.width, 'sentinel', 'an idle bow button is not touched every frame');
+  tc.setWeaponState('BUSUR', 0.5, held);
+  assert.notEqual(ring.style.width, 'sentinel', 'drawing the bow still moves the ring');
+  tc.destroy();
+});

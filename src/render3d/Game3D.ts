@@ -89,6 +89,14 @@ function vibrate(ms: number): void {
   }
 }
 
+/*
+ * What the attack and swap buttons say. Constants, because they are handed to the touch controls
+ * every frame: building the object and upper-casing the name each time was garbage on every frame.
+ */
+const HELD_MELEE = { label: 'TEBAS', ranged: false } as const;
+const HELD_RANGED = { label: 'PANAH', ranged: true } as const;
+const WEAPON_LABEL = Object.fromEntries(Object.values(WEAPONS).map((w) => [w.id, w.name.toUpperCase()])) as Record<keyof typeof WEAPONS, string>;
+
 /** A number per event id, for the HUD's cheap change key. */
 const WORLD_EVENT_IDS_INDEX: Record<WorldEventId, number> = { invasi: 1, badai: 2, kabut: 3, pedagang: 4, purnama: 5 };
 
@@ -1365,9 +1373,9 @@ export class Game3D {
       this.portrait.update(dt, this.sheet.showingCharacter);
     }
     this.onWeaponState(
-      WEAPONS[this.hero.loadout[this.hero.slot === 0 ? 1 : 0]].name.toUpperCase(),
+      WEAPON_LABEL[this.hero.loadout[this.hero.slot === 0 ? 1 : 0]],
       this.hero.charge,
-      { label: this.hero.isRanged ? 'PANAH' : 'TEBAS', ranged: this.hero.isRanged },
+      this.hero.isRanged ? HELD_RANGED : HELD_MELEE,
     );
     // The contextual interact button: the world decides the word, the controls draw it.
     this.onInteractPrompt(this.paused || this.dialogue.open ? null : this.story.interactPrompt);

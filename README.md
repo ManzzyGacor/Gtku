@@ -4,8 +4,18 @@ Open-world action RPG **3D pixel-art** (Three.js). Semua karakter, nama, cerita,
 seluruh pixel art, geometri, musik, dan efek suara dihasilkan lewat kode. Dirancang untuk browser
 HP Android (landscape); keyboard tetap didukung.
 
-Rencana induk dan urutan batch: [`docs/OVERHAUL.md`](docs/OVERHAUL.md). Naskah cerita:
-[`docs/STORY.md`](docs/STORY.md). Status pekerjaan dan cara mengetesnya: [`docs/PROGRESS.md`](docs/PROGRESS.md).
+Rencana induk dan urutan batch: [`docs/OVERHAUL.md`](docs/OVERHAUL.md) (Batch 0–7 selesai). Naskah
+cerita: [`docs/STORY.md`](docs/STORY.md). Status pekerjaan dan cara mengetesnya:
+[`docs/PROGRESS.md`](docs/PROGRESS.md). Desain server: [`docs/BACKEND.md`](docs/BACKEND.md).
+
+## Memulai
+
+1. Buka game → **Sentuh untuk memulai** (musik tema mulai, dan game meminta layar penuh; kalau
+   browser menolak, ketuk tombol **⛶ Layar Penuh** di atas).
+2. **Masuk** atau **Daftar**. Akun wajib. Selama server belum ada, akun **hanya tersimpan di HP ini**
+   dan hilang kalau data browser dibersihkan — form Daftar mengatakannya. Kata sandi disimpan
+   sebagai hash (PBKDF2), tidak pernah dalam bentuk asli. Setiap akun punya save sendiri.
+3. Menu: Lanjutkan · Main Baru · Pengaturan · Akun · Kredit.
 
 ## Cara main
 
@@ -20,18 +30,25 @@ Rencana induk dan urutan batch: [`docs/OVERHAUL.md`](docs/OVERHAUL.md). Naskah c
 | Bicara · Baca · Buka · Berdoa | Tombol yang **muncul saat dekat** objek, labelnya sesuai objek | `E` / `Enter` |
 | Karakter & tas | Tombol 🎒 (kanan atas) | `I` / `Tab` |
 | Menu jeda | Tombol ☰ (kanan atas) | `Esc` / `P` |
-| Pengaturan | Tombol ⚙ (kanan atas) | — |
+| Pengaturan | Tombol ⚙ (kanan atas) | `Esc` di layar judul |
+| Dagang (event Pedagang Keliling) | Tombol **Dagang** saat dekat pedagang | `E` |
 
 **Awal permainan:** setelah prolog, berdoa di shrine Ravenhollow (di plaza, satu langkah dari titik
 mulai) untuk mendapat **Inti Bara** dan elemen **Api**, lalu coba pada boneka latihan di sebelah timur
 shrine. Setelah itu quest utama: bicara dengan tetua di plaza.
+
+**World event** muncul sendiri setelah tutorial (dicek tiap 90 detik bermain): Invasi Monster,
+Badai Elemen, Kabut Misterius, Pedagang Keliling (belanja dengan koin), Malam Purnama. Baris event
+tampil di bawah objektif.
 
 ## Mode Pengembang
 
 Menu untuk mengetes tanpa harus memainkan seluruh game: memberi item/Inti Lentera/koin, membuka
 keempat elemen dan mengatur elemen primer & sekunder, mengatur level & EXP, memunculkan tiap jenis
 musuh dan boneka latihan, log reaksi elemen di layar, teleport ke setiap area & tempat penting
-(termasuk tiap peti), mengatur jam & cuaca, mode kebal, reset status cutscene, dan hapus save.
+(termasuk tiap peti), mengatur jam & cuaca, **memulai/mengakhiri world event**, mode kebal, reset
+status cutscene, dan hapus save. Di build pengembangan, layar Masuk juga punya tombol
+**LEWATI LOGIN (MODE PENGEMBANG)** untuk mengetes tanpa akun.
 
 **Cara membuka** (salah satu):
 
@@ -46,8 +63,8 @@ Selama menu terbuka, dunia berhenti. Musuh yang dimunculkan dari menu **tidak** 
 **Tidak pernah ada di build rilis.** Pintu masuknya memakai `import.meta.env.DEV`, yang diganti
 menjadi `false` oleh `vite build`, sehingga kode menunya bahkan tidak ikut dibangun — bukan
 disembunyikan, tapi tidak ada. `tests/devmode.test.ts` membangun versi rilis sungguhan dan memeriksa
-bahwa tidak ada potongan menu pengembang di dalamnya. Untuk build staging yang sengaja membawanya:
-`VITE_DEV_TOOLS=1 npm run build`.
+bahwa tidak ada potongan menu pengembang (termasuk tombol lewati login) di dalamnya. Untuk build
+staging yang sengaja membawanya: `VITE_DEV_TOOLS=1 npm run build`.
 
 ## Menjalankan
 
@@ -62,11 +79,15 @@ npm run lint     # oxlint
 Parameter URL: `?fps=1` (penghitung FPS), `?bloom=0`, `?preset=vlow|low|medium|high|ultra`,
 `?debug=1` (Mode Pengembang, hanya build pengembangan).
 
+Variabel build: `VITE_API_URL=https://…/api` memakai akun & sinkronisasi save di server
+(`docs/BACKEND.md`; servernya belum dibangun), `VITE_DEV_TOOLS=1` membawa Mode Pengembang.
+
 ## Dokumentasi
 
 - `docs/OVERHAUL.md` — rencana induk & urutan batch
 - `docs/STORY.md` — naskah (nama tokoh utama diambil dari setelan pemain)
 - `docs/PROGRESS.md` — status fitur, bug yang ditemukan, cara mengetes di HP
 - `docs/GAME_DESIGN.md` — ringkasan desain
+- `docs/BACKEND.md` — API akun & save, keamanan, rencana penerapan server
 - `CLAUDE.md` — stack, struktur folder, konvensi (untuk sesi pengembangan berikutnya)
 - `CREDITS.md` — kredit aset & library

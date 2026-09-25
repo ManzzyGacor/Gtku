@@ -43,7 +43,8 @@ npx tsx scripts/ascii-map.ts 3       # cetak dunia sebagai ASCII (periksa tata l
 npx tsx scripts/crop-reference.ts docs/reference/referensi-visual.png 400 0 420 320 2 .preview/x.png
 ```
 
-Flag URL untuk menguji di HP: `?fps=1`, `?bloom=0`, `?preset=vlow|low|medium|high|ultra`.
+Flag URL untuk menguji di HP: `?fps=1`, `?bloom=0`, `?preset=vlow|low|medium|high|ultra`, `?debug=1`.
+Variabel build: `VITE_API_URL` (akun server), `VITE_DEV_TOOLS=1` (Mode Pengembang di build staging).
 Semuanya juga ada di menu Pengaturan (gerigi di pojok kanan atas).
 
 - Dev server harus hidup di **sesi tmux bernama `game`**: `tmux new-session -d -s game -c <repo> "npm run dev"`.
@@ -72,24 +73,29 @@ src/
     stats/           stats (pipeline modifier), damage (satu formula untuk SEMUA hit),
                      character (level + equipment + buff -> satu StatBlock + passive Inti Lentera)
     items/           items (8 slot, 6 rarity, katalog), inventory (grid 48 sel + equipped),
-                     drops (tabel loot)
+                     drops (tabel loot), look (perlengkapan → warna di model hero)
     download/        pack (format paket area), manifest, downloader (aman & bisa dilanjutkan),
                      gate (area mana yang butuh data)
+    account/         auth (AuthAdapter + aturan), local (PBKDF2, di HP), remote (API server, cookie)
+    sync/            saveSync (save lokal-dulu → server: revisi, konflik berdasarkan progres)
     (akar)           autotune (AUTO per komponen), devtools (gerbang Mode Pengembang)
     (akar)           progression (level/EXP), lifecycle (pause/context-lost/orientasi), saveMigrate
-    systems/         quest, puzzleLogic, daynight, interactables
+    systems/         quest, puzzleLogic, daynight, interactables, tutorial, weather,
+                     worldEvents (event dunia sebagai data + sutradara)
     state/           GameState (quest, kill, flag, waktu) + serialisasi save
     (akar)           rng, save, storage, input, display, errors, settings, perf, graphics, anim, audio
   art/               PIPELINE SENI MURNI-KODE (tanpa DOM, tanpa renderer): Pixmap, palette,
                      generator sprite/tile/fx/ui/font, bake (chunk → pixmap + light mask),
                      greybox (tekstur 3D 32x32), markers (penanda quest)
-  ui/                OVERLAY UI NETRAL-RENDERER (DOM): TitleScreen, Hud, Dialogue, Minimap,
-                     TouchControls, CharacterPanel (karakter + tas), PauseMenu, CutsceneOverlay,
-                     SettingsPanel, DebugUi, FpsMeterView, safearea, fx — dilarang mengimpor three
+  ui/                OVERLAY UI NETRAL-RENDERER (DOM): TitleScreen (gerbang → akun → menu), Hud,
+                     Dialogue, Minimap, TouchControls, CharacterPanel (karakter + tas + avatar),
+                     PauseMenu, CutsceneOverlay, SettingsPanel, DebugUi, DevMenu, DownloadManager,
+                     ShopPanel, fullscreen, FpsMeterView, safearea, fx — dilarang mengimpor three
   render3d/          SEMUA KODE THREE.JS: boot3d, Game3D, PixelRenderer (pipeline pixel),
                      IsoCamera, World3D (streaming), Combat3D, Story3D, Puzzle3D, HeroMesh3D,
                      EnemyMesh3D, NpcMesh3D, Environment, Sky, WaterSurface, InstancePool,
-                     lightmap, occlusion, PerfProbe,
+                     lightmap, occlusion, PerfProbe, AreaData (paket area), Rain, DevTools,
+                     Cutscene3D, Portrait3D (avatar), TitleBackdrop (malam di layar judul),
                      worldPlan + pixelPlan (BEBAS three, jadi bisa dites di Node)
 tests/               Vitest: logika inti, playthrough headless, dan penjaga lapisan
 scripts/             skrip node — termasuk areaPacks.ts (paket data area; dipakai plugin Vite),
@@ -133,6 +139,12 @@ phaser.
   `import.meta.env.DEV`, bukan panggilan fungsi — kalau tidak, chunk-nya tetap ter-emit ke `dist/`.
   Dijaga `tests/devmode.test.ts`, yang membangun versi rilis sungguhan.
 - **Efek layar penuh (blur) hanya di preset Tinggi ke atas** (`ui/fx.ts` `blurAllowed()`).
+- **Nama class CSS global.** Setiap overlay menyuntikkan stylesheet global; beri awalan per komponen
+  (`lm-set-*`, `lm-shop-*`, …). Class `lm-title` milik layar judul pernah dipakai header Pengaturan
+  dan menutupi seluruh panelnya. Dijaga `tests/source.test.ts` (satu class, satu stylesheet) dan
+  `tests/settingspanel.test.ts` (cascade CSS nyata ke setiap elemen panel).
+- **Akun:** tidak pernah simpan kata sandi plaintext, tidak ada rahasia/API key di klien, dan jangan
+  menjanjikan keamanan akun lokal. Lihat `docs/BACKEND.md`.
 - **Semua panel UI wajib menghormati safe area** lewat `var(--lm-sa*)` di CSS, atau `safeInsets()`
   kalau memposisikan dengan JavaScript. Dijaga `tests/layout.test.ts` di 2318x759.
 - **Jangan pakai backtick di dalam komentar yang berada DI DALAM template literal** (blok CSS di
