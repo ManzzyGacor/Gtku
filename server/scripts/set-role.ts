@@ -23,6 +23,9 @@ const db = await connectMongo(config.mongoUri, config.mongoDb).catch(() => {
   console.error('Tidak bisa terhubung ke MongoDB. Periksa MONGODB_URI di server/.env.');
   process.exit(1);
 });
-const ok = await db.repos.users.setRole(name.toLowerCase(), role);
-console.log(ok ? `Peran ${name} sekarang: ${role}` : `Akun ${name} tidak ditemukan.`);
-await db.close();
+try {
+  const ok = await db.repos.users.setRole(name.toLowerCase(), role);
+  console.log(ok ? `Peran ${name} sekarang: ${role}` : `Akun ${name} tidak ditemukan.`);
+} finally {
+  await db.close();
+}

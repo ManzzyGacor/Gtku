@@ -167,7 +167,8 @@ test('access tokens expire; the refresh cookie rotates; a reused refresh token e
   assert.notEqual(second, first, 'rotated');
   assert.equal((await app.inject({ method: 'GET', url: '/auth/me', headers: { authorization: `Bearer ${r1.json().accessToken}` } })).statusCode, 200);
 
-  // the old one again: someone copied it — both are now dead
+  // the old one again, after the two-tab grace window: someone copied it — both are now dead
+  clock += 60 * 1000;
   assert.equal((await post('/auth/refresh', {}, { cookie: `${REFRESH_COOKIE}=${first}` })).statusCode, 401);
   assert.equal((await post('/auth/refresh', {}, { cookie: `${REFRESH_COOKIE}=${second}` })).statusCode, 401);
 });

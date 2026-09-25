@@ -16,12 +16,22 @@ type SessionRow = SessionDoc & { _id?: ObjectId };
 
 const isDup = (e: unknown): boolean => (e as { code?: number })?.code === 11000;
 
-export async function connectMongo(uri: string, dbName: string): Promise<{ repos: Repos; close(): Promise<void> }> {
-  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 8000, appName: 'lentera-malam' });
-  await client.connect();
-  const db = client.db(dbName);
-  await ensureIndexes(db);
-  return { repos: mongoRepos(db), close: () => client.close() };
+export async function connectMongo(
+  uri: string,
+  dbName: string,
+  makeClient: (uri: string) => MongoClient = (u) => new MongoClient(u, { serverSelectionTimeoutMS: 8000, appName: 'lentera-malam' }),
+): Promise<{ repos: Repos; close(): Promise<void> }> {
+  const client = makeClient(uri);
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    await ensureIndexes(db);
+    return { repos: mongoRepos(db), close: () => client.close() };
+  } catch (e) {
+    // a failure after connecting (indexes, permissions) must not leave the pool open
+    await client.close().catch(() => undefined);
+    throw e;
+  }
 }
 
 export async function ensureIndexes(db: Db): Promise<void> {
@@ -92,6 +102,9 @@ export function mongoRepos(db: Db): Repos {
       },
       async revokeFamily(f, at) {
         await sessions.updateMany({ family: f, revokedAt: null }, { $set: { revokedAt: at } });
+      },
+      async familyActive(f, now) {
+        return (await sessions.countDocuments({ family: f, revokedAt: null, expiresAt: { $gt: now } }, { limit: 1 })) > 0;
       },
     },
     characters: {

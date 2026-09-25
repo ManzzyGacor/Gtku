@@ -1230,3 +1230,28 @@ Fastify + TypeScript + MongoDB di `server/`, `127.0.0.1:3000`, dibuka lewat Clou
   register, login, duplikat, sinkron dua HP, offline, refresh otomatis, sesi berakhir, timeout).
 - **Belum:** server berjalan di VPS menunggu `server/.env` diisi (MONGODB_URI, JWT_SECRET) dan
   hostname `api.varesa.mom` di Cloudflare Tunnel.
+
+## Audit keamanan & bug backend
+
+Setiap temuan ditulis dulu sebagai tes (`server/tests/audit.test.ts`), dijalankan terhadap kode
+lama untuk memastikan memang gagal, baru diperbaiki. Hasil sebelum perbaikan: **9 gagal, 3 lulus**.
+
+| # | Temuan | Dampak | Perbaikan |
+| --- | --- | --- | --- |
+| 1 | Body bukan JSON (`application/x-www-form-urlencoded`) → **500** | galat klien tercatat sebagai galat server, log berisik | semua 4xx dari Fastify tetap 4xx `{error:"invalid_input"}` |
+| 2 | `clientUpdatedAt: 1e20` diterima → `Invalid Date` | MongoDB menolak/menyimpan tanggal rusak → 500 | skema: 2000–2100 |
+| 3 | **Dua tab me-refresh bersamaan** dengan cookie yang sama → tab kedua dianggap pencurian, **seluruh sesi dicabut** | pemain yang membuka dua tab (persis cara tes co-op) tiba-tiba ter-logout | tenggang 20 dtk setelah rotasi; lewat itu tetap dianggap pencurian (dijaga tes tersendiri) |
+| 4 | **Access token tetap berlaku 15 menit setelah logout** | token yang bocor tidak bisa dimatikan | token membawa `sid` (sesi login); setiap permintaan memeriksa sesinya masih hidup |
+| 5 | Rute tak dikenal menjawab bentuk bawaan Fastify | tidak konsisten, menyebut metode & jalur | `{error:"not_found"}` |
+| 6 | Tidak ada `Cache-Control` pada jawaban berisi token/save | proxy/cache bisa menyimpan token | `no-store`, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` |
+| 7 | **Limiter login memindai seluruh peta di setiap percobaan** setelah 50 000 kunci | banjir nama berbeda → tiap login O(n): **DoS CPU** (tes lama: 6,5 dtk untuk 2 000 kunci) | LRU dengan pemangkasan sekali tiap 10% kunci baru; ukuran dibatasi |
+| 8 | `/health` tanpa rate limit, padahal setiap panggilan mem-ping database | beban database dari luar | 60/menit per IP |
+| 9 | Koneksi MongoDB **tidak ditutup** bila pembuatan index gagal; juga saat port 3000 terpakai, dan di `set-role` bila galat | pool koneksi menggantung | `try/catch/finally` di `connectMongo`, `index.ts`, `set-role` |
+
+Yang diperiksa dan **sudah benar**: token palsu (secret lain, `alg: none`, pengguna tak ada) ditolak;
+token lama yang dipakai lagi setelah tenggang mencabut sesi; tulis save bersamaan dengan revisi
+sama → tepat satu menang (operasi atomik). Algoritma JWT kini juga dikunci eksplisit ke HS256.
+
+Rahasia: seluruh riwayat git dipindai ulang — nol connection string berkredensial, nol isian
+`MONGODB_URI`/`JWT_SECRET`, nol kunci privat/token. `server/.env` diabaikan git (`!!` di
+`git status --ignored`), izin berkas 600, hanya `server/.env.example` yang terlacak.

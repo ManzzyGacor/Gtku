@@ -38,6 +38,8 @@ import { DEV_USERNAME, redact, type ServerConfig } from './config';
 import { DuplicateError, type CharacterDoc, type Repos, type UserDoc } from './repo';
 
 export const REFRESH_COOKIE = 'lm_refresh';
+/** How long after a rotation the old refresh token is still accepted (two tabs refreshing at once). */
+export const REFRESH_GRACE_MS = 20_000;
 
 /**
  * argon2id with the OWASP-recommended floor (19 MiB, 2 passes). About 50 ms on this VPS — slow for
@@ -112,15 +114,29 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (e.statusCode === 429) return fail(reply, 429, 'rate_limited');
     if (e.validation || e.statusCode === 400) return fail(reply, 400, 'invalid_input');
     if (e.statusCode === 413) return fail(reply, 413, 'save_too_large');
+    // any other client error (wrong content type, …) is the client's, not a 500 in our logs
+    if (e.statusCode !== undefined && e.statusCode >= 400 && e.statusCode < 500) return fail(reply, e.statusCode, 'invalid_input');
     // never echo internals; log them with anything that looks like a connection string removed
     req.log.error({ err: { name: e.name, message: redact(String(e.message ?? ''), [config.mongoUri]) } }, 'kesalahan server');
     return fail(reply, 500, 'server_error');
   });
 
+  app.setNotFoundHandler((_req, reply) => fail(reply, 404, 'not_found'));
+
+  // nothing this API answers may be cached (tokens, saves), sniffed, or framed
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('Cache-Control', 'no-store');
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Referrer-Policy', 'no-referrer');
+    return payload;
+  });
+
   // ───────────────────────── tokens ─────────────────────────
 
-  const issueAccess = async (u: UserDoc): Promise<string> =>
-    new SignJWT({ role: u.role, name: u.username })
+  /** `sid` = the login (session family) the token belongs to: logging out ends the token too. */
+  const issueAccess = async (u: UserDoc, sid: string): Promise<string> =>
+    new SignJWT({ role: u.role, name: u.username, sid })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(u.id)
       .setIssuer('lentera-malam')
@@ -138,7 +154,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     });
   };
 
-  const newSession = async (reply: FastifyReply, userId: string, family = randomBytes(12).toString('hex')): Promise<void> => {
+  const newSession = async (reply: FastifyReply, userId: string, family = randomBytes(12).toString('hex')): Promise<string> => {
     const token = randomBytes(32).toString('base64url');
     await repos.sessions.create({
       tokenHash: sha256(token),
@@ -149,10 +165,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       createdAt: new Date(now()),
     });
     setRefresh(reply, token);
+    return family;
   };
 
 
-  const authResponse = async (u: UserDoc): Promise<AuthResponse> => ({ accessToken: await issueAccess(u), expiresIn: config.accessTtl, user: publicUser(u) });
+  const authResponse = async (u: UserDoc, sid: string): Promise<AuthResponse> => ({ accessToken: await issueAccess(u, sid), expiresIn: config.accessTtl, user: publicUser(u) });
 
   /** The account behind a Bearer access token, or null (and a 401 already sent). */
   const requireUser = async (req: FastifyRequest, reply: FastifyReply): Promise<UserDoc | null> => {
@@ -162,9 +179,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return null;
     }
     try {
-      const { payload } = await jwtVerify(h.slice(7), config.jwtSecret, { issuer: 'lentera-malam', currentDate: new Date(now()) });
+      const { payload } = await jwtVerify(h.slice(7), config.jwtSecret, { issuer: 'lentera-malam', algorithms: ['HS256'], currentDate: new Date(now()) });
       const u = typeof payload.sub === 'string' ? await repos.users.byId(payload.sub) : null;
-      if (!u) {
+      // the login this token came from must still be alive (logout, theft revocation)
+      const live = u && typeof payload.sid === 'string' ? await repos.sessions.familyActive(payload.sid, new Date(now())) : false;
+      if (!u || !live) {
         fail(reply, 401, 'unauthorized');
         return null;
       }
@@ -191,7 +210,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   // ───────────────────────── routes ─────────────────────────
 
-  app.get('/health', async () => ({ ok: true, db: (await repos.ping()) ? 'ok' : 'down' }));
+  // rate limited: every call pings the database
+  app.get('/health', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async () => ({ ok: true, db: (await repos.ping()) ? 'ok' : 'down' }));
 
   const usernameQuery = {
     querystring: { type: 'object', required: ['username'], properties: { username: { type: 'string', maxLength: 32 } }, additionalProperties: false },
@@ -249,8 +269,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         if (e instanceof DuplicateError) return fail(reply, 409, 'username_taken');
         throw e;
       }
-      await newSession(reply, user.id);
-      return reply.code(201).send(await authResponse(user));
+      const sid = await newSession(reply, user.id);
+      return reply.code(201).send(await authResponse(user, sid));
     },
   );
 
@@ -276,8 +296,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       const ok = await argon2.verify(user?.passwordHash ?? dummyHash, String(req.body.password));
       if (!user || !ok) return fail(reply, 401, 'invalid_credentials');
       await repos.users.touchLogin(user.id, new Date(now()));
-      await newSession(reply, user.id);
-      return reply.send(await authResponse(user));
+      const sid = await newSession(reply, user.id);
+      return reply.send(await authResponse(user, sid));
     },
   );
 
@@ -288,17 +308,24 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     const s = await repos.sessions.byHash(sha256(token));
     if (!s) return fail(reply, 401, 'unauthorized');
     if (s.revokedAt) {
-      // a rotated token came back: it was copied. End that whole login everywhere.
-      await repos.sessions.revokeFamily(s.family, new Date(now()));
-      reply.clearCookie(REFRESH_COOKIE, { path: '/auth' });
-      return fail(reply, 401, 'unauthorized');
+      /*
+       * A rotated token came back. Within a few seconds of its rotation that is a second tab (or a
+       * retry) that raced the first one with the same cookie: give it a fresh token in the same
+       * login. Any later, it was copied — end that whole login everywhere.
+       */
+      const grace = now() - s.revokedAt.getTime() <= REFRESH_GRACE_MS && (await repos.sessions.familyActive(s.family, new Date(now())));
+      if (!grace) {
+        await repos.sessions.revokeFamily(s.family, new Date(now()));
+        reply.clearCookie(REFRESH_COOKIE, { path: '/auth' });
+        return fail(reply, 401, 'unauthorized');
+      }
     }
     if (s.expiresAt.getTime() <= now()) return fail(reply, 401, 'unauthorized');
     const user = await repos.users.byId(s.userId);
     if (!user) return fail(reply, 401, 'unauthorized');
-    await repos.sessions.revoke(s.tokenHash, new Date(now()));
+    if (!s.revokedAt) await repos.sessions.revoke(s.tokenHash, new Date(now()));
     await newSession(reply, user.id, s.family);
-    return reply.send(await authResponse(user));
+    return reply.send(await authResponse(user, s.family));
   });
 
   app.post('/auth/logout', async (req, reply) => {
@@ -336,7 +363,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       properties: {
         data: { type: 'object' },
         baseRev: { type: 'integer', minimum: 0 },
-        clientUpdatedAt: { type: 'number' },
+        // a real epoch-ms timestamp (2000–2100): anything else would be stored as an invalid date
+        clientUpdatedAt: { type: 'number', minimum: 946_684_800_000, maximum: 4_102_444_800_000 },
       },
     },
   } as const;
@@ -393,21 +421,39 @@ export class SlidingLimiter {
   constructor(
     private readonly max: number,
     private readonly windowMs: number,
+    /** Most keys held at once. Beyond it, stale keys go, then the oldest. */
+    private readonly maxKeys = 50_000,
   ) {}
 
+  get size(): number {
+    return this.hits.size;
+  }
+
   allow(key: string, now: number): boolean {
-    if (this.hits.size > 50_000) this.prune(now);
     const recent = (this.hits.get(key) ?? []).filter((t) => now - t < this.windowMs);
     if (recent.length >= this.max) {
       this.hits.set(key, recent);
       return false;
     }
     recent.push(now);
+    // delete first so the key moves to the end: the Map's order is then "least recently used first"
+    this.hits.delete(key);
     this.hits.set(key, recent);
+    if (this.hits.size > this.maxKeys) this.shrink(now);
     return true;
   }
 
-  private prune(now: number): void {
+  /**
+   * Down to 90% of the cap: stale keys first, then the least recently used. It used to scan the whole
+   * map on *every* call once the cap was passed — flooding it with distinct names made each login
+   * attempt O(n), a CPU denial of service. Now the scan happens once per 10% of new keys.
+   */
+  private shrink(now: number): void {
+    const target = Math.floor(this.maxKeys * 0.9);
     for (const [k, v] of this.hits) if (!v.some((t) => now - t < this.windowMs)) this.hits.delete(k);
+    for (const k of this.hits.keys()) {
+      if (this.hits.size <= target) break;
+      this.hits.delete(k);
+    }
   }
 }

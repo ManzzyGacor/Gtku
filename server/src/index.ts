@@ -37,14 +37,23 @@ async function main(): Promise<void> {
   }
 
   const app = await buildApp({ config, repos: db.repos, logger: true });
-  const stop = async (): Promise<void> => {
-    await app.close();
-    await db.close();
-    process.exit(0);
+  let stopping = false;
+  const stop = async (code = 0): Promise<void> => {
+    if (stopping) return;
+    stopping = true;
+    await app.close().catch(() => undefined);
+    await db.close().catch(() => undefined);
+    process.exit(code);
   };
   process.on('SIGINT', () => void stop());
   process.on('SIGTERM', () => void stop());
-  await app.listen({ host: config.host, port: config.port });
+  try {
+    await app.listen({ host: config.host, port: config.port });
+  } catch (e) {
+    // e.g. port 3000 already taken: say so, and close the database pool on the way out
+    console.error(`[lentera-malam] Tidak bisa mendengarkan di ${config.host}:${config.port} (${(e as { code?: string }).code ?? 'Error'}).`);
+    await stop(1);
+  }
 }
 
 main().catch((e: unknown) => {

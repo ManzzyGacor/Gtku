@@ -55,6 +55,8 @@ export interface Repos {
     byHash(tokenHash: string): Promise<SessionDoc | null>;
     revoke(tokenHash: string, at: Date): Promise<void>;
     revokeFamily(family: string, at: Date): Promise<void>;
+    /** Is any session of this login still usable (not revoked, not expired)? */
+    familyActive(family: string, now: Date): Promise<boolean>;
   };
   characters: {
     get(userId: string, slot: number): Promise<CharacterDoc | null>;
@@ -117,6 +119,10 @@ export function memoryRepos(): Repos {
       },
       async revokeFamily(f, at) {
         for (const s of sessions.values()) if (s.family === f && !s.revokedAt) s.revokedAt = at;
+      },
+      async familyActive(f, now) {
+        for (const s of sessions.values()) if (s.family === f && !s.revokedAt && s.expiresAt > now) return true;
+        return false;
       },
     },
     characters: {
