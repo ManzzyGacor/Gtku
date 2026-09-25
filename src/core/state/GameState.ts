@@ -34,6 +34,8 @@ export interface SaveData {
 export interface CharacterJson {
   level: number;
   exp: number;
+  /** Absent in saves written before the element picker existed. */
+  elements?: { unlocked: string[]; primary: string | null; secondary: string | null } | undefined;
   inventory: {
     slots: ({ id: string; count: number; rarity: string } | null)[];
     equipped: Record<string, { id: string; count: number; rarity: string } | undefined>;

@@ -71,6 +71,9 @@ test('the minimap redraws when a marker moves, not only when the hero does', () 
 test('quest text and map markers are not rebuilt every frame', () => {
   const scene = new THREE.Scene();
   const state = new GameState();
+  // past the "Bara Pertama" tutorial, which otherwise owns the tracker
+  state.flags.tut_core = true;
+  state.flags.tut_done = true;
   const story = new Story3D(scene, world, new Collision(world), state, {
     dialogue: () => undefined,
     toast: () => undefined,

@@ -7,7 +7,7 @@
  * calculation follow. The sheet is also the single place that knows about the Lantern Core's
  * passive, so a passive is a named rule in one file rather than a special case sprinkled around.
  */
-import type { ElementId } from '../combat/elements';
+import { ELEMENTS, type ElementId } from '../combat/elements';
 import { Inventory } from '../items/inventory';
 import { passiveMeta, type PassiveId } from '../items/items';
 import { gainExp, levelMods, MAX_LEVEL, expForNext, type LevelUp, type Progress } from '../progression';
@@ -18,6 +18,9 @@ export interface SourceLine {
   mods: Modifier[];
 }
 
+/** An element id this build knows and has implemented — anything else in a save is dropped. */
+const known = (v: unknown): v is ElementId => typeof v === 'string' && !!ELEMENTS[v as ElementId]?.implemented;
+
 export class Character {
   readonly inventory: Inventory;
   level = 1;
@@ -25,6 +28,20 @@ export class Character {
   /** Temporary modifiers from buffs/debuffs; cleared when they expire. */
   private buffs: { mods: Modifier[]; label: string; until: number }[] = [];
   private cached: StatBlock = { ...HERO_BASE };
+  /**
+   * Elements the hero can use, and which two are in hand (docs/OVERHAUL.md §4: "Player punya
+   * elemen primer dan sekunder").
+   *
+   * **Primary** rides on every weapon hit; **secondary** rides on the skill blast. That split is
+   * what makes two elements worth having at once: a fire sword and an ice blast is how you set up
+   * a Lebur reaction by yourself.
+   *
+   * An element is unlocked by equipping a Lantern Core that carries it, and stays unlocked after
+   * the core comes off — you learned it, you do not lose it by changing jewellery.
+   */
+  unlocked: ElementId[] = [];
+  primary: ElementId | null = null;
+  secondary: ElementId | null = null;
   private cachedMods: Modifier[] = [];
   private clock = 0;
 
@@ -65,8 +82,37 @@ export class Character {
     return id ? (passiveMeta(id)?.label ?? null) : null;
   }
 
+  /**
+   * Learn an element. The first one learned becomes primary, the second secondary, so a player who
+   * never opens the element picker still gets the sensible setup.
+   */
+  unlock(element: ElementId): boolean {
+    if (!ELEMENTS[element]?.implemented) return false;
+    if (this.unlocked.includes(element)) return false;
+    this.unlocked.push(element);
+    if (!this.primary) this.primary = element;
+    else if (!this.secondary && this.primary !== element) this.secondary = element;
+    return true;
+  }
+
+  /** Put an element in a hand. Only learned elements; the same element cannot be in both. */
+  setElement(slot: 'primary' | 'secondary', element: ElementId | null): boolean {
+    if (element !== null && !this.unlocked.includes(element)) return false;
+    if (slot === 'primary') {
+      if (element !== null && element === this.secondary) this.secondary = this.primary;
+      this.primary = element;
+    } else {
+      if (element !== null && element === this.primary) this.primary = this.secondary;
+      this.secondary = element;
+    }
+    return true;
+  }
+
   /** Recompute the sheet. Cheap, but not free — call it on a change, not every frame. */
   refresh(): void {
+    // wearing a core teaches its element
+    const core = this.inventory.lanternCore()?.def.element;
+    if (core) this.unlock(core);
     const mods: Modifier[] = [...levelMods(this.level), ...this.inventory.equippedMods()];
     for (const b of this.buffs) mods.push(...b.mods);
     this.cachedMods = mods;
@@ -139,17 +185,32 @@ export class Character {
     return this.passive === 'frostWard' ? 1.2 : 0;
   }
 
-  toJSON(): { level: number; exp: number; inventory: ReturnType<Inventory['toJSON']> } {
-    return { level: this.level, exp: this.exp, inventory: this.inventory.toJSON() };
+  toJSON(): {
+    level: number;
+    exp: number;
+    inventory: ReturnType<Inventory['toJSON']>;
+    elements: { unlocked: ElementId[]; primary: ElementId | null; secondary: ElementId | null };
+  } {
+    return {
+      level: this.level,
+      exp: this.exp,
+      inventory: this.inventory.toJSON(),
+      elements: { unlocked: [...this.unlocked], primary: this.primary, secondary: this.secondary },
+    };
   }
 
-  load(data: { level?: unknown; exp?: unknown; inventory?: unknown } | null | undefined): void {
+  load(data: { level?: unknown; exp?: unknown; inventory?: unknown; elements?: unknown } | null | undefined): void {
     const level = typeof data?.level === 'number' && Number.isFinite(data.level) ? Math.floor(data.level) : 1;
     const exp = typeof data?.exp === 'number' && Number.isFinite(data.exp) ? Math.floor(data.exp) : 0;
     this.level = Math.max(1, Math.min(MAX_LEVEL, level));
     this.exp = Math.max(0, exp);
     this.inventory.load((data?.inventory ?? null) as Parameters<Inventory['load']>[0]);
     this.buffs = [];
+    // elements: only ones that exist and are implemented survive a load
+    const el = (data?.elements ?? null) as { unlocked?: unknown; primary?: unknown; secondary?: unknown } | null;
+    this.unlocked = Array.isArray(el?.unlocked) ? [...new Set(el.unlocked.filter(known))] : [];
+    this.primary = known(el?.primary) && this.unlocked.includes(el.primary) ? el.primary : null;
+    this.secondary = known(el?.secondary) && this.unlocked.includes(el.secondary) && el.secondary !== this.primary ? el.secondary : null;
     this.refresh();
     // A save written before the level cap dropped, or hand-edited, could hold more EXP than the
     // level needs; fold it in rather than leaving a bar that is permanently past full.

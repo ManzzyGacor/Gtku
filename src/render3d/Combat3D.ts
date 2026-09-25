@@ -12,8 +12,8 @@
  */
 import * as THREE from 'three';
 import { TILE } from '../config';
-import { applyElement, ELEMENTS, REACTIONS, STATUSES, StatusBag, type ElementId } from '../core/combat/elements';
-import { Archer, Boss, EnemyCore, EnemyWorld, inArc, Slime, type WorldEvent } from '../core/entities/enemies';
+import { applyElement, ELEMENT_STATUS, ELEMENTS, REACTIONS, STATUSES, StatusBag, type ElementId, type ReactionResult } from '../core/combat/elements';
+import { Archer, Boss, EnemyCore, EnemyWorld, inArc, Slime, TrainingDummy, type WorldEvent } from '../core/entities/enemies';
 import type { HeroCore, ShootEvent, SwingEvent } from '../core/entities/HeroCore';
 import { ATTACKS, HERO_STATS } from '../core/entities/HeroCore';
 import { sfx } from '../core/audio';
@@ -57,6 +57,10 @@ export interface CombatHooks {
   exp(amount: number, x: number, y: number): void;
   /** HP the hero gets back (lifesteal, the `tideMend` core passive). */
   heal(amount: number): void;
+  /** An elemental hit landed (the tutorial listens for the one on the training dummy). */
+  elementHit?(kind: string, element: ElementId): void;
+  /** A reaction fired: `on` is the element whose status was already there. For the on-screen log. */
+  reaction?(name: string, incoming: ElementId, on: ElementId | null, x: number, y: number): void;
 }
 
 export class Combat3D {
@@ -99,6 +103,25 @@ export class Combat3D {
   }
 
   // ───────────────────────── spawning ─────────────────────────
+
+  /** Put a training dummy in the world (the tutorial's, or the developer menu's). */
+  addDummy(x: number, y: number): TrainingDummy {
+    const d = this.world.add(new TrainingDummy(x, y));
+    d.spawnId = `dummy_${Math.round(x)}_${Math.round(y)}`;
+    return d;
+  }
+
+  /** The dummies, with the status each one currently carries — for the labels above them. */
+  dummyStatus(): { enemy: TrainingDummy; statuses: string; taken: number }[] {
+    const out: { enemy: TrainingDummy; statuses: string; taken: number }[] = [];
+    for (const e of this.world.enemies) {
+      if (!(e instanceof TrainingDummy)) continue;
+      const bag = this.statuses.get(e);
+      const names = bag ? bag.active.map((st) => `${STATUSES[st.id].name}${st.stacks > 1 ? ` x${st.stacks}` : ''}`).join(' \u00b7 ') : '';
+      out.push({ enemy: e, statuses: names, taken: Math.round(e.taken) });
+    }
+    return out;
+  }
 
   /** Spawn everything a freshly streamed chunk declares. */
   spawnForChunk(cx: number, cy: number): void {
@@ -189,6 +212,20 @@ export class Combat3D {
     return { amount: result.amount, crit: result.crit };
   }
 
+  /**
+   * Report what an elemental hit did, for the tutorial and the reaction log. Shared by the three
+   * places a hit can land (swing, blast, arrow), so none of them can quietly forget to.
+   */
+  private noteElement(e: EnemyCore, element: ElementId | undefined, res: ReactionResult): void {
+    if (!element) return;
+    this.hooks.elementHit?.(e.kind, element);
+    const r = res.reaction;
+    if (!r) return;
+    // the element whose status the reaction consumed, e.g. Lebur = Api hitting something frozen (Es)
+    const on = (Object.keys(ELEMENT_STATUS) as ElementId[]).find((id) => ELEMENT_STATUS[id] === r.on) ?? null;
+    this.hooks.reaction?.(r.name, element, on, e.x, e.cy);
+  }
+
   applySwing(hero: HeroCore, ev: SwingEvent): void {
     let hits = 0;
     let reacted = false;
@@ -202,6 +239,7 @@ export class Combat3D {
       const stun = ev.index === 2 || hero.isHeavy ? 0.32 : 0.18;
       if (!e.hurt(dmg, hero.x, hero.y - 6, ev.knock, stun, { emit: (x) => this.world.events.push(x) })) continue;
       hits++;
+      this.noteElement(e, el, res);
       this.meshes.get(e)?.flash();
       const colour = res.reaction ? `#${res.reaction.color.toString(16).padStart(6, '0')}` : rolled.crit ? '#ff9f43' : hero.isHeavy ? '#ffd15a' : '#ffffff';
       this.hooks.damage(e.x, e.y - e.h - 2, dmg, colour, hero.isHeavy || rolled.crit || !!res.reaction);
@@ -240,10 +278,13 @@ export class Combat3D {
       if (e.dead) continue;
       if (Math.hypot(e.x - x, e.cy - y) > radius + e.radius) continue;
       const bag = this.statusOf(e);
-      const res = hero.element ? applyElement(bag, hero.element) : { damageMult: 1, reaction: null };
-      const blastDmg = this.hit(e, dmg, hero.element, res.damageMult).amount;
+      // the skill carries the SECONDARY element, which is what makes a second element useful
+      const el = hero.skillElement ?? hero.element;
+      const res = el ? applyElement(bag, el) : { damageMult: 1, reaction: null };
+      const blastDmg = this.hit(e, dmg, el, res.damageMult).amount;
       if (!e.hurt(blastDmg, x, y, knock, stun, { emit: (ev) => this.world.events.push(ev) })) continue;
       hits++;
+      this.noteElement(e, el, res);
       this.meshes.get(e)?.flash();
       this.hooks.damage(e.x, e.y - e.h - 2, blastDmg, '#ffe066', true);
       this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : 0xffe066, true);
@@ -293,8 +334,14 @@ export class Combat3D {
           a.hit.add(e);
           const bag = this.statusOf(e);
           const res = a.element ? applyElement(bag, a.element) : { damageMult: 1, reaction: null };
-          const dmg = Math.round(a.dmg * res.damageMult);
+          /*
+           * Arrows go through the same damage formula as the sword. They used to multiply their raw
+           * number by the reaction and stop there, which meant levels, ATK, crits and the target's
+           * DEF all did nothing for the bow — half the weapons ignored the whole of Batch 4.
+           */
+          const dmg = this.hit(e, a.dmg, a.element, res.damageMult).amount;
           if (e.hurt(dmg, a.x - a.vx * 0.02, a.y - a.vy * 0.02, 90, 0.16, { emit: (x) => this.world.events.push(x) })) {
+            this.noteElement(e, a.element, res);
             this.meshes.get(e)?.flash();
             this.hooks.damage(e.x, e.y - e.h - 2, dmg, res.reaction ? '#ffe066' : '#ffe9a8', a.pierce > 1);
             this.hooks.spark(e.x, e.cy, res.reaction ? res.reaction.color : 0xffe9a8, false);

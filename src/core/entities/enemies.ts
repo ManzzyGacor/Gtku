@@ -8,7 +8,7 @@ import type { ElementId } from '../combat/elements';
 import { EXP_REWARDS } from '../progression';
 import type { Collision } from '../world/collision';
 
-export type EnemyKind = 'slime' | 'archer' | 'bat' | 'boss';
+export type EnemyKind = 'slime' | 'archer' | 'bat' | 'boss' | 'dummy';
 
 /**
  * The defensive half of the stat pipeline, per enemy kind (Batch 4).
@@ -23,6 +23,8 @@ export const ENEMY_STATS: Record<EnemyKind, { def: number; resist: Partial<Recor
   archer: { def: 14, resist: { petir: -0.2 }, exp: EXP_REWARDS.archer },
   bat: { def: 4, resist: { petir: 0.35, es: -0.3 }, exp: EXP_REWARDS.bat },
   boss: { def: 45, resist: { api: 0.35, es: 0.2, air: -0.15 }, exp: EXP_REWARDS.boss },
+  // a training dummy teaches nothing if its numbers get in the way: no defence, no resistance
+  dummy: { def: 0, resist: {}, exp: 0 },
 };
 
 export interface HeroRef {
@@ -745,6 +747,47 @@ export class Boss extends EnemyCore {
 }
 
 // ───────────────────────────── projectiles & shockwaves ─────────────────────────────
+
+// ───────────────────────────── Boneka Latihan: the training dummy ─────────────────────────────
+
+/**
+ * A training dummy (the tutorial and the developer menu).
+ *
+ * It exists for one reason: to let the player *see* the element system work. So it never moves,
+ * never attacks, never dies (its HP refills), gives no EXP and drops nothing — and its status bag is
+ * read by the renderer and shown above it, so "I hit it with fire, then ice" visibly becomes
+ * "Terbakar", then "Lebur". Everything that would get in the way of reading that is removed.
+ */
+export class TrainingDummy extends EnemyCore {
+  /** Damage taken since the last reset, for the label above it. */
+  taken = 0;
+  lastHit = 0;
+
+  constructor(x: number, y: number) {
+    super('dummy', x, y, 999, 6, 16);
+    this.knockResist = 0;
+  }
+
+  /**
+   * Takes the hit and never dies. Written out rather than calling the base class, because the base
+   * class decides death *inside* `hurt` and emits `died` — and a dummy that emits `died` feeds the
+   * quest kill counter and the loot table, however quickly its HP is put back afterwards.
+   */
+  override hurt(dmg: number, _fromX: number, _fromY: number, _knock: number, _stun: number, _ctx: { emit: (e: EnemyEvent) => void }): boolean {
+    this.taken += Number.isFinite(dmg) ? Math.max(0, dmg) : 0;
+    this.lastHit = 0;
+    this.flash = 0.11;
+    this.hp = this.maxHp;
+    return true;
+  }
+
+  protected think(dt: number): void {
+    this.stop();
+    this.lastHit += dt;
+    // the running total fades after a quiet few seconds, so each test starts from zero
+    if (this.lastHit > 4) this.taken = 0;
+  }
+}
 
 export class Projectile {
   alive = true;

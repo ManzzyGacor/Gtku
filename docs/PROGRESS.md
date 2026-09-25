@@ -849,3 +849,39 @@ menghilang di tengah tekanan tidak meninggalkan aksi macet. `layout.test.ts`: 5 
 bertumpuk dan tetap di safe area pada teks 2x/tombol 1.3x dan 1.8x.
 
 Plus `tests/source.test.ts`: tidak ada backtick di dalam blok CSS/GLSL (sudah tiga kali kejadian).
+
+### Bagian 2 — Inti Lentera & elemen pertama lebih awal
+
+**Temuan yang lebih besar dari yang diminta:** `hero.element` **tidak pernah di-set di mana pun**
+sejak Batch 3. Jadi walaupun Inti Lentera dipasang, setiap serangan tidak membawa elemen, dan reaksi
+hanya pernah terjadi di tes yang men-set-nya manual. Sistem elemen praktis tidak bisa dicapai dalam
+permainan normal. Sekarang `applySheet()` men-set elemen **primer** ke senjata dan **sekunder** ke
+skill.
+
+Ditambah: **panah tidak lewat pipeline damage** — level, ATK, kritis, dan DEF musuh tidak
+berpengaruh sama sekali pada busur. Sekarang lewat `computeDamage` seperti pedang.
+
+**Tutorial "Bara Pertama"** (`src/core/systems/tutorial.ts`, murni):
+
+1. Setelah prolog, objektif di layar: **Berdoa di shrine Ravenhollow** — shrine itu 1 petak dari
+   titik mulai Game Baru.
+2. Berdoa → lentera menjawab → **Inti Bara** masuk tas **dan langsung terpasang** → Api dipelajari
+   → notifikasi "Elemen Api terbuka" → objektif: **pukul boneka latihan dengan Api**.
+3. Boneka latihan berdiri permanen di plaza (5 petak timur shrine). Satu tebasan ber-Api → label di
+   atasnya menunjukkan "Terbakar" + damage → tutorial selesai → tracker kembali ke quest utama.
+
+Save lama yang sudah punya elemen otomatis dianggap selesai. Quest utama tidak diubah dan bisa
+dikerjakan paralel.
+
+**Elemen primer & sekunder** (`Character`): primer di senjata, sekunder di skill — jadi pedang Api +
+ledakan Es bisa memicu reaksi Lebur sendirian. Elemen dipelajari dengan memasang Inti yang
+membawanya, dan **tetap** dipelajari setelah Inti dilepas. Pemilihnya ada di panel Karakter.
+
+**Boneka latihan** (`TrainingDummy`): tidak bergerak, tidak menyerang, tidak pernah mati, tanpa DEF
+atau resistensi, tanpa EXP/loot, dan tidak pernah memicu event `died` (yang akan menghitung kill
+quest). Status aktifnya tampil di atasnya, diperbarui 5x/detik.
+
+**Tes:** `tests/tutorial.test.ts` (5) — termasuk jalur lengkap di `Game3D` asli: Game Baru → skip
+prolog → objektif tutorial → jalan ke shrine → prompt "Berdoa" → tekan → Inti Bara terpasang, Api
+dipelajari, `hero.element === 'api'` → tebas boneka → status "Terbakar" → selesai → tracker kembali
+ke quest utama → save/reload tetap utuh.

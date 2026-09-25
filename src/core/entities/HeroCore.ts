@@ -159,8 +159,10 @@ export class HeroCore {
   slot: 0 | 1 = 0;
   /** Bow draw progress, 0..1. Only meaningful while the attack button is held with the bow out. */
   charge = 0;
-  /** Element the next hit carries, from the weapon or a buff. */
+  /** Element weapon hits carry — the character's primary element. */
   element: ElementId | undefined = undefined;
+  /** Element the skill blast carries — the character's secondary (falls back to primary). */
+  skillElement: ElementId | undefined = undefined;
   private shot: ShotDef | null = null;
   private shotFired = false;
   rollCd = 0;

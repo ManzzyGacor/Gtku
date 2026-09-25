@@ -12,6 +12,7 @@ import { TILE, WORLD_CHUNKS_H, WORLD_CHUNKS_W } from '../config';
 import { sfx } from '../core/audio';
 import { input } from '../core/input';
 import { EXP_REWARDS } from '../core/progression';
+import { advanceTutorial, tutorialLines, type TutorialEvent } from '../core/systems/tutorial';
 import { nearestInteractable, type Interactable } from '../core/systems/interactables';
 import { advanceQuest, dialogueFor, QUEST_TITLE, trackerLines, type NpcId, type QuestEvent, type QuestReward } from '../core/systems/quest';
 import type { GameState } from '../core/state/GameState';
@@ -50,6 +51,8 @@ export interface StoryHooks {
   reward(reward: QuestReward, x: number, y: number): void;
   /** A quest step moved. Shown as its own notification rather than a passing toast. */
   questNote(text: string): void;
+  /** The tutorial hands over its Lantern Core: add it, equip it, apply the sheet. */
+  grantCore?(itemId: string): void;
 }
 
 export class Story3D {
@@ -196,6 +199,16 @@ export class Story3D {
     });
   }
 
+  /** Feed the "Bara Pertama" tutorial. Harmless once it is done. */
+  tutorialEvent(ev: TutorialEvent): void {
+    const r = advanceTutorial(this.state, ev);
+    if (!r.changed) return;
+    if (r.grantCore) this.hooks.grantCore?.(r.grantCore);
+    if (r.message) this.hooks.questNote(r.message);
+    this.questCache = null;
+    this.hooks.save(true);
+  }
+
   /** Apply a quest event, tell the player, and persist. Same rules as the 2D build. */
   questEvent(ev: QuestEvent): void {
     const r = advanceQuest(this.state, ev);
@@ -267,6 +280,7 @@ export class Story3D {
     // the first time you find a shrine is a discovery; after that it is just a bed
     const cp = this.world.markers.checkpoints.find((c) => c.id === id);
     if (cp) this.discover(`found_${id}`, EXP_REWARDS.discovery, cp.x, cp.y);
+    this.tutorialEvent({ type: 'pray', checkpoint: id });
     this.hooks.save(true);
     this.onRest();
   }
@@ -401,6 +415,14 @@ export class Story3D {
   questText(): { title: string; lines: string[] } {
     const q = this.state.quest;
     if (this.questCache && this.questStage === q.stage && this.questKills === q.kills) return this.questCache;
+    // while "Bara Pertama" is running it is the objective on screen; the main quest waits its turn
+    const tut = tutorialLines(this.state);
+    if (tut) {
+      this.questStage = q.stage;
+      this.questKills = q.kills;
+      this.questCache = tut;
+      return tut;
+    }
     this.questStage = q.stage;
     this.questKills = q.kills;
     this.questCache = { title: QUEST_TITLE, lines: trackerLines(this.state) };

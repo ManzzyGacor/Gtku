@@ -105,6 +105,15 @@ const CSS = `
 .lm-pop .tx small { display: block; color: #a79dc4; font-size: 10px; }
 @keyframes lm-pop-in { from { opacity: 0; transform: translateX(34px); } to { opacity: 1; transform: none; } }
 
+/*
+ * Labels pinned to things in the world: the status a training dummy carries. Pooled like the
+ * damage numbers, and positioned with transform only.
+ */
+.lm-wlabel { position: absolute; transform: translate(-50%, -100%); white-space: nowrap;
+  padding: 2px 6px; border-radius: 3px; font-size: 0.85em; pointer-events: none;
+  background: rgba(12, 9, 26, 0.78); border: 1px solid rgba(140, 239, 235, 0.45); color: #cffaff;
+  display: none; }
+
 /* floating combat text */
 .lm-float { position: absolute; transform: translate(-50%, -50%); font-weight: bold;
   pointer-events: none; opacity: 0; will-change: transform, opacity; }
@@ -144,6 +153,8 @@ export class Hud {
   private fullBtn: HTMLButtonElement;
   private pauseBtn: HTMLButtonElement;
   private pops: HTMLDivElement;
+  private labelPool: HTMLDivElement[] = [];
+  private labels: { x: number; y: number; z: number; text: string }[] = [];
   private popList: { node: HTMLDivElement; left: number }[] = [];
   /** Tapped the pause button. Wired by the game to open the pause menu. */
   onPause: () => void = () => undefined;
@@ -337,6 +348,38 @@ export class Hud {
     }
   }
 
+  /**
+   * Text pinned to world positions (world units), redrawn each frame by `update`.
+   *
+   * The array is kept and read by reference, so the caller can reuse one list every frame instead
+   * of allocating a new one.
+   */
+  setWorldLabels(labels: { x: number; y: number; z: number; text: string }[]): void {
+    this.labels = labels;
+  }
+
+  private drawWorldLabels(project: Projector): void {
+    while (this.labelPool.length < this.labels.length) {
+      const node = el('div');
+      node.className = 'lm-wlabel';
+      this.root.appendChild(node);
+      this.labelPool.push(node);
+    }
+    for (let i = 0; i < this.labelPool.length; i++) {
+      const node = this.labelPool[i];
+      const l = this.labels[i];
+      const p = l && l.text ? project(l.x, l.y, l.z) : null;
+      if (!l || !p || !p.visible) {
+        if (node.style.display !== 'none') node.style.display = 'none';
+        continue;
+      }
+      if (node.style.display !== 'block') node.style.display = 'block';
+      if (node.textContent !== l.text) node.textContent = l.text;
+      node.style.left = `${p.x.toFixed(0)}px`;
+      node.style.top = `${p.y.toFixed(0)}px`;
+    }
+  }
+
   /** Age the notification stack. Called from the HUD's own update. */
   private updatePopups(dt: number): void {
     for (let i = this.popList.length - 1; i >= 0; i--) {
@@ -395,6 +438,7 @@ export class Hud {
 
   update(dt: number, project: Projector): void {
     this.updatePopups(dt);
+    this.drawWorldLabels(project);
     // HP: the fill snaps, the trail lags behind it so a big hit reads as a big hit
     const ratio = Math.max(0, Math.min(1, this.hp / this.maxHp));
     this.trailHp += (ratio - this.trailHp) * Math.min(1, dt * (ratio < this.trailHp ? 2.4 : 12));

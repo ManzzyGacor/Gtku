@@ -26,8 +26,9 @@ import { CharacterPanel } from '../ui/CharacterPanel';
 import { CutsceneOverlay } from '../ui/CutsceneOverlay';
 import { PauseMenu, type InfoLine } from '../ui/PauseMenu';
 import { BOW_SHOTS } from '../core/combat/weapons';
-import { ELEMENTS } from '../core/combat/elements';
+import { ELEMENTS, type ElementId } from '../core/combat/elements';
 import { KILLS_NEEDED } from '../core/state/GameState';
+import { DUMMY_TILE, settleTutorial } from '../core/systems/tutorial';
 import { Cutscene3D } from './Cutscene3D';
 import { CUTSCENES, playerName } from '../core/story/cutscenes';
 import { ambient as ambientPlayer, ambientFor, audioReady, bus, fadeFor, music, musicFor } from '../core/audio';
@@ -248,6 +249,10 @@ export class Game3D {
         this.dropLoot(kind, x, y);
       },
       exp: (amount, x, y) => this.gainExp(amount, x, y),
+      elementHit: (kind, element) => {
+        if (kind === 'dummy') this.story.tutorialEvent({ type: 'element-hit', element, target: 'dummy' });
+      },
+      reaction: (name, incoming, on, x, y) => this.onReaction(name, incoming, on, x, y),
       heal: (amount) => {
         if (amount <= 0 || this.hero.hp >= this.hero.maxHp) return;
         this.hero.heal(amount);
@@ -276,6 +281,7 @@ export class Game3D {
       exp: (amount, x, y) => this.gainExp(amount, x, y),
       loot: (kind, x, y) => this.dropLoot(kind, x, y),
       reward: (reward, x, y) => this.giveReward(reward, x, y),
+      grantCore: (itemId) => this.grantCore(itemId),
       questNote: (text) => {
         this.hud.popup({ icon: '\u2691', title: 'Quest', sub: text, color: '#ffd98a', seconds: 5 });
         this.hud.toast(text);
@@ -312,6 +318,11 @@ export class Game3D {
 
     // Now that the HUD, the combat and the meshes exist, push the whole character sheet through.
     this.applySheet();
+    // A save that already knows an element has nothing left to learn from "Bara Pertama".
+    settleTutorial(this.state, this.character.unlocked.length > 0);
+    // The tutorial's training dummy stands in the plaza for good: it is also the best place to try
+    // out a new element or a reaction, long after the tutorial is done.
+    this.combat.addDummy(DUMMY_TILE.tx * 16 + 8, DUMMY_TILE.ty * 16 + 12);
 
     this.applyProfile();
     this.resize();
@@ -413,6 +424,7 @@ export class Game3D {
     this.hud.update(dt, this.projector);
 
     this.updateSoundtrack();
+    this.updateDummyLabels(dt);
 
     // area banner
     const area = areaAtTile(Math.floor(this.hero.x / 16));
@@ -484,6 +496,13 @@ export class Game3D {
     this.hero.setMaxHp(stats.maxHp);
     this.hero.speedScale = stats.speed / 100;
     this.hero.heavyCritBonus = this.character.heavyCritBonus();
+    /*
+     * The elements. These two lines are the whole reason the element system works in play: before
+     * them `hero.element` was never assigned anywhere, so every hit carried no element whatever
+     * core was equipped, and reactions only ever happened in tests that set it by hand.
+     */
+    this.hero.element = this.character.primary ?? undefined;
+    this.hero.skillElement = this.character.secondary ?? this.character.primary ?? undefined;
   }
 
   /**
@@ -544,6 +563,68 @@ export class Game3D {
       this.saveNow();
     }
     if (overflowed) this.hud.toast('Tas penuh! Buang sesuatu dulu.');
+  }
+
+  /**
+   * The tutorial's Lantern Core: into the bag, onto the hero, and through the sheet — which is what
+   * unlocks its element and fires the "Elemen Api terbuka" notification.
+   *
+   * Equipped automatically because the whole point of step one is that the next swing carries
+   * fire. Asking the player to find it in the bag first would turn a two-step tutorial into three.
+   */
+  grantCore(itemId: string): void {
+    const def = itemDef(itemId);
+    if (!def) return;
+    const inv = this.character.inventory;
+    inv.add(itemId, 1);
+    const cell = inv.slots.findIndex((s) => s?.id === itemId);
+    if (cell >= 0) inv.equip(cell, 'lantern');
+    this.applySheet();
+    this.hud.popup({ icon: '\u2727', title: def.name, sub: 'Terpasang di lenteramu', color: rarityMeta(def.rarity).color, seconds: 5 });
+    this.environment.spark(u(this.hero.x), u(this.hero.y), 0xff7a2e, true);
+    sfx.lanternLight();
+    this.saveNow(true);
+  }
+
+  /** Set when the developer menu wants every reaction written on screen. */
+  onReactionLog: ((line: string) => void) | null = null;
+
+  /** A reaction fired. Always a short popup; a full log line when the developer menu asks for it. */
+  private onReaction(name: string, incoming: ElementId, on: ElementId | null, x: number, y: number): void {
+    const line = `${ELEMENTS[incoming].name}${on ? ` + ${ELEMENTS[on].name}` : ''} \u2192 ${name}`;
+    this.onReactionLog?.(line);
+    this.hud.float(u(x), 1.9, u(y), name.toUpperCase(), '#ffe066', true);
+  }
+
+  /** Reused every frame for the dummy labels, so nothing is allocated per frame. */
+  private dummyLabels: { x: number; y: number; z: number; text: string }[] = [];
+
+  private dummyLabelT = 0;
+
+  /**
+   * Status text above each training dummy: what it carries right now, and what it has taken.
+   *
+   * Five times a second, not sixty: building the status strings allocates, and a status that lasts
+   * seconds does not need to be re-read every 16 ms. The labels themselves are still repositioned
+   * every frame by the HUD, so they track the camera smoothly.
+   */
+  private updateDummyLabels(dt: number): void {
+    this.dummyLabelT -= dt;
+    if (this.dummyLabelT > 0) return;
+    this.dummyLabelT = 0.2;
+    const list = this.combat.dummyStatus();
+    this.dummyLabels.length = list.length;
+    for (let i = 0; i < list.length; i++) {
+      const d = list[i];
+      const text = d.statuses || d.taken > 0 ? `${d.statuses || 'tanpa status'}${d.taken > 0 ? `  \u00b7  ${d.taken} dmg` : ''}` : 'Boneka Latihan';
+      const label = this.dummyLabels[i] ?? { x: 0, y: 0, z: 0, text: '' };
+      label.x = u(d.enemy.x);
+      label.y = 2.1;
+      label.z = u(d.enemy.y);
+      label.text = text;
+      this.dummyLabels[i] = label;
+    }
+    this.hud.setWorldLabels(this.dummyLabels);
   }
 
   /**

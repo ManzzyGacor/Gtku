@@ -18,6 +18,7 @@ import { formatModifier, formatStat, STAT_META } from '../core/stats/stats';
 import { EQUIP_SLOTS, itemDef, itemMods, rarityMeta, type EquipSlot, type ItemDef } from '../core/items/items';
 import type { ItemStack } from '../core/items/inventory';
 import type { Character } from '../core/stats/character';
+import { ELEMENTS, type ElementId } from '../core/combat/elements';
 import { el, injectStyle, onTap } from './dom';
 
 const CSS = `
@@ -79,6 +80,14 @@ const CSS = `
   background: rgba(20,16,38,0.6); }
 .lm-st b { color: #fff8e6; font-weight: normal; }
 .lm-note { color: #8189a8; font-size: 10px; margin-top: 6px; }
+/* elements: primary rides on the weapon, secondary on the skill */
+.lm-el-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.lm-el-row > span { min-width: 5.5em; color: #a79dc4; font-size: 11px; }
+.lm-el { min-height: 36px; min-width: 64px; padding: 0 10px; border-radius: 18px; cursor: pointer;
+  font: inherit; font-size: 11px; color: #e7e0ff; background: rgba(28,22,52,0.9);
+  border: 1px solid rgba(154,140,214,0.35); touch-action: manipulation; transition: transform 90ms ease; }
+.lm-el:active { transform: scale(0.95); }
+.lm-el.on { color: #1a1430; font-weight: bold; }
 .lm-core { margin-top: 8px; padding: 6px 8px; border-radius: 4px; color: #ffe9a8;
   background: rgba(70,44,20,0.5); border: 1px solid rgba(255,176,74,0.45); }
 
@@ -321,6 +330,8 @@ export class CharacterPanel {
     }
     left.appendChild(slots);
 
+    left.appendChild(this.elementPicker());
+
     const core = this.character.inventory.lanternCore();
     if (core) {
       const box = el('div');
@@ -356,6 +367,45 @@ export class CharacterPanel {
     }
 
     this.body.append(left, right);
+  }
+
+  /**
+   * Choose which learned element goes in which hand.
+   *
+   * Primary rides on every weapon hit, secondary on the skill blast. Tapping an element that is
+   * already in the other hand swaps them, rather than refusing — the player is saying "I want this
+   * one here", and the swap is what they mean.
+   */
+  private elementPicker(): HTMLDivElement {
+    const box = el('div');
+    box.appendChild(heading('ELEMEN'));
+    const learned = this.character.unlocked;
+    if (!learned.length) {
+      const none = el('div', {}, 'Belum ada. Berdoa di shrine Ravenhollow untuk yang pertama.');
+      none.className = 'lm-note';
+      box.appendChild(none);
+      return box;
+    }
+    for (const slot of ['primary', 'secondary'] as const) {
+      const row = el('div');
+      row.className = 'lm-el-row';
+      row.appendChild(el('span', {}, slot === 'primary' ? 'Senjata' : 'Skill'));
+      const current = slot === 'primary' ? this.character.primary : this.character.secondary;
+      const options: (ElementId | null)[] = slot === 'secondary' ? [...learned, null] : learned;
+      for (const id of options) {
+        const label = id ? ELEMENTS[id].name : 'kosong';
+        const chip = el('button', {}, label);
+        chip.className = `lm-el${id === current ? ' on' : ''}`;
+        if (id && id === current) chip.style.background = `#${ELEMENTS[id].color.toString(16).padStart(6, '0')}`;
+        onTap(chip, () => {
+          this.character.setElement(slot, id);
+          this.after();
+        });
+        row.appendChild(chip);
+      }
+      box.appendChild(row);
+    }
+    return box;
   }
 
   // ───────────────────────── tas ─────────────────────────
