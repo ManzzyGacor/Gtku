@@ -28,6 +28,10 @@ import { Hud, type Projector } from '../ui/Hud';
 import { Minimap } from '../ui/Minimap';
 import { CharacterPanel } from '../ui/CharacterPanel';
 import { Portrait3D } from './Portrait3D';
+import { Coop3D } from './Coop3D';
+import { CoopPanel, type CoopView } from '../ui/CoopPanel';
+import { CoopClient, type CoopStatus, type Result, type RoomView, type SocketLike } from '../core/coop/client';
+import { BTN_ATTACK, BTN_DODGE, BTN_SKILL, type ClientMsg, type CoopError, type SnapEvent } from '../../shared/coop/protocol';
 import { gearLook } from '../core/items/look';
 import { CutsceneOverlay } from '../ui/CutsceneOverlay';
 import { PauseMenu, type InfoLine } from '../ui/PauseMenu';
@@ -88,6 +92,50 @@ function vibrate(ms: number): void {
   } catch {
     /* not allowed right now */
   }
+}
+
+/** What the Mission Board's panel reads and does, backed by the game's co-op client. */
+class CoopViewOf implements CoopView {
+  constructor(private readonly game: Game3D) {}
+  get status(): CoopStatus {
+    return this.game.coopClient?.status ?? 'idle';
+  }
+  get room(): RoomView | null {
+    return this.game.coopClient?.room ?? null;
+  }
+  get lastError(): CoopError | null {
+    return this.game.coopClient?.lastError ?? null;
+  }
+  get result(): Result | null {
+    return this.game.coopClient?.result ?? null;
+  }
+  go(msg: ClientMsg): void {
+    this.game.coopConnect()?.go(msg);
+  }
+  ready(on: boolean): void {
+    this.game.coopClient?.ready(on);
+  }
+  start(): void {
+    this.game.coopClient?.start();
+  }
+  leave(): void {
+    this.game.coopClient?.leave();
+  }
+}
+
+/** How the game reaches the co-op server (built in main.ts for a logged-in server account). */
+export interface CoopAccess {
+  /** `wss://…/ws` */
+  url: string;
+  token(): Promise<string | null>;
+  /** The server said this account is a developer: private rooms only. */
+  developer: boolean;
+  /** A save the server wrote (loot): make it the truth on this phone and for the next sync. */
+  onServerSave(save: { data: SaveData; rev: number }): void;
+  /** Send the newest local save before a fight. */
+  flush(): Promise<void>;
+  /** Tests only: the socket to use instead of the browser's WebSocket. */
+  makeSocket?: ((url: string) => SocketLike) | undefined;
 }
 
 /*
@@ -355,6 +403,7 @@ export class Game3D {
       save: (force) => this.saveNow(force),
       shake: (amount, seconds) => this.camera.shake(amount, seconds),
       shop: () => this.shop.show(),
+      missionBoard: () => this.openMissionBoard(),
     });
     this.story.onRest = () => {
       this.hero.heal(this.hero.maxHp);
@@ -1328,6 +1377,174 @@ export class Game3D {
   }
 
   /** Write the save. Never mid-boss-fight unless forced, so death cannot lock you in. */
+  // ───────────────────────── co-op (docs/MULTIPLAYER.md) ─────────────────────────
+
+  /** How to reach the co-op server — only for a logged-in server account (set by boot3d). */
+  coopAccess: CoopAccess | null = null;
+  coopClient: CoopClient | null = null;
+  coopPanel: CoopPanel | null = null;
+  arena: Coop3D | null = null;
+  private coopAim = -90;
+  private coopLabelT = 0;
+  private coopPingT = 0;
+  private coopResultTaken = false;
+  private dayBeforeCoop: number | null = null;
+
+  /** The Mission Board was used: pause the world and open the co-op panel. */
+  openMissionBoard(): void {
+    const access = this.coopAccess;
+    if (!this.coopPanel) {
+      this.coopPanel = new CoopPanel(
+        new CoopViewOf(this),
+        {
+          unavailable: () =>
+            !this.coopAccess ? 'Co-op butuh akun server yang sedang online. Masuk dengan akunmu (bukan mode tanpa server), lalu coba lagi.' : null,
+          developer: () => this.coopAccess?.developer ?? false,
+          itemName: (id) => itemDef(id)?.name ?? id,
+          onClose: () => this.exitCoop(),
+        },
+      );
+    }
+    this.paused = true;
+    input.enabled = false;
+    input.reset();
+    // the server's copy of the save is the base for stats and loot: send the newest first
+    if (access) void access.flush();
+    this.coopPanel.show();
+  }
+
+  /** Whether the world simulation is held (a menu, the board, a fight elsewhere). */
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  /** The co-op client, made on first use (null without a server account). */
+  coopConnect(): CoopClient | null {
+    const access = this.coopAccess;
+    if (!access) return null;
+    if (!this.coopClient) {
+      const client = new CoopClient({
+        url: access.url,
+        makeSocket: access.makeSocket ?? ((url) => new WebSocket(url) as unknown as SocketLike),
+        token: () => access.token(),
+        now: () => performance.now() / 1000,
+        later: (fn, ms) => void setTimeout(fn, ms),
+      });
+      client.onChange = () => this.coopChanged();
+      client.onEvents = (events) => this.coopEvents(events);
+      this.coopClient = client;
+    }
+    return this.coopClient;
+  }
+
+  /** Something changed in the room: enter the arena, take the result, redraw the panel. */
+  private coopChanged(): void {
+    const c = this.coopClient;
+    if (!c) return;
+    if (c.room?.phase === 'fight' && !this.arena && !c.result) this.enterArena();
+    if (c.result && !this.coopResultTaken) {
+      this.coopResultTaken = true;
+      input.enabled = false;
+      if (c.result.save) {
+        // the server wrote the loot into the save: that save is now the truth, here too
+        this.adoptSave(c.result.save.data as SaveData);
+        this.coopAccess?.onServerSave(c.result.save as { data: SaveData; rev: number });
+      }
+      if (c.result.won) sfx.levelUp();
+    }
+    this.coopPanel?.render();
+  }
+
+  private enterArena(): void {
+    this.arena = new Coop3D(this.pixels.scene, gearLook(this.character.inventory.equipped));
+    this.coopResultTaken = false;
+    // dusk in the arena: lanterns lit, faces still readable
+    this.dayBeforeCoop = this.dayTimeOverride;
+    this.dayTimeOverride = 0.74;
+    input.enabled = true;
+    input.reset();
+    const at = this.arena.toWorld(0, 100);
+    this.camera.snap(at.x, at.z);
+    this.hud.banner('BAYANG KOLOSUS', 2);
+  }
+
+  /** Back to the village from the board or the arena. */
+  exitCoop(): void {
+    this.coopClient?.leave();
+    this.coopClient = null;
+    this.arena?.dispose();
+    this.arena = null;
+    this.dayTimeOverride = this.dayBeforeCoop;
+    this.dayBeforeCoop = null;
+    this.hud.setBoss(null);
+    this.hud.setWorldLabels([]);
+    this.camera.snap(u(this.hero.x), u(this.hero.y));
+    this.paused = this.pause.isOpen || this.sheet.isOpen;
+    input.enabled = !this.paused && !this.dialogue.open;
+    input.reset();
+    this.saveNow(true);
+  }
+
+  /** One frame of a co-op fight: our input out, everyone's positions in, drawn. */
+  private updateCoop(dt: number): void {
+    const client = this.coopClient!;
+    const arena = this.arena!;
+    const view = client.draw();
+    const ax = input.axis();
+    const moving = Math.hypot(ax.x, ax.y) > 0.2;
+    const me = view.players.find((p) => p.you);
+    // aim: where the stick points; standing still, at the boss — on a phone that is what you mean
+    if (moving) this.coopAim = (Math.atan2(ax.y, ax.x) * 180) / Math.PI;
+    else if (view.boss && me) this.coopAim = (Math.atan2(view.boss[1] - me.y, view.boss[0] - me.x) * 180) / Math.PI;
+    const buttons = (input.isHeld('attack') ? BTN_ATTACK : 0) | (input.isHeld('dodge') ? BTN_DODGE : 0) | (input.isHeld('skill') ? BTN_SKILL : 0);
+    client.frame(dt, ax.x, ax.y, this.coopAim, client.result ? 0 : buttons);
+    arena.update(dt, view.players, view.boss, view.things);
+
+    const pos = client.myPosition;
+    const at = arena.toWorld(pos.x, pos.y);
+    this.camera.follow(at.x, at.z, dt);
+    this.camera.tick(dt);
+    if (view.boss) this.hud.setBoss('Bayang Kolosus', Math.max(0, view.boss[3] / Math.max(1, view.boss[4])));
+
+    // names over heads and the party strip, a few times a second (they allocate)
+    this.coopLabelT -= dt;
+    if (this.coopLabelT <= 0 && client.room) {
+      this.coopLabelT = 0.2;
+      const names = new Map(client.room.players.map((p) => [p.id, p.name]));
+      this.hud.setWorldLabels(arena.labelSpots(view.players, names));
+      this.coopPanel?.setParty(view.players.map((p) => ({ name: names.get(p.id) ?? '?', hp: p.hp, maxHp: p.maxHp, down: p.state === 4, you: p.you })));
+    }
+    this.coopPingT -= dt;
+    if (this.coopPingT <= 0) {
+      this.coopPingT = 2;
+      client.ping();
+    }
+  }
+
+  /** Damage numbers: the server's, where they happened. */
+  private coopEvents(events: SnapEvent[]): void {
+    const arena = this.arena;
+    const view = this.coopClient?.draw();
+    if (!arena || !view) return;
+    for (const [kind, target, amount] of events) {
+      if (kind === 1 && view.boss) {
+        const at = arena.toWorld(view.boss[0], view.boss[1]);
+        const crit = amount < 0;
+        this.hud.float(at.x, 1.8, at.z, String(Math.abs(amount)), crit ? '#ff9f43' : '#ffffff', crit);
+        if (target === this.coopClient?.room?.you) sfx.hit(crit);
+      } else if (kind === 2) {
+        const p = view.players.find((q) => q.id === target);
+        if (!p) continue;
+        const at = arena.toWorld(p.x, p.y);
+        this.hud.float(at.x, 1.4, at.z, `-${amount}`, '#ff6a5a', false);
+        if (p.you) this.camera.shake(3, 0.18);
+      } else if (kind === 3) {
+        const p = view.players.find((q) => q.id === target);
+        if (p?.you) this.hud.banner('KAMU JATUH — tunggu bangkit', 2);
+      }
+    }
+  }
+
   /** The save as it would be written right now (the developer panel sends it with each grant). */
   snapshotSave(): SaveData {
     this.state.dayTime = this.dayTime;
@@ -1377,7 +1594,11 @@ export class Game3D {
     // ── a cutscene owns the world while it runs ──
     this.tickCutscene(dt);
 
-    if (!this.paused && dt > 0) {
+    // ── a co-op fight owns the camera and the controls while it runs ──
+    if (this.arena && this.coopClient) this.updateCoop(dt);
+
+    // (the world stands still while a co-op fight runs, whatever the pause menu did meanwhile)
+    if (!this.paused && dt > 0 && !this.arena) {
       this.dayTime = (this.dayTime + simDt / DAY_SECONDS) % 1;
       this.updateHero(simDt);
       this.updateEvents(simDt);
@@ -1708,6 +1929,9 @@ export class Game3D {
     this.pause.destroy();
     this.sheet.destroy();
     this.shop.destroy();
+    this.coopClient?.leave();
+    this.arena?.dispose();
+    this.coopPanel?.destroy();
     this.dialogue.destroy();
     this.hud.destroy();
     this.combat.dispose();

@@ -97,6 +97,10 @@ export const HEARTBEAT_S = 0.25;
 const SNAP_ERROR = 40;
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+const findPlayer = (list: SnapPlayer[], id: number): SnapPlayer | undefined => {
+  for (const p of list) if (p[0] === id) return p;
+  return undefined;
+};
 const lerpAngle = (a: number, b: number, t: number): number => {
   let d = b - a;
   d = ((((d + 180) % 360) + 360) % 360) - 180;
@@ -358,10 +362,21 @@ export class CoopClient {
     if (this.pending.length > 64) this.pending.splice(0, this.pending.length - 64);
   }
 
-  /** Where to draw everyone this frame: you predicted, the others interpolated. */
+  // buffers `draw()` fills every frame instead of allocating (CLAUDE.md: allocation per frame is a bug)
+  private readonly drawOut: { players: DrawPlayer[]; boss: SnapBoss | null; things: SnapThing[] } = { players: [], boss: null, things: [] };
+  private readonly drawPool: DrawPlayer[] = [];
+  private readonly drawBoss: SnapBoss = [0, 0, 0, 0, 0, 0, 0, 0];
+
+  /**
+   * Where to draw everyone this frame: you predicted, the others interpolated. The returned object
+   * and its arrays are reused frame to frame — read it, do not keep it.
+   */
   draw(): { players: DrawPlayer[]; boss: SnapBoss | null; things: SnapThing[] } {
-    const out: DrawPlayer[] = [];
-    if (!this.snaps.length || !this.room) return { players: out, boss: null, things: [] };
+    const out = this.drawOut;
+    out.players.length = 0;
+    out.boss = null;
+    out.things = [];
+    if (!this.snaps.length || !this.room) return out;
     const renderAt = this.deps.now() - INTERP_DELAY;
     let a = this.snaps[0];
     let b = this.snaps[this.snaps.length - 1];
@@ -373,24 +388,38 @@ export class CoopClient {
       }
     const t = b.at > a.at ? Math.max(0, Math.min(1, (renderAt - a.at) / (b.at - a.at))) : 1;
     const newest = this.snaps[this.snaps.length - 1];
-    for (const p of newest.p) {
-      const you = p[0] === this.room.you;
-      if (you) {
-        out.push({ id: p[0], x: this.me.x + this.errX, y: this.me.y + this.errY, aim: p[3], hp: p[4], maxHp: p[5], state: p[6], you });
-        continue;
+    for (let i = 0; i < newest.p.length; i++) {
+      const p = newest.p[i];
+      const d = this.drawPool[i] ?? (this.drawPool[i] = { id: 0, x: 0, y: 0, aim: 0, hp: 0, maxHp: 0, state: 0, you: false });
+      d.id = p[0];
+      d.hp = p[4];
+      d.maxHp = p[5];
+      d.you = p[0] === this.room.you;
+      if (d.you) {
+        d.x = this.me.x + this.errX;
+        d.y = this.me.y + this.errY;
+        d.aim = p[3];
+        d.state = p[6];
+      } else {
+        const pa = findPlayer(a.p, p[0]) ?? p;
+        const pb = findPlayer(b.p, p[0]) ?? p;
+        d.x = lerp(pa[1], pb[1], t);
+        d.y = lerp(pa[2], pb[2], t);
+        d.aim = lerpAngle(pa[3], pb[3], t);
+        d.state = pb[6];
       }
-      const pa = a.p.find((q) => q[0] === p[0]) ?? p;
-      const pb = b.p.find((q) => q[0] === p[0]) ?? p;
-      out.push({ id: p[0], x: lerp(pa[1], pb[1], t), y: lerp(pa[2], pb[2], t), aim: lerpAngle(pa[3], pb[3], t), hp: p[4], maxHp: p[5], state: pb[6], you });
+      out.players.push(d);
     }
-    let boss: SnapBoss | null = null;
     if (a.b && b.b) {
-      boss = [...b.b] as SnapBoss;
+      const boss = this.drawBoss;
+      for (let i = 0; i < 8; i++) boss[i] = b.b[i];
       boss[0] = lerp(a.b[0], b.b[0], t);
       boss[1] = lerp(a.b[1], b.b[1], t);
       boss[2] = lerpAngle(a.b[2], b.b[2], t);
-    } else boss = newest.b;
-    return { players: out, boss, things: newest.z };
+      out.boss = boss;
+    } else out.boss = newest.b;
+    out.things = newest.z;
+    return out;
   }
 
   /** Our own predicted position (for the camera). */

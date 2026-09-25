@@ -41,6 +41,14 @@ shrine. Setelah itu quest utama: bicara dengan tetua di plaza.
 Badai Elemen, Kabut Misterius, Pedagang Keliling (belanja dengan koin), Malam Purnama. Baris event
 tampil di bawah objektif.
 
+## Co-op (sampai 4 pemain)
+
+Di alun-alun Ravenhollow ada **Papan Misi** (tanda oranye di minimap). Dari situ: **buat room privat**
+(dapat kode 5 huruf untuk dibagikan), **gabung dengan kode**, atau **cari room publik**. Lawan
+**Bayang Kolosus** bersama; server yang menentukan semuanya (posisi, damage, HP, loot) dan hadiah
+langsung masuk ke save. Dunia utama tetap pribadi. Butuh akun server yang online.
+Detail & cara tes dengan dua tab: [`docs/MULTIPLAYER.md`](docs/MULTIPLAYER.md).
+
 ## Mode Pengembang
 
 Hanya untuk akun **`manzzy`**, yang perannya `dev` di database — **ditentukan server**. Masuk sebagai

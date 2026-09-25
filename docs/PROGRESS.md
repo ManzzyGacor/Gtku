@@ -1279,3 +1279,25 @@ Rahasia: seluruh riwayat git dipindai ulang — nol connection string berkredens
 - **Stats bebas** (`devStats`) masuk ke lembar karakter sebagai sumber "Pengembang".
 - Tes: `server/tests/dev.test.ts` (10), `tests/devmode.test.ts` (6, game + app server sungguhan),
   `tests/catalog.test.ts` (2), `tests/saverules.test.ts` (1), satu tambahan di `tests/backend.test.ts`.
+
+## Multiplayer co-op: satu boss bisa dimainkan
+
+Detail lengkap: `docs/MULTIPLAYER.md`.
+
+- **Tahap 1 — koneksi & posisi:** WebSocket `wss://api.varesa.mom/ws` di server yang sama (origin
+  dicek, auth di pesan pertama, pesan maks 512 byte, > 40/dtk diputus, heartbeat). Klien mengirim
+  input hanya saat berubah + detak; prediksi + rekonsiliasi untuk hero sendiri, interpolasi 150 ms untuk
+  yang lain; sambung ulang otomatis ke room yang sama dalam 30 dtk.
+- **Tahap 2 — boss co-op: Bayang Kolosus.** Simulasi di `shared/coop/sim.ts`, dijalankan server 20 Hz:
+  slam, sweep, hujan bara, terjangan (fase 3), semua bertelegraf; jatuh & bangkit; HP boss sesuai jumlah
+  pemain. **Semua angka dari server** (posisi, damage dari save di server, HP, loot); klien hanya stik,
+  arah, tombol.
+- **Room:** privat berkode 5 huruf, publik lewat "Cari room publik", maks 4, lobby dengan siap/mulai,
+  room kosong ditutup setelah 30 dtk. **Akun pengembang hanya room privat.**
+- **Di game:** Papan Misi di alun-alun (juga di minimap) → panel → arena di luar peta (dunia berhenti,
+  senja, lentera di pilar) → strip party & bar HP boss → hasil; loot ditulis server ke save lalu masuk
+  tas.
+- **Hemat:** snapshot < 0,9 KB (10/dtk), input ± 40 byte.
+- Tes: simulasi (8, termasuk satu pertarungan penuh dimainkan bot), room (9, termasuk soket sungguhan),
+  end-to-end dua klien (3), **dua game sungguhan di satu room** (2), panel (4). Tampilan dan rasa hanya
+  bisa dicek di HP.

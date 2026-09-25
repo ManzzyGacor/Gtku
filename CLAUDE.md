@@ -64,6 +64,7 @@ Semuanya juga ada di menu Pengaturan (gerigi di pojok kanan atas).
 src/
   main.ts            entry: overlay debug, layar judul + akun, lalu muat render3d/boot3d secara dinamis
   cloud.ts           setelah login ke server: peran, save server vs HP, antrean sinkron (dibatasi waktu)
+  core/coop/         client (co-op: input hemat, prediksi, interpolasi, sambung ulang) — docs/MULTIPLAYER.md
   config.ts          konstanta global (TILE, ukuran dunia, key save/setelan, versi)
   core/              LOGIKA GAME MURNI — dilarang mengimpor three, dan hanya boleh mengimpor
                      src/core/** + src/config (dijaga tests/architecture.test.ts)
@@ -109,9 +110,11 @@ scripts/             skrip node — termasuk areaPacks.ts (paket data area; dipa
                      ekspor sheet, preview dunia, ascii-map, plan-stats,
                      stream-budget, preview-textures, crop-reference, debug-puzzle)
 shared/              kontrak game ↔ server, murni: api (tipe, nama dilindungi, kode galat), catalog
-                     (ringkasan katalog item, dijaga tes), saveRules (validasi save), devActions
+                     (ringkasan katalog item, dijaga tes), saveRules (validasi save), devActions,
+                     coop/protocol + coop/sim (pertarungan co-op, otoritatif di server)
 server/              backend akun & save (Fastify + MongoDB + argon2id + JWT), paket npm sendiri:
-                     src/app (rute), config, repo (antarmuka + memori), repo.mongo, index (start)
+                     src/app (rute), config, repo (antarmuka + memori), repo.mongo, index (start),
+                     coop/rooms + coop/ws (room co-op lewat WebSocket /ws), devGrants, saveEdit
 docs/                OVERHAUL.md (rencana induk), GAME_DESIGN.md, PROGRESS.md, STORY.md, BACKEND.md
 docs/reference/      TARGET VISUAL (referensi-visual.png). Buka dengan scripts/crop-reference.ts
                      untuk memeriksa bagiannya dari dekat; scripts/png.ts bisa decode PNG.

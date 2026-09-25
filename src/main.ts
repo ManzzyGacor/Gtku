@@ -27,6 +27,8 @@ import { readRaw, writeRaw, removeRaw } from './core/storage';
 import { connectCloud, makeDevServer } from './cloud';
 import type { DevServer } from './render3d/DevTools';
 import type { SaveSync } from './core/sync/saveSync';
+import type { CoopAccess } from './render3d/Game3D';
+import type { SaveData } from './core/state/GameState';
 
 /**
  * Where accounts live: the Lentera Malam server (`server/`, docs/BACKEND.md) at api.varesa.mom.
@@ -64,11 +66,19 @@ function makeAuth(): AuthAdapter | null {
  */
 let devServer: DevServer | undefined;
 let cloudSync: SaveSync | undefined;
+let coopAccess: CoopAccess | undefined;
+
+/** A save the server wrote (developer grant, co-op loot): the truth on this phone and for the next sync. */
+function serverSave(save: { data: SaveData; rev: number }): void {
+  adoptSave(save.data);
+  if (cloudSync) cloudSync.rev = save.rev;
+}
 
 async function onAccount(session: AccountSession | null): Promise<void | string> {
   setSaveMirror(null);
   devServer = undefined;
   cloudSync = undefined;
+  coopAccess = undefined;
   if (!session || session.kind === 'local' || !remote) return undefined;
   const result = await connectCloud(remote, session, {
     loadLocal: () => loadGame(),
@@ -85,12 +95,21 @@ async function onAccount(session: AccountSession | null): Promise<void | string>
     now: () => Date.now(),
   });
   cloudSync = result.sync;
-  if (result.role === 'dev')
-    devServer = makeDevServer(remote, (save) => {
-      // the server's save is now the truth: on this phone, and as the base of the next sync
-      adoptSave(save.data);
-      if (cloudSync) cloudSync.rev = save.rev;
-    });
+  if (result.role === 'dev') devServer = makeDevServer(remote, serverSave);
+  const auth = remote;
+  // co-op rides the same server: wss://api.varesa.mom/ws, the token in the first message
+  coopAccess = {
+    url: `${API_URL.replace(/\/$/, '').replace(/^http/, 'ws')}/ws`,
+    token: async () => {
+      const t = await auth.token();
+      return t === 'offline' || t === 'logged-out' ? null : t;
+    },
+    developer: result.role === 'dev',
+    onServerSave: serverSave,
+    flush: async () => {
+      await cloudSync?.tick(performance.now() / 1000, true);
+    },
+  };
   return result.relogin;
 }
 
@@ -163,7 +182,7 @@ async function boot(): Promise<void> {
     title.setBackdrop(false);
     (backdrop as { dispose(): void } | null)?.dispose();
     backdrop = null;
-    (window as unknown as { __game3d: unknown }).__game3d = startWorld(host, debug, choice.continueGame, { devServer });
+    (window as unknown as { __game3d: unknown }).__game3d = startWorld(host, debug, choice.continueGame, { devServer, coop: coopAccess });
   } catch (e) {
     /*
      * Show what actually failed.

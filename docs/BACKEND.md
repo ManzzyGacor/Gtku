@@ -60,6 +60,7 @@ driver. Kode-kodenya ada di `shared/api.ts` (`ApiErrorCode`) beserta teks bahasa
 | `GET /save` | Bearer | — | `200 { data, saveVersion, rev, updatedAt }` atau `204` |
 | `PUT /save` | Bearer | `{ data, baseRev, clientUpdatedAt? }` | `200 { rev, updatedAt }` · `409 { error: "conflict", current }` · `413` · `422 { error: "save_rejected", reason, detail }` |
 | `POST /dev/action` | Bearer, peran `dev` | `{ action, save? }` | `200 { ok, note?, save? }` · `403 forbidden` · `400` |
+| `GET /ws` (WebSocket) | access token di pesan pertama | protokol co-op | lihat `docs/MULTIPLAYER.md` |
 
 `user` = `{ username, role }`, `role` = `"player"` atau `"dev"`.
 

@@ -18,5 +18,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "scripts", "tests", "shared", "vite.config.ts"]
+  "include": ["src", "scripts", "tests", "shared", "vite.config.ts", "server/tests/coop-game.test.ts", "server/tests/coop-e2e.test.ts"]
 }

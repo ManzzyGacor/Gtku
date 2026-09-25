@@ -3,8 +3,12 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022"],
-    "types": ["node"],
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -16,5 +20,14 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "scripts", "tests", "../shared"]
+  "include": [
+    "src",
+    "scripts",
+    "tests",
+    "../shared"
+  ],
+  "exclude": [
+    "tests/coop-game.test.ts",
+    "tests/coop-e2e.test.ts"
+  ]
 }

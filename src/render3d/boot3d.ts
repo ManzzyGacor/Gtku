@@ -6,7 +6,7 @@
  * kill the tab, and rebuilding the whole world if the GPU takes the WebGL context away. See
  * `core/lifecycle.ts` for why each of those matters on a phone.
  */
-import { Game3D } from './Game3D';
+import { Game3D, type CoopAccess } from './Game3D';
 import { TitleBackdrop } from './TitleBackdrop';
 import type { DevServer } from './DevTools';
 import { resumeAudio, suspendAudio } from '../core/audio';
@@ -62,6 +62,8 @@ function notice(text: string | null): void {
  */
 export interface SessionAccess {
   devServer?: DevServer | undefined;
+  /** Co-op: only for a logged-in server account (docs/MULTIPLAYER.md). */
+  coop?: CoopAccess | undefined;
 }
 
 export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: boolean, access: SessionAccess = {}): Booted3D {
@@ -70,6 +72,7 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
   // to wait for the combat model to download.
   loadCombatTuning();
   let game = new Game3D(parent, { continue: continueGame });
+  game.coopAccess = access.coop ?? null;
   const controls = new TouchControls();
 
   const wire = (g: Game3D): void => {
@@ -120,6 +123,7 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
       game.saveNow(true);
       game.dispose();
       game = new Game3D(parent, { continue: true });
+      game.coopAccess = access.coop ?? null;
       wire(game);
       lifecycle.attachCanvas(game.pixels.canvas);
       notice(null);

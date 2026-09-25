@@ -22,6 +22,7 @@ import type { NpcDef, WorldSource } from '../core/world/source';
 import type { DialogueSpec } from '../ui/Dialogue';
 import type { MapMark } from '../ui/Minimap';
 import { markerTexture, NpcMesh3D } from './NpcMesh3D';
+import { findStandable } from '../core/saveMigrate';
 import { u } from './worldPlan';
 
 /** A heal orb an enemy dropped. */
@@ -55,6 +56,8 @@ export interface StoryHooks {
   grantCore?(itemId: string): void;
   /** The wandering merchant was spoken to: open the shop. */
   shop?(): void;
+  /** The Mission Board in the plaza: open the co-op panel. */
+  missionBoard?(): void;
 }
 
 export class Story3D {
@@ -183,8 +186,58 @@ export class Story3D {
         markerLift: 1.9,
       });
     }
+    this.buildMissionBoard();
     this.refreshMarkers();
     this.setLanternLit(!!this.state.flags.lanternLit, false);
+  }
+
+  /** Where the Mission Board stands (px), for the map and the tests. */
+  missionBoardAt: { x: number; y: number } = { x: 0, y: 0 };
+  private boardGroup: THREE.Group | null = null;
+  private boardGeo: THREE.BufferGeometry[] = [];
+  private boardMat: THREE.Material[] = [];
+
+  /**
+   * The Mission Board: a notice board on posts at the edge of the plaza, where co-op parties form
+   * (docs/MULTIPLAYER.md). An ordinary interactable — "Papan Misi" — so the contextual button and
+   * the marker work as for everything else.
+   */
+  private buildMissionBoard(): void {
+    const m = this.world.markers.lantern;
+    const spot = findStandable(this.world, m.x - 60, m.y + 30) ?? { x: m.x - 60, y: m.y + 30 };
+    this.missionBoardAt = spot;
+    const g = new THREE.Group();
+    const wood = new THREE.MeshLambertMaterial({ color: 0x7a5236 });
+    const paper = new THREE.MeshLambertMaterial({ color: 0xe8dcb8 });
+    const seal = new THREE.MeshBasicMaterial({ color: 0xff7a3a });
+    this.boardMat.push(wood, paper, seal);
+    const box = (w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number): void => {
+      const geo = new THREE.BoxGeometry(w, h, d);
+      this.boardGeo.push(geo);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, y, z);
+      g.add(mesh);
+    };
+    box(0.14, 1.9, 0.14, wood, -0.7, 0.95, 0);
+    box(0.14, 1.9, 0.14, wood, 0.7, 0.95, 0);
+    box(1.7, 1.0, 0.1, wood, 0, 1.35, 0.02);
+    box(1.9, 0.12, 0.35, wood, 0, 1.95, 0);
+    box(0.5, 0.6, 0.02, paper, -0.4, 1.35, 0.09);
+    box(0.5, 0.6, 0.02, paper, 0.32, 1.3, 0.09);
+    box(0.12, 0.12, 0.03, seal, 0.32, 1.52, 0.1);
+    g.position.set(u(spot.x), 0, u(spot.y - 6));
+    this.scene.add(g);
+    this.boardGroup = g;
+    this.collision.addBlocker(Math.floor(spot.x / TILE), Math.floor((spot.y - 6) / TILE));
+    this.interactables.push({
+      id: 'papan_misi',
+      x: spot.x,
+      y: spot.y + 6,
+      range: 42,
+      label: () => 'Papan Misi',
+      interact: () => this.hooks.missionBoard?.(),
+      markerLift: 2.4,
+    });
   }
 
   // ───────────────────────── quest ─────────────────────────
@@ -443,6 +496,7 @@ export class Story3D {
       out.push({ x: npc.def.x, y: npc.def.y, color: highlight ? '#ffd15a' : '#66e0ff', size: highlight ? 3 : 2 });
     }
     for (const cp of this.world.markers.checkpoints) out.push({ x: cp.x, y: cp.y, color: '#ffb04a' });
+    out.push({ x: this.missionBoardAt.x, y: this.missionBoardAt.y, color: '#ff7a3a', size: 2 });
     if (stage === 2) {
       const b = this.world.markers.boss.spawn;
       out.push({ x: b.x, y: b.y, color: '#ff5a4a', size: 3 });
@@ -471,6 +525,9 @@ export class Story3D {
   }
 
   dispose(): void {
+    this.boardGroup?.removeFromParent();
+    for (const g of this.boardGeo) g.dispose();
+    for (const m of this.boardMat) m.dispose();
     this.marker?.removeFromParent();
     this.markerMat?.dispose();
     this.marker = null;
