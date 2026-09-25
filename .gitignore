@@ -4,3 +4,11 @@ dist/
 *.log
 .DS_Store
 .preview/
+
+# secrets: never committed. Only .env.example (names, no values) is.
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+!server/.env.example
