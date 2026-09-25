@@ -8,7 +8,8 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
-import { AUTO_PATH, AutoTuner, FULL, levelsAt, type ComponentId } from '../src/core/autotune';
+import { AUTO_PATH, AutoTuner, FULL, levelsAt, minLevels, playerLevels, type ComponentId } from '../src/core/autotune';
+import { DEFAULTS } from '../src/core/settings';
 import { FPS_CEIL, FPS_FLOOR } from '../src/core/graphics';
 import { PerfMeter } from '../src/core/perf';
 
@@ -161,4 +162,21 @@ test('the decision history is capped, so the report stays readable', () => {
     assert.ok(d.what.length > 3);
     assert.ok(Number.isFinite(d.fps) && Number.isFinite(d.at));
   }
+});
+
+test("the player's graphics caps only ever take away, and default to taking nothing", () => {
+  // defaults are "as the preset has it" for every dial
+  assert.deepEqual(playerLevels(DEFAULTS), FULL);
+  const mine = playerLevels({ ...DEFAULTS, gfxOutline: 0, gfxLights: 1, bloom: false });
+  const out = { ...FULL };
+  // AUTO has dropped particles; the player has dropped outline, lights and bloom — both apply
+  minLevels(levelsAt(1), mine, out);
+  assert.equal(out.particles, 0.5, 'AUTO still trims');
+  assert.equal(out.outline, 0, 'the player turned the outline off');
+  assert.equal(out.lights, 1);
+  assert.equal(out.bloom, 0);
+  assert.equal(out.water, 1, 'untouched dials stay at the preset');
+  // a player cap can never lift something AUTO lowered
+  minLevels(levelsAt(AUTO_PATH.length), playerLevels(DEFAULTS), out);
+  assert.deepEqual(out, levelsAt(AUTO_PATH.length));
 });

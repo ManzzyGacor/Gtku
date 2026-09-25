@@ -14,7 +14,7 @@ import { EQUIP_SLOTS, ITEMS, RARITIES, itemDef, type Rarity } from '../core/item
 import { MAX_LEVEL } from '../core/progression';
 import { WEATHER, WEATHER_IDS, type Weather } from '../core/systems/weather';
 import { findStandable } from '../core/saveMigrate';
-import { clearSave } from '../core/save';
+import { wipeSave } from '../core/save';
 import { DUMMY_TILE } from '../core/systems/tutorial';
 
 const KIND_LABEL: Record<string, string> = {
@@ -184,7 +184,7 @@ export function buildDevActions(game: Game3D, reload: () => void): DevActions {
       return 'Status cutscene direset. Prolog akan diputar lagi di Game Baru.';
     },
     resetSave: () => {
-      clearSave();
+      wipeSave();
       reload();
       return 'Save dihapus.';
     },

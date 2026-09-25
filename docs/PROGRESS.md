@@ -1009,3 +1009,41 @@ berarti **5 detik tanah kosong** kalau paketnya lambat. Sekarang batasnya waktu:
 memanggang sendiri. Teleport dan frame pertama tidak menunggu sama sekali.
 
 **Tes baru Batch 6:** `autotune` (10), `download` (13), `areadata` (9), `downloadui` (5).
+
+## Perbaikan: Pengaturan kosong (hanya judul "PENGATURAN")
+
+**Penyebab:** tabrakan nama class CSS. Setiap overlay menyuntikkan stylesheet global sendiri, dan
+header menu Pengaturan memakai class `lm-title` — nama yang sama dengan **akar layar judul**
+(`position: fixed; inset: 0; z-index: 90`, latar gradien gelap, isi di tengah). Header itu
+membesar menutupi seluruh panel: yang terlihat hanya kata "PENGATURAN" di tengah layar, semua baris
+setelan tetap ada di DOM tapi tertutup. Perbaikan z-index sebelumnya (85 → 96) membuat panelnya
+tampil di atas layar judul, tapi headernya tetap menutupi isinya. Layar judul dan menu jeda memakai
+komponen yang **sama** (`SettingsPanel` lewat `DebugUi`), jadi keduanya kena.
+
+Ditemukan juga dua tabrakan lain (`lm-hint` dengan HUD, `lm-note` dengan panel Karakter) dan satu
+bug gulir: badan daftar tidak punya `min-height: 0`, jadi di layar setinggi 759 px bagian bawah
+daftar bisa terpotong alih-alih bisa digulir.
+
+**Perbaikan:** semua class Pengaturan kini berawalan `lm-set-*`; badan daftar bisa menyusut dan
+menggulir; baris "chip" di atas untuk lompat ke tiap kelompok.
+
+**Isi Pengaturan sekarang:** Grafik (preset AUTO → Ultra, skala render, bloom, partikel, angin
+rumput, lampu dinamis, grain tanah, air beriak, jarak pandang ekstra, outline, reset grafik) ·
+Kamera (sudut, zoom, reset) · Kontrol (ukuran & posisi joystick, ukuran tombol, reset) · Tampilan
+(ukuran teks, kecepatan teks dialog, nama, penghitung FPS) · Audio (5 kategori) · Combat · Cutscene
+(putar ulang) · Data (Download Manager, **hapus data dunia**, **reset save**) · Diagnostik.
+
+Setelan grafik individual bekerja sebagai **batas atas milik pemain**: setiap komponen =
+min(preset, AUTO, pilihan pemain). AUTO tetap bisa menurunkan, pilihan pemain tidak pernah menaikkan
+di atas preset. Reset save bertanya dua kali, lalu save **dikunci terhapus** sampai halaman dimuat
+ulang (`wipeSave`) — sebelumnya `pagehide` saat reload bisa menulis save yang baru dihapus kembali
+(ini juga memperbaiki tombol reset save di Mode Pengembang).
+
+**Tes:** `tests/settingspanel.test.ts` (7) membangun Pengaturan bersama layar judul, menu jeda, HUD
+dan dialog, lalu **menghitung CSS yang akan diterapkan browser** dari semua stylesheet ke setiap
+elemen panel: tidak boleh ada elemen di dalam panel yang jadi `position: fixed` atau diberi gaya
+oleh stylesheet lain. Diverifikasi: mengembalikan class lama membuat tes ini gagal dengan pesan
+`"PENGATURAN" is position:fixed via lm-ui-title .lm-title`. Plus: semua kelompok & setelan ada dan
+berfungsi, preset berputar AUTO→Ultra, daftar bisa digulir di 2318x759 dengan teks 2x/tombol 1.3x,
+dibuka dari layar judul dan menu jeda (panel yang sama), reset save. `tests/source.test.ts`
+menambah penjaga: **tidak boleh ada class yang diberi gaya oleh dua stylesheet berbeda**.

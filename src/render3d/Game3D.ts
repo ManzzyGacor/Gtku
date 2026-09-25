@@ -8,7 +8,7 @@
  */
 import { buildTileSheet } from '../art/tiles';
 import { higherPreset, lowerPreset, probeDevice, profileOf, suggestPreset, PROFILES } from '../core/graphics';
-import { AUTO_PATH, AutoTuner, COMPONENT_LABEL, FULL, type ComponentId } from '../core/autotune';
+import { AUTO_PATH, AutoTuner, COMPONENT_LABEL, FULL, minLevels, playerLevels, type ComponentId, type ComponentLevels } from '../core/autotune';
 
 const AUTO_STEPS = AUTO_PATH.length;
 import { input } from '../core/input';
@@ -100,6 +100,8 @@ export class Game3D {
   readonly autoTuner = new AutoTuner(this.perf);
   /** Set while AUTO itself is changing the preset, so that change does not reset AUTO's dials. */
   private autoMovingPreset = false;
+  /** Where `applyProfile` combines AUTO's dials with the player's caps, reused. */
+  private readonly levelScratch: ComponentLevels = { ...FULL };
   private tileSheet = buildTileSheet();
   private raf = 0;
   private lastFrame = 0;
@@ -338,6 +340,7 @@ export class Game3D {
         if (!this.autoTuner.auto) this.autoTuner.reset();
         this.applyProfile();
       }
+      if (key !== null && key.startsWith('gfx')) this.applyProfile();
       if (key === 'preset' || key === 'renderScale') {
         // a preset the *player* picked starts from full dials; one AUTO picked keeps AUTO's
         if (key === 'preset' && !this.autoMovingPreset) this.autoTuner.reset();
@@ -400,7 +403,8 @@ export class Game3D {
    */
   private applyProfile(): void {
     const p = profileOf(settings.get('preset'));
-    const a = this.autoTuner.auto ? this.autoTuner.levels : FULL;
+    // AUTO's dials, then the player's own caps from Pengaturan → Grafik on top
+    const a = minLevels(this.autoTuner.auto ? this.autoTuner.levels : FULL, playerLevels(settings.all()), this.levelScratch);
     this.pixels.setOutline(p.outline && a.outline > 0);
     this.scene3d.setLightBudget(Math.min(LIGHT_BUDGET[p.id] ?? 2, a.lights));
     // The bottom preset stands still: swaying every blade costs vertex work.
@@ -469,7 +473,8 @@ export class Game3D {
    */
   private chunkRadius(): number {
     // AUTO's "jarak pandang" dial drops the preset's extra margin, never the visible chunks themselves
-    const margin = this.autoTuner.auto && this.autoTuner.levels.distance === 0 ? 0 : profileOf(settings.get('preset')).chunkMargin;
+    const auto = this.autoTuner.auto && this.autoTuner.levels.distance === 0;
+    const margin = auto || settings.get('gfxDistance') === 0 ? 0 : profileOf(settings.get('preset')).chunkMargin;
     return Math.max(1, margin + 1);
   }
 

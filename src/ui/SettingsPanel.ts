@@ -29,26 +29,51 @@ type StoryModule = {
 let story: StoryModule | null = null;
 import { PROFILES, probeDevice, profileOf } from '../core/graphics';
 import { buildReport, copyText } from '../core/report';
-import { DEFAULTS, NAME_FALLBACK, PRESET_IDS, RANGES, sanitizeName, settings, type NumericKey, type PresetId, type Settings } from '../core/settings';
+import { DEFAULTS, GFX_KEYS, NAME_FALLBACK, PRESET_IDS, RANGES, sanitizeName, settings, type NumericKey, type PresetId, type Settings } from '../core/settings';
 import type { DiagnosticsSource } from './diagnostics';
 import { el, injectStyle, onTap } from './dom';
+import { wipeSave } from '../core/save';
+import { wipeWorldData } from '../core/download/wipe';
 
 type Row =
-  | { kind: 'header'; label: string }
+  | { kind: 'header'; label: string; id: string }
   | { kind: 'toggle'; label: string; key: 'bloom' | 'fpsCounter'; hint?: string }
-  | { kind: 'number'; label: string; key: NumericKey; fmt: (v: number) => string }
+  | { kind: 'number'; label: string; key: NumericKey; fmt: (v: number) => string; hint?: string }
+  /** A numeric 0/1 setting shown as one Nyala/Mati button (the per-component graphics caps). */
+  | { kind: 'switch'; label: string; key: NumericKey; hint?: string }
   | { kind: 'choice'; label: string; key: 'preset'; hint?: string }
-  | { kind: 'action'; label: string; button: string; run: (panel: SettingsPanel) => void; note?: () => string };
+  | { kind: 'action'; label: string; button: string; run: (panel: SettingsPanel) => void; note?: () => string; danger?: boolean; opensCombat?: boolean };
 
 const pct = (v: number): string => `${Math.round(v * 100)}%`;
 const mult = (v: number): string => `${v.toFixed(1)}x`;
+const off = (fmt: (v: number) => string) => (v: number): string => (v === 0 ? 'Mati' : fmt(v));
 
-const ROWS: Row[] = [
-  { kind: 'header', label: 'Grafik' },
+/**
+ * Every setting, in the order the player reads them. The `id` of each header is also its jump chip
+ * at the top of the panel: on a 759-pixel-tall phone the list is several screens long, and "Audio"
+ * should be one tap away, not a long scroll past the graphics.
+ */
+export const ROWS: Row[] = [
+  { kind: 'header', label: 'Grafik', id: 'grafik' },
   { kind: 'choice', label: 'Preset', key: 'preset', hint: 'AUTO menyesuaikan sendiri dari FPS' },
-  { kind: 'toggle', label: 'Bloom', key: 'bloom', hint: 'Cahaya mekar; matikan bila berat' },
-  { kind: 'number', label: 'Skala render', key: 'renderScale', fmt: pct },
-  { kind: 'header', label: 'Kamera (mode 3D)' },
+  { kind: 'number', label: 'Skala render', key: 'renderScale', fmt: pct, hint: 'Lebih rendah = lebih ringan, pixel tetap sama' },
+  { kind: 'toggle', label: 'Bloom', key: 'bloom', hint: 'Cahaya mekar' },
+  { kind: 'number', label: 'Partikel', key: 'gfxParticles', fmt: off(pct), hint: 'Kunang-kunang dan kabut melayang' },
+  { kind: 'number', label: 'Angin rumput', key: 'gfxWind', fmt: off(pct), hint: 'Rumput dan daun bergoyang' },
+  { kind: 'number', label: 'Lampu dinamis', key: 'gfxLights', fmt: off((v) => `${v}`), hint: 'Lampu yang ikut bergerak' },
+  { kind: 'switch', label: 'Grain tanah', key: 'gfxDetail', hint: 'Tekstur halus di tanah' },
+  { kind: 'switch', label: 'Air beriak', key: 'gfxWater', hint: 'Permukaan air bergerak' },
+  { kind: 'switch', label: 'Jarak pandang ekstra', key: 'gfxDistance', hint: 'Memuat dunia sedikit di luar layar' },
+  { kind: 'switch', label: 'Outline pixel', key: 'gfxOutline', hint: 'Garis tepi khas pixel-art' },
+  {
+    kind: 'action',
+    label: 'Kembalikan grafik',
+    button: 'Reset',
+    note: () => 'Semua komponen kembali mengikuti preset',
+    run: () => settings.reset([...GFX_KEYS, 'bloom', 'renderScale']),
+  },
+
+  { kind: 'header', label: 'Kamera', id: 'kamera' },
   { kind: 'number', label: 'Sudut kamera', key: 'camPitch', fmt: (v) => `${v}\u00b0` },
   { kind: 'number', label: 'Jarak / zoom', key: 'camZoom', fmt: mult },
   {
@@ -58,13 +83,23 @@ const ROWS: Row[] = [
     note: () => `Kembali ke ${DEFAULTS.camPitch}\u00b0 dan ${DEFAULTS.camZoom.toFixed(2)}x`,
     run: () => settings.reset(['camPitch', 'camZoom']),
   },
-  { kind: 'header', label: 'Kontrol & teks' },
+
+  { kind: 'header', label: 'Kontrol', id: 'kontrol' },
   { kind: 'number', label: 'Ukuran joystick', key: 'stickScale', fmt: mult },
   { kind: 'number', label: 'Joystick kiri-kanan', key: 'stickX', fmt: pct },
   { kind: 'number', label: 'Joystick atas-bawah', key: 'stickY', fmt: pct },
   { kind: 'number', label: 'Ukuran tombol', key: 'buttonScale', fmt: mult },
+  {
+    kind: 'action',
+    label: 'Reset kontrol',
+    button: 'Reset',
+    note: () => 'Joystick dan tombol ke posisi & ukuran bawaan',
+    run: () => settings.reset(['stickScale', 'stickX', 'stickY', 'buttonScale']),
+  },
+
+  { kind: 'header', label: 'Tampilan', id: 'tampilan' },
   { kind: 'number', label: 'Ukuran teks', key: 'textScale', fmt: (v) => `${v}x` },
-  { kind: 'number', label: 'Kecepatan teks', key: 'textSpeed', fmt: (v) => `${v}/dtk` },
+  { kind: 'number', label: 'Kecepatan teks dialog', key: 'textSpeed', fmt: (v) => `${v}/dtk` },
   {
     kind: 'action',
     label: 'Nama karakter',
@@ -72,21 +107,26 @@ const ROWS: Row[] = [
     note: () => settings.get('playerName') || `Belum diatur (${NAME_FALLBACK})`,
     run: (p) => p.askName(),
   },
-  { kind: 'header', label: 'Audio' },
-  { kind: 'number', label: 'Musik', key: 'musicVol', fmt: pct },
-  { kind: 'number', label: 'Suasana', key: 'ambientVol', fmt: pct },
-  { kind: 'number', label: 'Tempur', key: 'combatVol', fmt: pct },
-  { kind: 'number', label: 'Efek', key: 'sfxVol', fmt: pct },
-  { kind: 'number', label: 'Antarmuka', key: 'uiVol', fmt: pct },
-  { kind: 'header', label: 'Data dunia' },
+  { kind: 'toggle', label: 'Penghitung FPS', key: 'fpsCounter', hint: 'Bisa juga lewat ?fps=1' },
+
+  { kind: 'header', label: 'Audio', id: 'audio' },
+  { kind: 'number', label: 'Musik', key: 'musicVol', fmt: off(pct) },
+  { kind: 'number', label: 'Suasana', key: 'ambientVol', fmt: off(pct) },
+  { kind: 'number', label: 'Tempur', key: 'combatVol', fmt: off(pct) },
+  { kind: 'number', label: 'Efek', key: 'sfxVol', fmt: off(pct) },
+  { kind: 'number', label: 'Antarmuka', key: 'uiVol', fmt: off(pct) },
+
+  { kind: 'header', label: 'Combat', id: 'combat' },
   {
     kind: 'action',
-    label: 'Download Manager',
+    label: 'Setelan Combat',
     button: 'Buka',
-    note: () => 'Status tiap area, unduh/hapus, dan sisa penyimpanan',
-    run: (p) => p.openDownloads(),
+    note: () => (tuning?.isTuned() ? 'Ada nilai yang sudah kamu ubah' : 'Kombo, busur, jangkauan, getaran'),
+    run: (p) => p.toggleCombat(),
+    opensCombat: true,
   },
-  { kind: 'header', label: 'Cerita' },
+
+  { kind: 'header', label: 'Cutscene', id: 'cutscene' },
   {
     kind: 'action',
     label: 'Putar ulang cutscene',
@@ -94,22 +134,39 @@ const ROWS: Row[] = [
     note: () => (story ? `${story.REPLAYABLE.length} adegan tersimpan` : 'Adegan cerita yang sudah ditonton'),
     run: (p) => p.showCutscenes(),
   },
-  { kind: 'header', label: 'Diagnostik' },
-  { kind: 'toggle', label: 'Penghitung FPS', key: 'fpsCounter', hint: 'Bisa juga lewat ?fps=1' },
+
+  { kind: 'header', label: 'Data', id: 'data' },
+  {
+    kind: 'action',
+    label: 'Download Manager',
+    button: 'Buka',
+    note: () => 'Status tiap area, unduh/hapus, dan sisa penyimpanan',
+    run: (p) => p.openDownloads(),
+  },
+  {
+    kind: 'action',
+    label: 'Hapus data dunia',
+    button: 'Hapus',
+    danger: true,
+    note: () => 'Semua area yang sudah diunduh. Progres TIDAK ikut terhapus.',
+    run: (p) => void p.wipeWorld(),
+  },
+  {
+    kind: 'action',
+    label: 'Reset save',
+    button: 'Reset',
+    danger: true,
+    note: () => 'Menghapus progres permainan. Tidak bisa dibatalkan.',
+    run: (p) => p.resetSave(),
+  },
+
+  { kind: 'header', label: 'Diagnostik', id: 'diagnostik' },
   {
     kind: 'action',
     label: 'Salin laporan',
     button: 'Salin',
     note: () => 'Perangkat, FPS, preset, dan error terakhir',
     run: (p) => void p.copyReport(),
-  },
-  { kind: 'header', label: 'Combat (mode debug)' },
-  {
-    kind: 'action',
-    label: 'Setelan Combat',
-    button: 'Buka',
-    note: () => (tuning?.isTuned() ? 'Ada nilai yang sudah kamu ubah' : 'Durasi, langkah, jangkauan, getaran'),
-    run: (p) => p.toggleCombat(),
   },
   {
     kind: 'action',
@@ -132,40 +189,52 @@ const ROWS: Row[] = [
 
 const CSS = `
 /*
+ * Every class here is namespaced lm-set-*, because an injected stylesheet is global. This panel
+ * once named its header lm-title, which is also the title screen's root: position fixed, inset 0,
+ * an opaque gradient. The header grew over the whole viewport and the player saw "PENGATURAN" and
+ * nothing else. tests/source.test.ts now fails on any class two stylesheets both style.
+ *
  * Above the title screen (90), the pause menu (86) and the character sheet (88), because it can be
- * opened from all three. It was below the title screen, which meant tapping PENGATURAN in the main
- * menu opened it *behind* an opaque full-screen gradient: the panel was built, laid out and
- * completely invisible. The whole layering is written down in the table below so the next panel
- * does not have to guess.
+ * opened from all three. The whole layering, so the next panel does not have to guess:
  *
  *   66 HUD        70 kontrol sentuh   72 dialog      80 tombol sudut (gear/tas/jeda/fullscreen)
- *   86 menu jeda  88 lembar karakter  90 layar judul  94 overlay cutscene
- *   96 pengaturan (ini)  97 mode pengembang  99 panel error (index.html)
+ *   86 menu jeda  88 lembar karakter  90 layar judul  92 data diperlukan  94 overlay cutscene
+ *   96 pengaturan (ini)  97 mode pengembang  98 download manager  99 panel error (index.html)
  */
-.lm-ov { position: fixed; inset: 0; z-index: 96; display: none; background: rgba(9, 7, 18, 0.72);
-         font: 13px/1.45 ui-monospace, monospace; color: #e7e0ff; -webkit-tap-highlight-color: transparent; }
-.lm-ov.on { display: flex; align-items: stretch; justify-content: center; }
-.lm-card { width: 100%; max-width: 460px; display: flex; flex-direction: column;
+.lm-set { position: fixed; inset: 0; z-index: 96; display: none; background: rgba(9, 7, 18, 0.72);
+          font: 13px/1.45 ui-monospace, monospace; color: #e7e0ff; -webkit-tap-highlight-color: transparent; }
+.lm-set.on { display: flex; align-items: stretch; justify-content: center; }
+.lm-set-card { width: 100%; max-width: 560px; min-height: 0; display: flex; flex-direction: column;
            margin: calc(8px + var(--lm-sat, 0px)) calc(8px + var(--lm-sar, 0px)) calc(8px + var(--lm-sab, 0px)) calc(8px + var(--lm-sal, 0px));
-           background: rgba(20, 16, 38, 0.95); border: 1px solid #3a2f5e; border-radius: 6px; overflow: hidden; }
-.lm-top { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #3a2f5e; }
-.lm-title { flex: 1; color: #ffd98a; letter-spacing: 1px; font-size: 14px; }
-.lm-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 4px 0 10px; }
-.lm-head { padding: 9px 10px 3px; color: #a795ff; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
-.lm-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
-.lm-row + .lm-row { border-top: 1px solid rgba(58, 47, 94, 0.5); }
-.lm-label { flex: 1; min-width: 0; }
-.lm-hint { display: block; color: #8189a8; font-size: 10.5px; }
-.lm-val { min-width: 92px; text-align: center; color: #ffe9a8; }
-.lm-btn { border: 1px solid #6a7094; background: #241c44; color: #e7e0ff; border-radius: 4px;
-          padding: 5px 9px; min-width: 40px; min-height: 40px; font: inherit; cursor: pointer;
+           background: rgba(20, 16, 38, 0.97); border: 1px solid #3a2f5e; border-radius: 6px; overflow: hidden; }
+.lm-set-top { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #3a2f5e; }
+.lm-set-title { flex: 1; color: #ffd98a; letter-spacing: 1px; font-size: 14px; }
+.lm-set-jump { flex: none; display: flex; gap: 6px; padding: 6px 10px; overflow-x: auto; border-bottom: 1px solid #3a2f5e;
+               -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.lm-set-chip { flex: none; min-height: 34px; padding: 0 11px; border-radius: 17px; border: 1px solid #4a3f78;
+               background: #1c1638; color: #cfc6ff; font: inherit; font-size: 12px; cursor: pointer; touch-action: manipulation; }
+.lm-set-chip:active { background: #ffb82e; color: #1a1430; }
+/* min-height 0 is what lets a flex child scroll: without it the body grows to its content, the
+   card clips it, and the lower half of the list can never be reached on a short screen */
+.lm-set-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+               -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: 4px 0 10px; }
+.lm-set-head { padding: 12px 10px 3px; color: #a795ff; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+.lm-set-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
+.lm-set-row + .lm-set-row { border-top: 1px solid rgba(58, 47, 94, 0.5); }
+.lm-set-label { flex: 1; min-width: 0; }
+.lm-set-hint { display: block; color: #8189a8; font-size: 10.5px; }
+.lm-set-val { min-width: 84px; text-align: center; color: #ffe9a8; }
+.lm-set-btn { border: 1px solid #6a7094; background: #241c44; color: #e7e0ff; border-radius: 4px;
+          padding: 5px 9px; min-width: 44px; min-height: 44px; font: inherit; cursor: pointer;
           touch-action: manipulation; }
-.lm-btn:active { background: #ffb82e; color: #1a1430; }
-.lm-btn.wide { min-width: 68px; }
-.lm-locked { opacity: 0.5; }
-.lm-lockmsg { color: #ffb04a; font-size: 10.5px; }
-.lm-note { padding: 8px 10px; color: #8189a8; font-size: 10.5px; border-top: 1px solid #3a2f5e; }
-.lm-dump { margin: 0; padding: 8px 10px; white-space: pre-wrap; word-break: break-word;
+.lm-set-btn:active { background: #ffb82e; color: #1a1430; }
+.lm-set-btn:disabled { opacity: 0.35; }
+.lm-set-btn.wide { min-width: 72px; }
+.lm-set-btn.danger { border-color: #b0504a; color: #ffb0a8; }
+.lm-set-locked { opacity: 0.5; }
+.lm-set-lockmsg { color: #ffb04a; font-size: 10.5px; }
+.lm-set-note { flex: none; padding: 6px 10px; color: #8189a8; font-size: 10.5px; border-top: 1px solid #3a2f5e; }
+.lm-set-dump { margin: 0; padding: 8px 10px; white-space: pre-wrap; word-break: break-word;
            font-size: 11px; color: #cfc6ff; background: #0f0b1c; max-height: 46vh; overflow: auto; }
 .lm-gear { position: fixed; right: calc(4px + var(--lm-sar, 0px)); top: calc(4px + var(--lm-sat, 0px)); z-index: 80; width: 34px; height: 34px; padding: 0;
            border: 1px solid #6a7094; background: rgba(20, 16, 38, 0.8); color: #ffd98a; border-radius: 17px;
@@ -190,29 +259,40 @@ export class SettingsPanel {
     parent: HTMLElement,
     private readonly source: () => DiagnosticsSource,
   ) {
-    injectStyle('lm-ui', CSS);
+    injectStyle('lm-ui-set', CSS);
     this.overlay = el('div');
-    this.overlay.className = 'lm-ov';
+    this.overlay.className = 'lm-set';
     const card = el('div');
-    card.className = 'lm-card';
+    card.className = 'lm-set-card';
 
     const top = el('div');
-    top.className = 'lm-top';
+    top.className = 'lm-set-top';
     const title = el('div', {}, 'PENGATURAN');
-    title.className = 'lm-title';
+    title.className = 'lm-set-title';
     const close = el('button', {}, 'Tutup');
-    close.className = 'lm-btn wide';
+    close.className = 'lm-set-btn wide';
     onTap(close, () => this.setOpen(false));
     top.append(title, close);
 
+    // one chip per group: a tap scrolls that group to the top of the list
+    const jump = el('div');
+    jump.className = 'lm-set-jump';
+    for (const row of ROWS) {
+      if (row.kind !== 'header') continue;
+      const chip = el('button', {}, row.label);
+      chip.className = 'lm-set-chip';
+      onTap(chip, () => this.jumpTo(row.id));
+      jump.appendChild(chip);
+    }
+
     this.body = el('div');
-    this.body.className = 'lm-body';
+    this.body.className = 'lm-set-body';
     this.note = el('div', {}, '');
-    this.note.className = 'lm-note';
+    this.note.className = 'lm-set-note';
 
     this.combatBox = el('div', { display: 'none' });
-    this.combatBox.className = 'lm-combat';
-    card.append(top, this.body, this.note);
+    this.combatBox.className = 'lm-set-combat';
+    card.append(top, jump, this.body, this.note);
     this.overlay.appendChild(card);
     // A tap on the dimmed backdrop closes; taps inside must not fall through to the canvas.
     this.overlay.addEventListener('pointerup', (e) => {
@@ -241,7 +321,7 @@ export class SettingsPanel {
    */
   private buildVersion(): void {
     const row = el('div', {}, `Lentera Malam v${GAME_VERSION}`);
-    row.className = 'lm-note lm-version';
+    row.className = 'lm-set-note lm-set-version';
     onTap(row, () => {
       const now = typeof performance !== 'undefined' ? performance.now() / 1000 : Date.now() / 1000;
       if (this.taps.tap(now)) {
@@ -261,40 +341,41 @@ export class SettingsPanel {
     for (const row of ROWS) {
       if (row.kind === 'header') {
         const h = el('div', {}, row.label);
-        h.className = 'lm-head';
+        h.className = 'lm-set-head';
+        this.heads.set(row.id, h);
         this.body.appendChild(h);
         continue;
       }
       const line = el('div');
-      line.className = 'lm-row';
+      line.className = 'lm-set-row';
       const label = el('div');
-      label.className = 'lm-label';
+      label.className = 'lm-set-label';
       label.appendChild(el('span', {}, row.label));
       const hint = el('span');
-      hint.className = 'lm-hint';
+      hint.className = 'lm-set-hint';
       label.appendChild(hint);
       line.appendChild(label);
 
       const locked = 'key' in row && settings.isLocked(row.key as keyof Settings);
-      if (locked) line.classList.add('lm-locked');
+      if (locked) line.classList.add('lm-set-locked');
 
       if (row.kind === 'toggle') {
         const btn = el('button', {}, '');
-        btn.className = 'lm-btn wide';
+        btn.className = 'lm-set-btn wide';
         if (!locked) onTap(btn, () => settings.set(row.key, !settings.get(row.key)));
         line.appendChild(btn);
         this.refreshers.push(() => {
           btn.textContent = settings.get(row.key) ? 'Nyala' : 'Mati';
           hint.textContent = locked ? 'dipaksa dari URL' : (row.hint ?? '');
-          if (locked) hint.className = 'lm-hint lm-lockmsg';
+          if (locked) hint.className = 'lm-set-hint lm-set-lockmsg';
         });
       } else if (row.kind === 'number') {
         const minus = el('button', {}, '−');
-        minus.className = 'lm-btn';
+        minus.className = 'lm-set-btn';
         const val = el('div', {}, '');
-        val.className = 'lm-val';
+        val.className = 'lm-set-val';
         const plus = el('button', {}, '+');
-        plus.className = 'lm-btn';
+        plus.className = 'lm-set-btn';
         if (!locked) {
           onTap(minus, () => settings.step(row.key, -1));
           onTap(plus, () => settings.step(row.key, +1));
@@ -306,15 +387,25 @@ export class SettingsPanel {
           const r = RANGES[row.key];
           minus.disabled = locked || v <= r.min;
           plus.disabled = locked || v >= r.max;
-          hint.textContent = locked ? 'dipaksa dari URL' : '';
+          hint.textContent = locked ? 'dipaksa dari URL' : (row.hint ?? '');
+        });
+      } else if (row.kind === 'switch') {
+        const btn = el('button', {}, '');
+        btn.className = 'lm-set-btn wide';
+        const r = RANGES[row.key];
+        if (!locked) onTap(btn, () => settings.set(row.key, settings.get(row.key) > r.min ? r.min : r.max));
+        line.appendChild(btn);
+        this.refreshers.push(() => {
+          btn.textContent = settings.get(row.key) > r.min ? 'Nyala' : 'Mati';
+          hint.textContent = row.hint ?? '';
         });
       } else if (row.kind === 'choice') {
         const prev = el('button', {}, '◂');
-        prev.className = 'lm-btn';
+        prev.className = 'lm-set-btn';
         const val = el('div', {}, '');
-        val.className = 'lm-val';
+        val.className = 'lm-set-val';
         const next = el('button', {}, '▸');
-        next.className = 'lm-btn';
+        next.className = 'lm-set-btn';
         if (!locked) {
           onTap(prev, () => this.cyclePreset(-1));
           onTap(next, () => this.cyclePreset(+1));
@@ -324,12 +415,12 @@ export class SettingsPanel {
           const auto = settings.get('presetAuto');
           const cur = profileOf(settings.get('preset'));
           val.textContent = auto ? 'AUTO' : cur.name;
-          hint.className = locked ? 'lm-hint lm-lockmsg' : 'lm-hint';
+          hint.className = locked ? 'lm-set-hint lm-set-lockmsg' : 'lm-set-hint';
           hint.textContent = locked ? 'dipaksa dari URL' : auto ? `sekarang: ${cur.name} — ${row.hint ?? ''}` : cur.note;
         });
       } else {
         const btn = el('button', {}, row.button);
-        btn.className = 'lm-btn wide';
+        btn.className = row.danger ? 'lm-set-btn wide danger' : 'lm-set-btn wide';
         onTap(btn, () => row.run(this));
         line.appendChild(btn);
         this.refreshers.push(() => {
@@ -337,7 +428,49 @@ export class SettingsPanel {
         });
       }
       this.body.appendChild(line);
+      // the combat tuning rows unfold right under their button, not at the bottom of the list
+      if (row.kind === 'action' && row.opensCombat) this.body.appendChild(this.combatBox);
     }
+  }
+
+  /** Bring a group's header to the top of the list. */
+  jumpTo(id: string): void {
+    const h = this.heads.get(id);
+    if (!h) return;
+    h.scrollIntoView({ block: 'start' });
+  }
+
+  /** Every group header, by id; the jump chips and the tests use it. */
+  readonly heads = new Map<string, HTMLElement>();
+
+  /**
+   * A native confirmation, for the two actions that destroy something. Native because it cannot be
+   * mis-tapped through, and because it works the same on every WebView. Absent (tests, some
+   * embedded browsers) it answers no: a destructive action never runs unconfirmed.
+   */
+  confirm: (message: string) => boolean = (message) => (typeof confirm === 'function' ? confirm(message) : false);
+
+  /** Reload after a reset; replaceable in tests. */
+  reload: () => void = () => {
+    if (typeof location !== 'undefined') location.reload();
+  };
+
+  /** "Hapus data dunia": every downloaded area. The save and the settings are untouched. */
+  async wipeWorld(): Promise<void> {
+    if (!this.confirm('Hapus semua data dunia yang sudah diunduh?\nProgres permainan tidak ikut terhapus.')) return;
+    const ok = await wipeWorldData();
+    this.showDump(ok ? 'Data dunia dihapus. Memuat ulang…' : 'Tidak ada data dunia tersimpan. Memuat ulang…');
+    // whatever the running world had decoded in memory goes with the page
+    this.reload();
+  }
+
+  /** "Reset save", asked twice: it cannot be undone and there is no cloud copy yet. */
+  resetSave(): void {
+    if (!this.confirm('Hapus progres permainan?\nLevel, item, quest, dan posisi akan hilang.')) return;
+    if (!this.confirm('Yakin? Ini tidak bisa dibatalkan.')) return;
+    wipeSave();
+    this.showDump('Save dihapus. Memuat ulang…');
+    this.reload();
   }
 
   /** Cycle AUTO → Sangat Rendah → … → Ultra → AUTO. */
@@ -407,15 +540,15 @@ export class SettingsPanel {
       this.combatBuilt = true;
       const { COMBAT_TUNABLES, resetCombatTuning, saveCombatTuning } = tuning;
       const reset = el('div');
-      reset.className = 'lm-row';
+      reset.className = 'lm-set-row';
       const label = el('div');
-      label.className = 'lm-label';
+      label.className = 'lm-set-label';
       label.appendChild(el('span', {}, 'Kembalikan semua'));
       const hint = el('span', {}, 'Ke angka bawaan');
-      hint.className = 'lm-hint';
+      hint.className = 'lm-set-hint';
       label.appendChild(hint);
       const btn = el('button', {}, 'Reset');
-      btn.className = 'lm-btn wide';
+      btn.className = 'lm-set-btn wide';
       onTap(btn, () => {
         resetCombatTuning();
         this.refresh();
@@ -425,17 +558,17 @@ export class SettingsPanel {
 
       for (const tune of COMBAT_TUNABLES) {
         const line = el('div');
-        line.className = 'lm-row';
+        line.className = 'lm-set-row';
         const lab = el('div');
-        lab.className = 'lm-label';
+        lab.className = 'lm-set-label';
         lab.appendChild(el('span', {}, tune.label));
         line.appendChild(lab);
         const minus = el('button', {}, '\u2212');
-        minus.className = 'lm-btn';
+        minus.className = 'lm-set-btn';
         const val = el('div', {}, '');
-        val.className = 'lm-val';
+        val.className = 'lm-set-val';
         const plus = el('button', {}, '+');
-        plus.className = 'lm-btn';
+        plus.className = 'lm-set-btn';
         const nudge = (dir: number): void => {
           const next = Math.max(tune.min, Math.min(tune.max, Math.round((tune.get() + tune.step * dir) / tune.step) * tune.step));
           tune.set(Number(next.toFixed(4)));
@@ -453,7 +586,6 @@ export class SettingsPanel {
           plus.disabled = v >= tune.max;
         });
       }
-      this.body.appendChild(this.combatBox);
     }
     const open = this.combatBox.style.display === 'none';
     this.combatBox.style.display = open ? 'block' : 'none';
@@ -548,7 +680,7 @@ export class SettingsPanel {
     this.showDump([...lines, '', 'Ketuk tombol di bawah untuk memutar ulang adegan pertama.'].join('\n'));
     if (!src.playCutscene) return;
     const play = el('button', {}, 'PUTAR ULANG');
-    play.className = 'lm-btn wide';
+    play.className = 'lm-set-btn wide';
     onTap(play, () => {
       src.playCutscene?.(REPLAYABLE[0]);
       this.setOpen(false);
@@ -559,7 +691,7 @@ export class SettingsPanel {
   private showDump(text: string): void {
     if (!this.dump) {
       this.dump = el('pre');
-      this.dump.className = 'lm-dump';
+      this.dump.className = 'lm-set-dump';
       this.body.appendChild(this.dump);
     }
     this.dump.textContent = text;

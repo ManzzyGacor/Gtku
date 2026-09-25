@@ -23,6 +23,7 @@
  */
 import { COOLDOWN, DROP_HOLD, FPS_CEIL, FPS_FLOOR, MAX_RAISE_HOLD, RAISE_HOLD } from './graphics';
 import type { PerfMeter } from './perf';
+import type { Settings } from './settings';
 
 /** Every dial AUTO may turn. 1 means "as the preset has it"; lower is cheaper. */
 export interface ComponentLevels {
@@ -71,6 +72,27 @@ export const FULL: ComponentLevels = {
   outline: 1,
   resolution: 1,
 };
+
+/** The player's own caps from Pengaturan → Grafik, as dials. Resolution stays with "Skala render". */
+export function playerLevels(s: Readonly<Settings>): ComponentLevels {
+  return {
+    particles: s.gfxParticles,
+    wind: s.gfxWind,
+    detail: s.gfxDetail,
+    bloom: s.bloom ? 1 : 0,
+    lights: s.gfxLights,
+    water: s.gfxWater,
+    distance: s.gfxDistance,
+    outline: s.gfxOutline,
+    resolution: 1,
+  };
+}
+
+/** The lower of two sets of dials, written into `out` (no allocation on the per-frame path). */
+export function minLevels(a: ComponentLevels, b: ComponentLevels, out: ComponentLevels): ComponentLevels {
+  for (const k of Object.keys(FULL) as ComponentId[]) out[k] = Math.min(a[k], b[k]);
+  return out;
+}
 
 /** One notch of one dial. */
 export interface PathStep {

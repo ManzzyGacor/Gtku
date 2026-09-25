@@ -49,6 +49,19 @@ export interface Settings {
   combatVol: number;
   sfxVol: number;
   uiVol: number;
+  /**
+   * The player's own cap on each graphics component (Pengaturan → Grafik). Every component runs at
+   * `min(preset, AUTO, this)`: the preset sets the ceiling, AUTO trims below it when the phone
+   * struggles, and these let the player take away something they simply do not want. 1 (3 for
+   * lights) means "as the preset has it"; none of them can raise a component above its preset.
+   */
+  gfxParticles: number;
+  gfxWind: number;
+  gfxDetail: number;
+  gfxLights: number;
+  gfxWater: number;
+  gfxDistance: number;
+  gfxOutline: number;
   /** Set once the intro cutscene has been watched (or skipped) to the end. */
   cutsceneSeen: boolean;
   /**
@@ -82,8 +95,18 @@ export const DEFAULTS: Settings = {
   combatVol: 0.9,
   sfxVol: 0.8,
   uiVol: 0.7,
+  gfxParticles: 1,
+  gfxWind: 1,
+  gfxDetail: 1,
+  gfxLights: 3,
+  gfxWater: 1,
+  gfxDistance: 1,
+  gfxOutline: 1,
   cutsceneSeen: false,
 };
+
+/** The per-component graphics keys, for the "back to the preset" button. */
+export const GFX_KEYS = ['gfxParticles', 'gfxWind', 'gfxDetail', 'gfxLights', 'gfxWater', 'gfxDistance', 'gfxOutline'] as const;
 
 /** Allowed range + step for the numeric settings, shared by the settings panel and clamping. */
 export const RANGES = {
@@ -101,6 +124,13 @@ export const RANGES = {
   ambientVol: { min: 0, max: 1, step: 0.1 },
   combatVol: { min: 0, max: 1, step: 0.1 },
   uiVol: { min: 0, max: 1, step: 0.1 },
+  gfxParticles: { min: 0, max: 1, step: 0.25 },
+  gfxWind: { min: 0, max: 1, step: 0.2 },
+  gfxDetail: { min: 0, max: 1, step: 1 },
+  gfxLights: { min: 0, max: 3, step: 1 },
+  gfxWater: { min: 0, max: 1, step: 1 },
+  gfxDistance: { min: 0, max: 1, step: 1 },
+  gfxOutline: { min: 0, max: 1, step: 1 },
 } as const;
 
 export type NumericKey = keyof typeof RANGES;

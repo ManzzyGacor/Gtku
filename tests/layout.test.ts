@@ -98,7 +98,7 @@ test('the UI layers in the right order, so no panel opens behind another', () =>
     ['CharacterPanel', '.lm-sheet'],
     ['TitleScreen', '.lm-title'],
     ['CutsceneOverlay', '.lm-cs'],
-    ['SettingsPanel', '.lm-ov'],
+    ['SettingsPanel', '.lm-set'],
     ['DevMenu', '.lm-dev'],
   ];
   // the two data panels live in one file, so read them by their own selectors

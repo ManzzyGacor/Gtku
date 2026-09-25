@@ -22,8 +22,7 @@ import { areaStatus, parseManifest, type DataManifest } from '../core/download/m
 import { cachedBytes, deleteArea, downloadArea, type DataCache, type DownloadDeps, type DownloadProgress, type FetchResult } from '../core/download/downloader';
 import { areaBlocked, type DataStatus } from '../core/download/gate';
 
-const CACHE_NAME = 'lentera-malam-data';
-const INSTALLED_KEY = 'lentera-malam/data/installed';
+import { DATA_CACHE_NAME as CACHE_NAME, DATA_INSTALLED_KEY as INSTALLED_KEY } from '../core/download/wipe';
 /** Decoded chunk textures kept in memory: about three screens' worth, ~12 MB. */
 const DECODED_KEEP = 48;
 

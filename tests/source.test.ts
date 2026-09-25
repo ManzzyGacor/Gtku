@@ -52,3 +52,44 @@ test('every injected stylesheet has balanced braces and parentheses', () => {
   }
   assert.deepEqual(bad, [], 'an unbalanced CSS block silently drops every rule after it');
 });
+
+/** The `lm-*` class names a stylesheet gives rules to (the classes in its selectors). */
+function selectorClasses(css: string): Set<string> {
+  const out = new Set<string>();
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\$\{[^}]*\}/g, '0');
+  const re = /([^{}]+)\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(clean)) !== null) {
+    const sel = m[1].trim();
+    if (sel.startsWith('@')) continue;
+    for (const c of sel.matchAll(/\.(lm-[\w-]+)/g)) out.add(c[1]);
+  }
+  return out;
+}
+
+test('no two stylesheets style the same class name', () => {
+  /*
+   * Every overlay injects its own global stylesheet, so a class name is global too. The settings
+   * menu called its header row `lm-title` — the title screen's full-screen, fixed, gradient-painted
+   * root. On the phone the settings header grew to cover the whole viewport: "PENGATURAN" in the
+   * middle, and not one setting visible underneath it. Nothing type-checks class names.
+   */
+  const owner = new Map<string, string>();
+  const clash: string[] = [];
+  for (const file of [...files('src/ui'), ...files('src/render3d')]) {
+    const src = readFileSync(file, 'utf8');
+    const sheets = templates(src).filter((t) => t.body.includes('{') && /\.lm-/.test(t.body));
+    // boot3d's small inline sheet is passed straight to injectStyle
+    for (const m of src.matchAll(/injectStyle\(\s*'[\w-]+',\s*`([\s\S]*?)`/g)) sheets.push({ name: 'inline', body: m[1] });
+    for (const t of sheets) {
+      const where = `${file} ${t.name}`;
+      for (const c of selectorClasses(t.body)) {
+        const prev = owner.get(c);
+        if (prev && !prev.startsWith(`${file} `)) clash.push(`.${c}: ${prev} and ${where}`);
+        else owner.set(c, where);
+      }
+    }
+  }
+  assert.ok(owner.has('lm-title') && owner.size > 50, `parser found ${owner.size} classes`);
+  assert.deepEqual(clash, [], `one class name, two stylesheets — the later one silently restyles the other's element:\n${clash.join('\n')}`);
+});
