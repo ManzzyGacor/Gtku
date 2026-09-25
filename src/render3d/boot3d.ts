@@ -7,6 +7,7 @@
  * `core/lifecycle.ts` for why each of those matters on a phone.
  */
 import { Game3D } from './Game3D';
+import { TitleBackdrop } from './TitleBackdrop';
 import { resumeAudio, suspendAudio } from '../core/audio';
 import { loadCombatTuning } from '../core/entities/combatTuning';
 import { Lifecycle } from '../core/lifecycle';
@@ -165,6 +166,21 @@ export function startWorld(parent: HTMLElement, debug: DebugUi, continueGame: bo
   };
 }
 
+
+/**
+ * The animated night behind the title screen, or null if this device cannot draw it (the title's
+ * own gradient then stays — nothing about the menu depends on it).
+ */
+export function startTitleBackdrop(parent: HTMLElement): { dispose(): void } | null {
+  try {
+    const backdrop = new TitleBackdrop(parent);
+    backdrop.start();
+    return backdrop;
+  } catch (e) {
+    recordError(String((e as Error)?.message ?? e), 'title-backdrop');
+    return null;
+  }
+}
 
 /** Remembered between reloads so a tester who unlocked it once does not have to tap again. */
 const DEV_KEY = 'lentera-malam/dev';

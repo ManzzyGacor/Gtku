@@ -1130,3 +1130,11 @@ Masuk/keluar layar penuh memicu resize dua kali (langsung dan setelah 350 ms) su
 tidak salah. Tombol ⛶ di HUD memakai aturan yang sama.
 
 Tes: `account` (7), `title` (7), `fullscreen` (4), plus lapisan z tombol Layar Penuh di `layout`.
+
+**Latar 3D layar judul (`render3d/TitleBackdrop.ts`):** Ravenhollow malam hari di sekitar Lentera
+Agung — dunia, langit, lampu jalan, kunang-kunang, dan kabut yang sama dengan game (kabut ditebalkan
+~40%), dengan kamera yang bergeser pelan (sekitar 5 menit per putaran, tidak lebih dari ~6 tile dari
+lentera). Datang bersama chunk renderer beberapa saat setelah layar judul tampil (sampai itu gradien
+biasa), lalu **dibuang sebelum dunia game dibangun** supaya HP tidak memegang dua konteks WebGL
+sekaligus. Kalau gagal dibuat, layar judul tetap berfungsi dengan gradiennya. Menu keluar dengan fade.
+Tes: `tests/titlebackdrop.test.ts`.

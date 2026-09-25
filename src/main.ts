@@ -61,10 +61,27 @@ async function boot(): Promise<void> {
   });
   // Start the download now, not after the tap: by the time anyone reads the menu it is usually in.
   const loading = import('./render3d/boot3d');
+  /*
+   * The 3D night fades in behind the menu once the renderer has arrived. It is thrown away before
+   * the world is built, so the phone never holds two WebGL contexts at once.
+   */
+  let picked = false;
+  let backdrop: { dispose(): void } | null = null;
+  void loading
+    .then((m) => {
+      if (picked) return;
+      backdrop = m.startTitleBackdrop(host);
+      if (backdrop) title.setBackdrop(true);
+    })
+    .catch(() => undefined);
   const choice = await title.choice();
+  picked = true;
   title.setBusy('Menyiapkan dunia…');
   try {
     const { startWorld } = await loading;
+    title.setBackdrop(false);
+    (backdrop as { dispose(): void } | null)?.dispose();
+    backdrop = null;
     (window as unknown as { __game3d: unknown }).__game3d = startWorld(host, debug, choice.continueGame);
   } catch (e) {
     /*
